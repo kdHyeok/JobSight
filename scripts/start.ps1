@@ -29,7 +29,11 @@ try {
         throw 'Docker 엔진에 연결할 수 없습니다. Docker Desktop을 시작하세요.'
     }
 
-    $labelsJson = & docker inspect --format '{{json .Config.Labels}}' jobsite-v006-backend-1 2>$null
+    # 컨테이너 이름 접두는 compose 프로젝트 이름이다. 워크트리가 .env 로 바꿀 수 있으므로
+    # PowerShell 의 $env 가 아니라 compose 가 해석한 값을 그대로 받는다.
+    $project = (& docker compose config --format json | ConvertFrom-Json).name
+    if ($LASTEXITCODE -ne 0 -or -not $project) { throw '.env 또는 Compose 설정이 올바르지 않습니다.' }
+    $labelsJson = & docker inspect --format '{{json .Config.Labels}}' "$project-backend-1" 2>$null
     $owner = if ($LASTEXITCODE -eq 0) { ($labelsJson | ConvertFrom-Json).'com.docker.compose.project.working_dir' }
     if ($owner) {
         $ownerPath = [IO.Path]::GetFullPath($owner.Trim())
@@ -49,7 +53,7 @@ try {
     & docker @arguments
     if ($LASTEXITCODE -ne 0) { throw 'docker compose up이 실패했습니다.' }
 
-    $containers = @('jobsite-v006-db-1', 'jobsite-v006-backend-1', 'jobsite-v006-frontend-1')
+    $containers = @("$project-db-1", "$project-backend-1", "$project-frontend-1")
     $deadline = (Get-Date).AddMinutes(3)
     do {
         $statuses = @($containers | ForEach-Object {
