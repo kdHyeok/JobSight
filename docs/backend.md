@@ -68,6 +68,8 @@ Spring Security 7의 AuthorizationServerConfigurer 패키지는 `security.config
 등록과 제한은 [mcp-plugin.md](mcp-plugin.md)를 따른다.
 
 `ChatGptClients`는 고정 ChatGPT CIMD 경로만 조회하고 기존 사전 등록 클라이언트를 보존한다.
+Codex native CIMD 경로도 지원하며 해당 문서 ID에 고정된 loopback 콜백만 등록한다.
+임시 포트 허용은 Spring 기본 loopback IP 검증을 사용한다. 별도 리다이렉트 검증기를 만들지 않는다.
 실제 공개 문서의 복수 인증 방식 중 none을 선택하고, grant_types 중 authorization_code만 발급한다.
 스킬 리소스도 검증하려면 테스트 컨테이너에 저장소 루트를 `/workspace`로 마운트하고 `-w /workspace/backend`로 실행한다.
 `processResources`는 `../plugins/jobsight`의 스킬·manifest·MCP 파일만 포함한다.

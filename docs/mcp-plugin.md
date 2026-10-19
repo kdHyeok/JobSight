@@ -12,6 +12,12 @@ GitHub 플러그인 0.3.1은 이 URL을 사용한다. 구 주소의 플러그인
 
 ## 인증과 불변 조건
 
+- Codex native CIMD는 `https://chatgpt.com/oauth/codex/<id>/client.json`만 추가 허용한다.
+  공개 문서의 `application_type=native`, 해당 ID의 `http://127.0.0.1/callback/<id>`와
+  `http://localhost/callback/<id>` 두 콜백을 검증한다. loopback IP의 임시 포트는 Spring 기본 검증에 맡기며
+  다른 호스트·경로·쿼리로 허용 범위를 넓히지 않는다. PKCE와 사용자 동의는 그대로 강제한다.
+  설치만으로 인증되지 않으며 `codex mcp login jobsight --oauth-client-registration cimd`가 필요하다.
+  플러그인 MCP URL은 현재 공개 설정과 같은 `https://job.donyk.link/mcp`를 사용한다.
 - 사용자 신원은 기존 Google OIDC만 사용한다. MCP OAuth는 그 사용자가 외부 클라이언트에 주는 위임이다.
 - Spring Authorization Server의 authorization code + S256 PKCE + 동의 화면을 사용한다.
 - ChatGPT CIMD 문서 URL을 client_id로 지원한다. HTTPS의 고정 chatgpt.com 문서 경로만 조회하고 리다이렉트·임의 호스트·과대 응답은 거부한다. 문서의 client_id, callback, none 인증과 authorization_code를 검증하며 PKCE·동의를 강제한다.
@@ -194,6 +200,19 @@ Spring 프록시가 적용된 운영 빈의 도구 설명도 다시 읽을 수 �
 - 수정 후 PostgreSQL 통합 테스트는 최초 access token과 refresh로 회전된 access token 양쪽에서 실제
   `tools/list` 및 `self_intro_list` 제목을 검증한다. 백엔드 전체 61개와 공개 스모크 45개가 통과했고,
   배포 서버의 기존 ChatGPT access token으로 공개 `/mcp`를 직접 호출해 46개 도구와 해당 제목을 확인했다.
+
+### Codex native OAuth 연결 복구 검증 (2026-10-19)
+
+- Codex 로그의 `notLoggedIn`으로 도구 미노출을 확인했고, 실제 CIMD 로그인은 기존 경로 제한으로 400을 반환했다.
+- 공식 Codex CIMD 문서의 native 콜백을 검증하도록 수정하고 공개 서버 백엔드에 배포했다.
+  이전 이미지는 `jobsite-v006-backend:pre-codex-oauth-20261019`로 보관했다.
+- 서버와 분리한 임시 소스에서 Java 21 컨테이너의 `compileJava compileTestJava test --tests '*Mcp*Test'`:
+  종료코드 0, `BUILD SUCCESSFUL`, 25개 통과(실패·오류·skip 0).
+  Codex 임시 loopback 포트의 인가 코드 교환과 MCP initialize, 잘못된 문서 콜백 거부를 포함한다.
+- 실제 Codex OAuth 로그인·사용자 동의 완료 후 이 채팅에 도구 46개가 노출되었다.
+  `account_get`의 authenticated=true/ADMIN과 `company_list`의 정상 배열 17개를 확인했다.
+- 배포 후 공개 `scripts/smoke.sh https://job.donyk.link`: 45개 PASS, 종료코드 0. 컨테이너 3개 healthy.
+- 업무 데이터 쓰기와 삭제, 실제 장기 토큰 갱신은 검증하지 않았다.
 
 ## 함정 — scope는 세 곳에서 광고된다
 
