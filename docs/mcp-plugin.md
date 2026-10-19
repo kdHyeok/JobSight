@@ -212,7 +212,18 @@ Spring 프록시가 적용된 운영 빈의 도구 설명도 다시 읽을 수 �
 - 실제 Codex OAuth 로그인·사용자 동의 완료 후 이 채팅에 도구 46개가 노출되었다.
   `account_get`의 authenticated=true/ADMIN과 `company_list`의 정상 배열 17개를 확인했다.
 - 배포 후 공개 `scripts/smoke.sh https://job.donyk.link`: 45개 PASS, 종료코드 0. 컨테이너 3개 healthy.
-- 업무 데이터 쓰기와 삭제, 실제 장기 토큰 갱신은 검증하지 않았다.
+- 업무 데이터 쓰기와 삭제는 검증하지 않았다.
+
+### 실제 Codex 자동 토큰 갱신 검증 (2026-10-19)
+
+- 현재 Codex OAuth 승인 한 건의 access token 만료 시각만 서버에서 조기 만료시켰다.
+  원래 발급·만료 시각은 토큰 원문 없이 서버 임시 파일에 보존했고 다른 연결은 변경하지 않았다.
+- 재로그인이나 수동 토큰 교환 없이 이 채팅의 `account_get`을 호출해 authenticated=true/ADMIN을 확인했다.
+- DB에서 access token과 refresh token 발급 시각이 모두 한국 시각 15:34:22에서 15:48:48로 갱신됐음을 확인했다.
+  새 access token 만료는 16:48:48, refresh token 만료는 2027-01-17 15:48:48이며 read/write scope는 유지됐다.
+- 이어서 `company_list`가 오류 없이 기업 17개를 반환했다. 토큰 원문은 조회·출력·복사하지 않았다.
+- 이 검증은 서버의 만료 응답을 받은 실제 Codex 클라이언트의 자동 갱신이다.
+  1시간 자연 만료를 기다리는 경우와 앱 재시작 후 갱신은 별도로 검증하지 않았다.
 
 ## 함정 — scope는 세 곳에서 광고된다
 
