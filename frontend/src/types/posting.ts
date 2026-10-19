@@ -8,6 +8,12 @@ export type ApplicationStatus =
 export type StepResult = 'UPCOMING' | 'PASSED'
 export type PostingTab = 'interested' | 'progress' | 'archived'
 
+/** 공고와 그 모집 직무가 표시될 상위 탭. 수동·자동 보관을 상태보다 우선한다. */
+export function postingTabFor(status: ApplicationStatus | null, archived: boolean): PostingTab {
+  if (archived) return 'archived'
+  return status === 'INTERESTED' || status === 'DRAFTING' ? 'interested' : 'progress'
+}
+
 export interface RecruitmentStep {
   seq: number
   name: string

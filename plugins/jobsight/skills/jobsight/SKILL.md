@@ -92,7 +92,7 @@ INTERVIEW_PREP→INTERVIEW_REJECTED. 관심·작성 중은 상태 유지 후 보
 
 `position_list({q?})`는 이름·팀·기업·기술 스택 검색이다. `position_get({id})`로 상세를 읽는다.
 `position_create({postingId,request})`로 기존 공고에 추가한다. 먼저 공고 ID를 확인한다.
-`position_update({id,request})`, `position_delete({id})`를 사용한다. 마지막 직무 삭제는 LAST_POSITION 오류다.
+`position_update({id,request})`, `position_delete({id})`를 사용한다. 마지막 직무를 삭제하면 소속 공고도 함께 삭제되므로 실행 전에 이 범위를 알린다.
 
 직무명 `name`, 팀 `team`, 역할 `role`, 담당업무 `responsibilities`, 영향력 `impact`,
 요구 역량 `requiredSkills`, 우대 역량 `preferredSkills`, 성장 방향 `growth`, 취득 경험 `experience`,

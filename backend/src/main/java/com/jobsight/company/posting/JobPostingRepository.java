@@ -1,7 +1,10 @@
 package com.jobsight.company.posting;
 
 import com.jobsight.company.common.OwnerCount;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -18,6 +21,16 @@ public interface JobPostingRepository extends JpaRepository<JobPosting, UUID> {
      * findById 후 소유자를 비교하는 방식은 비교를 빠뜨리면 그대로 유출이 되므로 쓰지 않는다.
      */
     Optional<JobPosting> findByIdAndOwnerId(UUID id, UUID ownerId);
+
+    /** PostgreSQL 행 잠금 대기 상한을 이 트랜잭션에만 적용한다. 커밋/롤백 때 자동 복원된다. */
+    @Modifying
+    @Query(value = "set local lock_timeout = '3s'", nativeQuery = true)
+    void setLocalLockTimeout();
+
+    /** 같은 공고의 직무를 동시에 지워도 마지막 직무 판단이 엇갈리지 않게 부모 행을 잠근다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from JobPosting p where p.id = :id and p.ownerId = :ownerId")
+    Optional<JobPosting> findOwnedForUpdate(@Param("id") UUID id, @Param("ownerId") UUID ownerId);
 
     /** 관리자 화면의 계정별 등록 수. 개수만 낸다 — 내용은 내보내지 않는다(docs/admin.md). */
     @Query("select new com.jobsight.company.common.OwnerCount(p.ownerId, count(p)) from JobPosting p group by p.ownerId")

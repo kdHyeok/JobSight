@@ -1,5 +1,8 @@
 package com.jobsight.company.posting;
 
+import com.jobsight.company.position.Position;
+import com.jobsight.company.position.PositionRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,6 +38,8 @@ class JobPostingPersistenceIntegrationTest {
     }
 
     @Autowired JobPostingRepository repository;
+    @Autowired PositionRepository positions;
+    @Autowired EntityManager entityManager;
 
     @Test
     void replacingExistingStepsDoesNotCollideOnSequence() {
@@ -55,6 +60,26 @@ class JobPostingPersistenceIntegrationTest {
 
         assertThat(repository.findPendingAutoArchive(OWNER_ID, Instant.now()))
                 .extracting(JobPosting::getId).contains(posting.getId());
+    }
+
+    @Test
+    void deletingPostingCascadesPositions() {
+        JobPosting posting = repository.saveAndFlush(postingWithSteps("서류"));
+        Position position = positions.saveAndFlush(new Position(OWNER_ID, posting.getId(), "백엔드 개발"));
+
+        repository.delete(posting);
+        repository.flush();
+        entityManager.clear();
+
+        assertThat(positions.findById(position.getId())).isEmpty();
+    }
+
+    @Test
+    void positionDeleteLockTimeoutIsScopedToCurrentTransaction() {
+        repository.setLocalLockTimeout();
+
+        assertThat(entityManager.createNativeQuery("show lock_timeout", String.class).getSingleResult())
+                .isEqualTo("3s");
     }
 
     private static JobPosting postingWithSteps(String... names) {

@@ -10,6 +10,7 @@
 - `POST /api/auth/refresh`: 유효한 리프레시 토큰을 회전하고 새 브라우저 세션 발급
 - `POST /api/auth/logout`: 현재 리프레시 토큰 폐기와 쿠키 삭제
 - 프런트 `src/api/http.ts`: API 401 시 한 번만 refresh 후 원래 요청 재시도
+- 프런트 `src/App.vue`: 최초 세션 확인 실패 시 로그인 대신 연결 실패와 재시도 표시
 
 ## 불변 조건
 
@@ -35,3 +36,4 @@
 - `SecurityContextHolder`에 인증만 넣으면 다음 요청에 남지 않는다. refresh 컨트롤러는 `SecurityContextRepository.saveContext`를 호출해야 한다.
 - 리프레시 토큰 만료를 사용할 때마다 30일 뒤로 미루면 탈취 토큰이 영구 생존할 수 있다. 회전해도 최초 `expires_at`은 보존한다.
 - 로그인 직후 CSRF 쿠키가 회전하므로 프런트는 항상 현재 `XSRF-TOKEN`을 읽어 refresh 요청에 보낸다.
+- 로컬 접속은 `127.0.0.1:8088`이 canonical이다. `localhost:8088`에서 로그인하면 시작 URL을 canonical host로 보내 쿠키를 두 호스트에 나누지 않는다.

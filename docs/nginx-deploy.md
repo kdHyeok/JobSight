@@ -28,6 +28,7 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 등록 절차와 공개 HTTPS 접근 조건은 [mcp-plugin.md](mcp-plugin.md)를 따른다.
 
 - `compose.yaml` 하나로 로컬·서버 모두 소스에서 빌드한다. 이미지 레지스트리를 쓰지 않는다.
+- DB 이름·사용자 값이 비어 있으면 Compose 보간 단계에서 중단한다. backend는 DB 연결을 3초 안에 실패시키고 60초의 초기 기동 유예 뒤 healthcheck 3회 연속 실패 시 unhealthy가 된다. frontend healthcheck는 DB를 조회하는 `/api/auth/login-options`까지 확인해 backend·DB 장애를 함께 감지한다.
 - 비밀값: `.secrets/postgres_password`, `.secrets/google_client_secret` → compose secret → 컨테이너 `/run/secrets/<프로퍼티키>` → Spring `configtree`. 파일 이름이 프로퍼티 키다.
 - 설정: `.env` 의 `PUBLIC_BASE_URL`, `APP_ADMIN_EMAIL`, `GOOGLE_CLIENT_ID`, `SESSION_COOKIE_SECURE`(HTTPS 뒤에서만 true).
 - 새 키를 추가하면 `.env.example`·`compose.yaml`·`docs/local-dev.md` 세 곳.
@@ -95,6 +96,8 @@ git pull
 docker compose up -d --build   # 이 시점에 공개 도메인이 바뀐다
 bash scripts/smoke.sh          # PASS 여야 배포 완료
 ```
+
+Windows 개발 환경에서는 `scripts/start.ps1`가 고정 Compose 프로젝트를 다른 worktree가 실행 중인지 먼저 확인한다. `-Takeover`는 컨테이너만 현재 작업공간 설정으로 재생성하고 DB 볼륨은 유지한다.
 
 `smoke.sh` 는 `.env` 의 `PUBLIC_BASE_URL` 을 읽는다. 출력 첫 줄이 공개 도메인인지 확인한다.
 기존 수동 OAuth callback을 유지하는 서버는 `-f compose.yaml -f compose.mcp.yaml`을 함께 사용한다.

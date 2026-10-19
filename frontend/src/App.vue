@@ -60,8 +60,8 @@ async function loadMe() {
   bootError.value = ''
   try {
     me.value = await fetchMe()
-  } catch (error) {
-    bootError.value = error instanceof Error ? error.message : '세션 상태를 확인하지 못했습니다.'
+  } catch {
+    bootError.value = '서비스에 연결할 수 없습니다.'
     me.value = ANONYMOUS
   } finally {
     booting.value = false
@@ -152,7 +152,7 @@ onUnmounted(() => {
           <button type="button" @click="loadMe">다시 시도</button>
         </div>
       </main>
-      <LoginView />
+      <LoginView v-else />
     </template>
 
     <template v-else-if="onAdminRoute">

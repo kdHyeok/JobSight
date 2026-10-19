@@ -12,6 +12,7 @@ import com.jobsight.company.posting.JobPostingRepository;
 import com.jobsight.company.reference.ReferenceItem;
 import com.jobsight.company.reference.ReferenceRepository;
 import com.jobsight.company.reference.dto.ReferenceResponse;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -113,13 +114,27 @@ public class PositionService {
         return toResponses(List.of(repository.save(position))).get(0);
     }
 
-    /** 공고의 마지막 직무는 지울 수 없다 — 공고는 직무가 1개 이상이다. */
+    /** 마지막 직무를 지우면 공고도 지운다. FK cascade가 그 직무와 절차를 정리한다. */
     @Transactional
     public void delete(UUID id) {
-        Position position = findOwned(id);
-        if (repository.countByPostingIdAndOwnerId(position.getPostingId(), currentUser.id()) <= 1) {
-            throw new ApiRuleException(HttpStatus.CONFLICT, "LAST_POSITION",
-                    "공고의 마지막 직무는 지울 수 없습니다. 공고를 삭제하세요.");
+        UUID ownerId = currentUser.id();
+        Position position = repository.findByIdAndOwnerId(id, ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException(id));
+        UUID postingId = position.getPostingId();
+        JobPosting posting;
+        try {
+            postingRepository.setLocalLockTimeout();
+            posting = postingRepository.findOwnedForUpdate(postingId, ownerId)
+                    .orElseThrow(() -> new ResourceNotFoundException(postingId));
+        } catch (PessimisticLockingFailureException exception) {
+            throw new ApiRuleException(HttpStatus.CONFLICT, "POSITION_DELETE_BUSY",
+                    "다른 삭제 요청을 처리 중입니다. 잠시 후 다시 시도해 주세요.");
+        }
+        position = repository.findByIdAndOwnerId(id, ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException(id));
+        if (repository.countByPostingIdAndOwnerId(position.getPostingId(), ownerId) <= 1) {
+            postingRepository.delete(posting);
+            return;
         }
         repository.delete(position);
     }

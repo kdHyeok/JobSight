@@ -56,7 +56,7 @@ public class PositionController {
         return service.replaceReferences(id, request);
     }
 
-    @Operation(summary = "직무 삭제", description = "공고의 마지막 직무면 409 LAST_POSITION.")
+    @Operation(summary = "직무 삭제", description = "공고의 마지막 직무면 소속 공고와 절차도 함께 삭제된다.")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         service.delete(id);

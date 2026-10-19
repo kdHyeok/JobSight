@@ -65,6 +65,13 @@ export const API = {
 /** Spring Security 가 소유하는 경로. 브라우저 네비게이션으로만 쓴다(fetch 금지). */
 export const GOOGLE_LOGIN_URL = '/oauth2/authorization/google'
 
+/** localhost 쿠키가 127.0.0.1 세션과 갈라지지 않도록 로컬 로그인 시작점만 canonical host로 보낸다. */
+export function googleLoginUrl(location: Pick<Location, 'hostname' | 'port'> = window.location) {
+  return location.hostname === 'localhost' && location.port === '8088'
+    ? `http://127.0.0.1:8088${GOOGLE_LOGIN_URL}`
+    : GOOGLE_LOGIN_URL
+}
+
 /** MCP 클라이언트용 경로. SPA 쿠키 API와 별개인 OAuth 위임 채널. */
 export const MCP_ENDPOINTS = {
   config: '/plugin/config',

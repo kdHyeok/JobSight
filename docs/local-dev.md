@@ -41,6 +41,16 @@ $lines = (Get-Content .env) -replace '^GOOGLE_CLIENT_ID=.*', 'GOOGLE_CLIENT_ID=<
 
 ## 실행 / 확인 / 중지
 
+PowerShell에서는 검증과 기동을 묶은 스크립트를 사용한다. 같은 Compose 프로젝트를 다른 worktree가 실행 중이면 실수로 교체하지 않고 중단한다.
+
+```powershell
+.\scripts\start.ps1
+# 다른 worktree가 띄운 컨테이너를 현재 작업공간으로 명시적으로 교체할 때만
+.\scripts\start.ps1 -Takeover
+```
+
+`-Takeover`도 `postgres-data` 볼륨은 삭제하지 않는다. 설정만 확인하려면 `.\scripts\start.ps1 -CheckOnly`를 사용한다.
+
 ```bash
 docker compose up -d --build
 bash scripts/smoke.sh          # PASS 가 나와야 정상
@@ -97,6 +107,7 @@ Ryuk 를 끄면 JVM 이 비정상 종료할 때 `postgres:17-alpine` 테스트 �
 | `redirect_uri_mismatch` | `PUBLIC_BASE_URL` 과 Console 등록 URI 의 origin 불일치. `bash scripts/smoke.sh` 의 redirect_uri 줄 확인 |
 | 로그인 후 `/?authError=…` | `docker compose logs backend \| grep "Google 로그인 실패"` 에 코드·설명이 남는다 |
 | `authorization_request_not_found` | 세션 쿠키 `SameSite` 가 Strict 로 바뀌었는지 확인 (Lax 여야 함) |
+| 재시작 뒤 backend가 `no password was provided`로 반복 종료 | 다른 worktree의 Compose 컨테이너가 남았는지 `.\scripts\start.ps1`로 확인. 현재 작업공간으로 교체할 때만 `-Takeover` |
 | 한글 JSON 이 curl 에서 400 | Git Bash 가 CP949 로 보냄. UTF-8 파일로 `--data-binary @file` |
 
 셸·경로·CRLF 같은 환경 일반 사항은 `AGENTS.md` 「환경 사실」에 있다.

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { fetchLoginOptions } from '../api/auth'
-import { AUTH_ERROR_QUERY, GOOGLE_LOGIN_URL } from '../routes'
+import { AUTH_ERROR_QUERY, googleLoginUrl } from '../routes'
 
 const googleEnabled = ref(false)
 const autoApproveSignup = ref(false)
+const loadingOptions = ref(true)
+const optionsError = ref(false)
 const errorMessage = ref('')
 const notice = ref('')
+const loginUrl = googleLoginUrl()
 
 /** Google 로그인은 리다이렉트로 돌아오므로 결과를 쿼리 파라미터로 받는다. */
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
@@ -17,7 +20,21 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   INVALID_IDENTITY: 'Google 계정 정보를 확인할 수 없습니다.',
 }
 
-onMounted(async () => {
+async function loadOptions() {
+  loadingOptions.value = true
+  optionsError.value = false
+  try {
+    const options = await fetchLoginOptions()
+    googleEnabled.value = options.googleEnabled
+    autoApproveSignup.value = options.autoApproveSignup
+  } catch {
+    optionsError.value = true
+  } finally {
+    loadingOptions.value = false
+  }
+}
+
+onMounted(() => {
   const code = new URLSearchParams(window.location.search).get(AUTH_ERROR_QUERY)
   if (code) {
     const message = AUTH_ERROR_MESSAGES[code]
@@ -30,13 +47,7 @@ onMounted(async () => {
     window.history.replaceState({}, '', window.location.pathname)
   }
 
-  try {
-    const options = await fetchLoginOptions()
-    googleEnabled.value = options.googleEnabled
-    autoApproveSignup.value = options.autoApproveSignup
-  } catch {
-    // 설정을 못 읽으면 버튼을 숨기는 쪽이 안전하다.
-  }
+  void loadOptions()
 })
 </script>
 
@@ -54,7 +65,12 @@ onMounted(async () => {
       <div v-if="notice" class="notice success" role="status">{{ notice }}</div>
       <div v-if="errorMessage" class="notice error" role="alert">{{ errorMessage }}</div>
 
-      <a v-if="googleEnabled" class="button google-button" :href="GOOGLE_LOGIN_URL">
+      <p v-if="loadingOptions" class="notice" role="status">로그인 설정을 확인하고 있습니다.</p>
+      <div v-else-if="optionsError" class="notice error" role="alert">
+        <span>로그인 설정을 확인하지 못했습니다.</span>
+        <button type="button" @click="loadOptions">다시 시도</button>
+      </div>
+      <a v-else-if="googleEnabled" class="button google-button" :href="loginUrl">
         <span class="google-mark" aria-hidden="true">G</span>
         Google로 계속하기
       </a>

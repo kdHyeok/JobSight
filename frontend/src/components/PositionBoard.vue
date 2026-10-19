@@ -13,7 +13,8 @@ import Drawer from './Drawer.vue'
 import PositionDetail from './PositionDetail.vue'
 import PositionForm from './PositionForm.vue'
 import type { Position, PositionPayload, ReferenceItem, ReferencePayload } from '../types/position'
-import { ddayLabel, ddayTone } from '../types/posting'
+import type { PostingTab } from '../types/posting'
+import { ddayLabel, ddayTone, postingTabFor } from '../types/posting'
 
 const props = defineProps<{ focus: string | null }>()
 
@@ -24,6 +25,7 @@ type Mode = 'view' | 'edit'
 
 const positions = ref<Position[]>([])
 const references = ref<ReferenceItem[]>([])
+const tab = ref<PostingTab>('interested')
 const query = ref('')
 const loading = ref(true)
 const loadError = ref('')
@@ -46,12 +48,18 @@ const selectedSubtitle = computed(() => {
     selected.value.postingTitle !== selected.value.name ? selected.value.postingTitle : null,
   ].filter(Boolean).join(' · ')
 })
+const tabCounts = computed<Record<PostingTab, number>>(() => ({
+  interested: positions.value.filter((position) => postingTabFor(position.status, position.archived) === 'interested').length,
+  progress: positions.value.filter((position) => postingTabFor(position.status, position.archived) === 'progress').length,
+  archived: positions.value.filter((position) => postingTabFor(position.status, position.archived) === 'archived').length,
+}))
 
 /** 검색은 클라이언트 필터. 이름·회사·공고·팀·스택. 수백 건을 넘으면 서버 ?q= 로. */
 const visible = computed(() => {
   const needle = query.value.trim().toLowerCase()
-  if (!needle) return positions.value
-  return positions.value.filter((p) =>
+  const inTab = positions.value.filter((position) => postingTabFor(position.status, position.archived) === tab.value)
+  if (!needle) return inTab
+  return inTab.filter((p) =>
     [p.name, p.companyName, p.postingTitle, p.team, ...p.techStack]
       .some((v) => (v ?? '').toLowerCase().includes(needle)))
 })
@@ -91,7 +99,10 @@ function close() {
 /** 다른 화면이 넘긴 항목, 또는 참고 직무 카드가 가리키는 직무를 연다. */
 function openById(id: string | null) {
   const found = positions.value.find((position) => position.id === id)
-  if (found) open(found)
+  if (found) {
+    tab.value = postingTabFor(found.status, found.archived)
+    open(found)
+  }
 }
 
 function fail(error: unknown, fallback: string) {
@@ -218,9 +229,20 @@ onMounted(async () => {
     <div class="page-head">
       <div class="page-title">
         <h1>모집 직무</h1>
-        <span class="page-count">{{ visible.length }}</span>
       </div>
       <input v-model="query" class="search" type="search" placeholder="직무·회사·공고·팀·스택 검색" aria-label="직무 검색" />
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="모집 직무 보기">
+      <button type="button" role="tab" :aria-selected="tab === 'interested'" :class="{ active: tab === 'interested' }" @click="tab = 'interested'">
+        관심 직무 <span class="tab-count">{{ tabCounts.interested }}</span>
+      </button>
+      <button type="button" role="tab" :aria-selected="tab === 'progress'" :class="{ active: tab === 'progress' }" @click="tab = 'progress'">
+        진행 중 <span class="tab-count">{{ tabCounts.progress }}</span>
+      </button>
+      <button type="button" role="tab" :aria-selected="tab === 'archived'" :class="{ active: tab === 'archived' }" @click="tab = 'archived'">
+        보관함 <span class="tab-count">{{ tabCounts.archived }}</span>
+      </button>
     </div>
 
     <div v-if="notice" class="notice success" role="status">{{ notice }}</div>
@@ -234,7 +256,7 @@ onMounted(async () => {
     </section>
 
     <section v-else-if="visible.length === 0" class="empty-state">
-      <strong>{{ query ? '검색 결과가 없습니다.' : '모집 직무가 없습니다.' }}</strong>
+      <strong>{{ query ? '검색 결과가 없습니다.' : tab === 'interested' ? '관심 직무가 없습니다.' : tab === 'progress' ? '진행 중인 직무가 없습니다.' : '보관된 직무가 없습니다.' }}</strong>
       <p>직무는 채용공고를 추가하면 함께 생깁니다.</p>
     </section>
 
@@ -319,7 +341,7 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="직무를 삭제할까요?"
     :subject="deleteTarget.name"
-    detail=" 직무 기록이 영구 삭제됩니다. 공고의 마지막 직무는 지울 수 없습니다."
+    detail=" 직무 기록이 영구 삭제됩니다. 공고의 마지막 직무라면 채용공고와 절차도 함께 삭제됩니다."
     aria-label="직무 삭제 확인"
     :busy="deleting"
     @confirm="remove"

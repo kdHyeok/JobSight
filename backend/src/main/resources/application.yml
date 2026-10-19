@@ -6,6 +6,8 @@ spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL}
     username: ${SPRING_DATASOURCE_USERNAME}
+    hikari:
+      connection-timeout: 3000
   jpa:
     open-in-view: false
     hibernate:

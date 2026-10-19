@@ -30,7 +30,7 @@ GitHub 플러그인 0.3.1은 이 URL을 사용한다. 구 주소의 플러그인
   의해 역직렬화가 거부되어 500이 난다.
 - access token의 `aud` claim은 `ArrayList`로 저장한다. `List.of()`의 런타임 타입인
   `java.util.ImmutableCollections$List12`도 같은 Jackson 허용 목록에서 거부되므로 사용하지 않는다.
-- 기업·공고 삭제 cascade, 마지막 직무 삭제 방지, 참고 정보 공유, 소유자 404 규칙은 기존 서비스가 담당한다.
+- 기업·공고 삭제 cascade, 마지막 직무 삭제 시 소속 공고 cascade, 참고 정보 공유, 소유자 404 규칙은 기존 서비스가 담당한다.
 - 기업·공고·직무의 `memo`는 렌더링된 HTML이 아닌 Markdown 원문으로 조회·저장한다.
 
 ## 실행·검증

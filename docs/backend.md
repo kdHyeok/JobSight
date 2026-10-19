@@ -15,6 +15,8 @@
 | 스키마 | `resources/db/migration/V1~V19` — Flyway, `ddl-auto: validate` |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
 
+DB 연결 획득은 3초 안에 실패시킨다. 마지막 직무 삭제의 PostgreSQL 행 잠금만 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다. `/actuator/health`의 DB 지표와 로그인 옵션 조회가 장애 감지 경로다.
+
 ## 요청 한 번의 흐름
 
 ```

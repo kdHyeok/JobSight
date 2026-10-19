@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App.vue'
 import * as auth from '../api/auth'
-import { GOOGLE_LOGIN_URL, ROUTES } from '../routes'
+import { GOOGLE_LOGIN_URL, ROUTES, googleLoginUrl } from '../routes'
 import type { Me } from '../types/auth'
 
 vi.mock('../api/auth', () => {
@@ -180,6 +180,48 @@ describe('App 접근 제어', () => {
 
     expect(wrapper.find('.google-button').exists()).toBe(false)
     expect(wrapper.text()).toContain('Google 로그인이 아직 설정되지 않았습니다.')
+  })
+
+  it('로그인 옵션 조회 실패를 Google 미설정으로 오인하지 않고 재시도한다', async () => {
+    vi.mocked(auth.fetchMe).mockResolvedValue(anonymous)
+    vi.mocked(auth.fetchLoginOptions)
+      .mockRejectedValueOnce(new Error('Failed to fetch'))
+      .mockResolvedValueOnce({ googleEnabled: true, autoApproveSignup: false })
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('로그인 설정을 확인하지 못했습니다.')
+    expect(wrapper.text()).not.toContain('Google 로그인이 아직 설정되지 않았습니다.')
+    expect(wrapper.find('.google-button').exists()).toBe(false)
+
+    await wrapper.get('.auth-card .notice.error button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.google-button').exists()).toBe(true)
+  })
+
+  it('세션 확인이 실패하면 로그인 대신 연결 실패와 재시도만 보여준다', async () => {
+    vi.mocked(auth.fetchMe).mockRejectedValueOnce(new Error('Failed to fetch')).mockResolvedValueOnce(anonymous)
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('서비스에 연결할 수 없습니다.')
+    expect(wrapper.get('.notice.error button').text()).toBe('다시 시도')
+    expect(wrapper.find('.auth-card').exists()).toBe(false)
+    expect(wrapper.find('.google-button').exists()).toBe(false)
+
+    await wrapper.get('.notice.error button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.auth-card').exists()).toBe(true)
+  })
+
+  it('localhost:8088 로그인은 세션 호스트인 127.0.0.1:8088에서 시작한다', () => {
+    expect(googleLoginUrl({ hostname: 'localhost', port: '8088' })).toBe(
+      'http://127.0.0.1:8088/oauth2/authorization/google',
+    )
+    expect(googleLoginUrl({ hostname: 'job.donhse.duckdns.org', port: '' })).toBe(GOOGLE_LOGIN_URL)
   })
 
   it('로그인하면 워크스페이스와 아바타를 보여준다', async () => {
