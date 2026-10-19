@@ -20,6 +20,10 @@ http://127.0.0.1:8088/login/oauth2/code/google
 
 `PUBLIC_BASE_URL` 의 origin + `/login/oauth2/code/google` 이다. 발급값 넣기:
 
+공개 배포에서는 `PUBLIC_BASE_URL=https://job.donyk.link`, `SESSION_COOKIE_SECURE=true`이며 Google callback은
+`https://job.donyk.link/login/oauth2/code/google`다. `.env.example`과 Compose는 로컬 loopback 기본값을 유지한다.
+Google Console callback과 ChatGPT/Codex callback은 서로 다르다. 공개 주소 전환 시 MCP 연결도 새 URL로 다시 인증한다.
+
 ```bash
 # bash
 sed -i 's#^GOOGLE_CLIENT_ID=.*#GOOGLE_CLIENT_ID=<ID>#' .env

@@ -1,6 +1,6 @@
 {
   "name": "jobsight",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Google OAuth로 연결한 JobSight의 기업, 채용공고, 모집 직무, 이력서, 자기소개와 참고 자료를 관리합니다.",
   "author": {
     "name": "JobSight"

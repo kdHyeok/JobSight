@@ -2,7 +2,7 @@
   "mcpServers": {
     "jobsight": {
       "type": "http",
-      "url": "https://job.donhse.duckdns.org/mcp"
+      "url": "https://job.donyk.link/mcp"
     }
   }
 }

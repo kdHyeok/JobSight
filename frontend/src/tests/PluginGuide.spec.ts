@@ -15,6 +15,7 @@ describe('플러그인 연결 가이드', () => {
     await flushPromises()
     expect(fetch).toHaveBeenCalledWith(MCP_ENDPOINTS.config)
     expect(page.get('input').element.value).toBe(config.mcpUrl)
+    expect(page.text()).toContain('위 MCP URL로 새 연결을 만들고 다시 인증')
     await page.get('button').trigger('click')
     await flushPromises()
     expect(writeText).toHaveBeenCalledWith(config.mcpUrl)

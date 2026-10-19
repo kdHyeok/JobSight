@@ -50,9 +50,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 import tools.jackson.databind.ObjectMapper;
 
 @Testcontainers
-@SpringBootTest(properties = "app.public-base-url=http://127.0.0.1:8088")
+@SpringBootTest(properties = "app.public-base-url=https://job.donyk.link")
 class McpOAuthJdbcIntegrationTest {
-    private static final String RESOURCE = "http://127.0.0.1:8088/mcp";
+    private static final String RESOURCE = "https://job.donyk.link/mcp";
     private static final String CALLBACK = "https://chatgpt.com/connector_platform_oauth_redirect";
 
     @Container

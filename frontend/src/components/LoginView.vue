@@ -10,6 +10,7 @@ const notice = ref('')
 
 /** Google 로그인은 리다이렉트로 돌아오므로 결과를 쿼리 파라미터로 받는다. */
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  DOMAIN_CHANGED: '서비스 주소가 변경되었습니다. 이 페이지에서 Google 로그인을 다시 시작해 주세요.',
   ACCOUNT_NOT_APPROVED: '가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.',
   ACCOUNT_SUSPENDED: '정지된 계정입니다. 관리자에게 문의하세요.',
   EMAIL_NOT_VERIFIED: 'Google 계정의 이메일이 확인되지 않았습니다.',

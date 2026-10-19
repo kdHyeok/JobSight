@@ -23,6 +23,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.keygen.Base64StringKeyGenerator;
 import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.server.authorization.*;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.*;
@@ -143,7 +144,8 @@ public class McpOAuthConfig {
     }
 
     @Bean @Order(1)
-    SecurityFilterChain mcpAuthorizationChain(HttpSecurity http, RegisteredClientRepository clients) throws Exception {
+    SecurityFilterChain mcpAuthorizationChain(HttpSecurity http, RegisteredClientRepository clients,
+                                               OAuth2AuthorizationService authorizations) throws Exception {
         var server = new OAuth2AuthorizationServerConfigurer();
         http.securityMatcher(server.getEndpointsMatcher())
                 .with(server, config -> {
@@ -191,6 +193,10 @@ public class McpOAuthConfig {
                                     response.setStatus(400); response.setContentType("application/json");
                                     response.getWriter().write("{\"error\":\"invalid_request\"}"); return;
                                 }
+                                if (path.equals(ApiPaths.MCP_TOKEN) && !grantMatchesResource(request, authorizations)) {
+                                    response.setStatus(400); response.setContentType("application/json");
+                                    response.getWriter().write("{\"error\":\"invalid_grant\"}"); return;
+                                }
                             }
                             chain.doFilter(request, response);
                         } finally {
@@ -199,6 +205,30 @@ public class McpOAuthConfig {
                     }
                 }, SecurityContextHolderFilter.class);
         return http.build();
+    }
+
+    // Check the stored grant before Spring can mint a token for the new deployment origin.
+    // Client authentication, PKCE, expiration, and replay checks still belong to Spring.
+    private boolean grantMatchesResource(HttpServletRequest request, OAuth2AuthorizationService authorizations) {
+        String[] grants = request.getParameterValues(OAuth2ParameterNames.GRANT_TYPE);
+        if (grants == null || grants.length != 1) return true;
+        boolean refresh = AuthorizationGrantType.REFRESH_TOKEN.getValue().equals(grants[0]);
+        boolean code = AuthorizationGrantType.AUTHORIZATION_CODE.getValue().equals(grants[0]);
+        if (!refresh && !code) return true;
+        String[] values = request.getParameterValues(refresh ? OAuth2ParameterNames.REFRESH_TOKEN : OAuth2ParameterNames.CODE);
+        if (values == null || values.length != 1 || values[0].isBlank()) return false;
+        var stored = authorizations.findByToken(values[0], refresh ? OAuth2TokenType.REFRESH_TOKEN
+                : new OAuth2TokenType(OAuth2ParameterNames.CODE));
+        if (stored == null) return false;
+        if (refresh) {
+            var token = stored.getAccessToken();
+            var claims = token == null ? null : token.getClaims();
+            return claims != null && claims.get("aud") instanceof Collection<?> audience
+                    && audience.size() == 1 && audience.contains(resource());
+        }
+        Object original = stored.getAttribute(OAuth2AuthorizationRequest.class.getName());
+        return original instanceof OAuth2AuthorizationRequest authorizationRequest
+                && resource().equals(authorizationRequest.getAdditionalParameters().get("resource"));
     }
 
     private static final class PublicRefreshConverter implements AuthenticationConverter {

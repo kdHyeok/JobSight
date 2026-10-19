@@ -19,6 +19,8 @@
 - ACTIVE 계정만 갱신할 수 있다. 정지·거절·승인 대기 계정은 기존 토큰이 있어도 새 세션을 받지 못한다.
 - refresh는 CSRF 보호를 받는다. MCP OAuth 토큰·scope·Bearer 체인과 섞지 않는다.
 - 로그아웃은 브라우저 세션과 현재 리프레시 토큰을 함께 폐기한다.
+- 공개 origin은 `https://job.donyk.link`다. host-only 쿠키를 구 도메인에서 복제하거나 Domain 범위를 넓히지 않는다.
+  구 도메인에서 시작한 Google callback은 쿼리를 버리고 새 주소의 `DOMAIN_CHANGED` 안내로 보낸다. 기존 Google 계정으로 다시 로그인한다.
 
 ## 실행·검증
 

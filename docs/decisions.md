@@ -1,5 +1,13 @@
 # 결정 기록
 
+## 2026-10-19: 공개 origin은 job.donyk.link 하나로 전환
+
+사용자가 붙인 새 도메인을 정식 주소로 채택한다. 기존 공용 프록시 구조·PUBLIC_BASE_URL 정본·Google OIDC는 유지하고
+DuckDNS vhost는 이전 안내와 프로토콜 거부용으로 바꾼다. 두 도메인에서 인증을 동시에 시작하면 host-only 세션 쿠키와
+Google callback이 갈라지므로 구 사이트 진입을 새 주소로 보낸다. query를 버려 code/state·자격증명이 도메인을 넘지 않게 한다.
+도메인 전환으로 access aud만 바꾸면 구 refresh가 새 토큰을 만들 수 있으므로 저장된 code resource·refresh audience도 검사한다.
+기존 연결은 새 URL로 재인증하며 사용자·업무 데이터·승인 행을 일괄 삭제하지 않는다. 아래 DuckDNS 배포 기록은 이전 결정이다.
+
 ## ChatGPT URL-only 연결은 제한된 CIMD로
 매 커넥터 callback 수동 등록을 없애기 위해 ChatGPT의 공식 CIMD 문서를 검증한다. DCR 저장소를 추가하지 않는다.
 허용된 HTTPS 문서 URL만 요청하며 최대 64KiB/연결·읽기 타임아웃 각각 5초, 리다이렉트 금지, 128개/10분 캐시로 제한한다.

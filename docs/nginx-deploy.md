@@ -1,5 +1,9 @@
 # nginx · Compose · 배포
 
+`job.donyk.link` 전환의 [계획](01-plan/features/custom-domain-oauth.plan.md)·
+[설계](02-design/features/custom-domain-oauth.design.md)를 따른다. 구 주소용 설정 정본은
+`deploy/nginx/40-job-legacy.conf`이며 외부 프록시의 `conf.d/40-job.conf`에 설치한다.
+
 ## nginx (`frontend/nginx.conf`)
 
 컨테이너 안에서 **80** 을 듣고 밖에서는 **8088**(로컬 직결) 또는 **443**(공개 도메인) 으로 보인다. 이 차이가 이 프로젝트 버그의 절반이었다.
@@ -33,14 +37,14 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 이 저장소 밖에 있다. 별도 compose 프로젝트다.
 
 ```
-브라우저 → https://job.donhse.duckdns.org        (호스트 443, 192.168.0.211)
+브라우저 → https://job.donyk.link                (호스트 443, 192.168.0.211)
         → reverse_proxy 컨테이너  nginx:1.28-alpine, listen 8443 ssl
-           /home/quincy/HDD/apps/reverse-proxy/conf.d/40-job.conf
+           /home/quincy/HDD/apps/reverse-proxy/conf.d/41-job-donyk.conf
         → jobsite-v006-frontend-1:80             jobsite-v006_app 네트워크, 컨테이너명 직결
         → backend:8080
 ```
 
-- TLS 는 Let's Encrypt `donhse.duckdns.org` 인증서의 SAN 으로 `job.` 를 덮는다. 종단은 프록시가 하고 이 저장소는 평문 80 만 다룬다.
+- TLS는 Let's Encrypt `donyk.link` 와일드카드 인증서로 덮는다. 구 도메인 인증서는 구 vhost와 ACME 갱신에 유지한다. 종단은 프록시가 하고 이 저장소는 평문 80만 다룬다.
 - 프록시가 `X-Forwarded-Proto https` 를 고정으로 넣는다. Spring 은 `forward-headers-strategy: framework` 로 이를 받아 secure 판정에 쓴다. `redirect_uri` 는 여기에 의존하지 않고 `PUBLIC_BASE_URL` 로 조립한다. 내부 nginx 가 이 값을 덮어쓰지 않아야 한다 — 덮어쓰면 authorize 진입점의 `Location` 이 평문으로 나간다.
 - 프록시가 `proxy_set_header Host $host` 를 쓴다. 공개 포트가 기본 443 이라 지금은 포트 누락이 없다. **비표준 포트로 옮기면 그 순간 `$host` 함정에 걸린다** — 그때는 `$http_host` 로 바꾼다.
 - upstream 을 변수(`set $job_up …`)로 두고 `resolver 127.0.0.11` 로 런타임 재해석한다. 이게 없으면 컨테이너를 재생성한 뒤 프록시가 죽은 IP 를 계속 잡는다.
@@ -68,7 +72,7 @@ chmod 644 .secrets/*
 `.env` 를 공개 도메인 값으로 채운다. `.env` 와 `.secrets/` 는 `.gitignore` 대상이라 `git pull` 이 덮어쓰지 않는다.
 
 ```
-PUBLIC_BASE_URL=https://job.donhse.duckdns.org
+PUBLIC_BASE_URL=https://job.donyk.link
 SESSION_COOKIE_SECURE=true
 APP_ADMIN_EMAIL=<본인 Gmail>
 GOOGLE_CLIENT_ID=<클라이언트 ID>
@@ -77,6 +81,11 @@ GOOGLE_CLIENT_ID=<클라이언트 ID>
 Google Cloud Console 의 Authorized redirect URI 에 `{PUBLIC_BASE_URL}/login/oauth2/code/google` 을 추가한다. 로컬용(`http://127.0.0.1:8088/…`)과 별개 항목이다.
 
 새 도메인을 붙이려면 이 저장소가 아니라 프록시 스택의 `conf.d/` 에 vhost 를 추가하고 그 스택을 reload 한다.
+
+구 주소는 알려진 화면 GET/HEAD만 새 고정 origin으로 302 이동하고 query는 모두 버린다. Google callback도
+code/state를 전달하지 않고 `/?authError=DOMAIN_CHANGED`로 보낸다. 구 `/mcp`는 새 metadata challenge로 401,
+OAuth 프로토콜 경로는 400 `invalid_target`, 나머지 API·변경 요청은 410이다. metadata GET은 새 canonical JSON을 제공한다.
+Bearer·POST body·세션 쿠키를 새 도메인으로 프록시/리다이렉트하지 않는다. `/health`와 HTTP ACME 갱신은 유지한다.
 
 ### 매 배포
 
@@ -88,6 +97,8 @@ bash scripts/smoke.sh          # PASS 여야 배포 완료
 ```
 
 `smoke.sh` 는 `.env` 의 `PUBLIC_BASE_URL` 을 읽는다. 출력 첫 줄이 공개 도메인인지 확인한다.
+기존 수동 OAuth callback을 유지하는 서버는 `-f compose.yaml -f compose.mcp.yaml`을 함께 사용한다.
+base URL을 바꿀 때는 구 code/refresh 승계를 막는 코드도 함께 배포하고, 가이드·ZIP·GitHub 플러그인 URL을 대조한다.
 
 ### 롤백
 

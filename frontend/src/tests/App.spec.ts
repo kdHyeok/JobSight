@@ -289,6 +289,16 @@ describe('App 접근 제어', () => {
   })
 
   /** Google 로그인 실패는 리다이렉트 쿼리로 돌아온다. */
+  it('구 도메인의 콜백은 새 주소에서 재로그인하도록 안내한다', async () => {
+    setPath('/?authError=DOMAIN_CHANGED')
+    vi.mocked(auth.fetchMe).mockResolvedValue(anonymous)
+    const wrapper = mount(App)
+    await flushPromises()
+    expect(wrapper.text()).toContain('이 페이지에서 Google 로그인을 다시 시작')
+    expect(wrapper.get('a.google-button').attributes('href')).toBe(GOOGLE_LOGIN_URL)
+    expect(window.location.search).toBe('')
+  })
+
   it('authError 쿼리를 사람이 읽을 문구로 바꿔 보여준다', async () => {
     setPath('/?authError=ACCOUNT_NOT_APPROVED')
     vi.mocked(auth.fetchMe).mockResolvedValue(anonymous)

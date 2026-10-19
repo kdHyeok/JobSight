@@ -2,6 +2,10 @@
 
 ## 목적과 진입점
 
+새 도메인 `job.donyk.link` 전환은 [계획](01-plan/features/custom-domain-oauth.plan.md)과
+[설계](02-design/features/custom-domain-oauth.design.md)를 따른다. 공개 MCP URL은 `https://job.donyk.link/mcp`다.
+GitHub 플러그인 0.3.1은 이 URL을 사용한다. 구 주소의 플러그인 연결은 새 주소로 재인증해야 한다.
+
 `plugins/jobsight`를 ChatGPT/Codex용 플러그인으로 패키징한다. MCP는 기존 Spring 애플리케이션의
 `/mcp`에서 JSON 응답형 Streamable HTTP로 실행하고, 기존 CRUD 컨트롤러·서비스와 DTO 검증을 재사용한다.
 도구 설명은 기존 `@Operation`, 입력 스키마는 실제 요청 DTO에서 만든다. `SKILL.md`는 사이트 조작과 데이터 관계를 설명한다.
@@ -16,6 +20,9 @@
 - 매 MCP 요청에서 계정 활성 상태·현재 역할을 DB에서 다시 확인한다. 도구는 `jobsight.read`,
   `jobsight.write`, 관리자 작업은 추가로 `jobsight.admin` 및 실제 ADMIN 역할을 요구한다.
 - resource는 `PUBLIC_BASE_URL + /mcp` 하나다. OAuth 토큰은 이 서버에서만 유효하며 Google 토큰을 전달하지 않는다.
+- code 교환은 저장된 인가 요청의 resource, refresh는 저장된 access token metadata의 단일 aud를 검사한다.
+  현재 resource와 다르거나 누락된 구 연결은 `invalid_grant`로 거부한다. 만료된 access token의 정상 refresh는 허용하며,
+  도메인 전환을 이유로 기존 승인·동의 행이나 업무 데이터를 일괄 삭제하지 않는다.
 - OAuth 승인·토큰은 Spring JDBC 저장소로 PostgreSQL에 보관한다. access token은 1시간,
   회전형 refresh token은 90일이며 서버 재시작 후에도 연결을 유지한다. 계정 정지·삭제 시에는 남은 토큰 기간과 무관하게 MCP 요청을 거부한다.
 - OAuth 승인 행에는 Google `AppOidcUser` 객체를 직렬화하지 않는다. 인가 요청 동안에는 사용자 ID와 권한만

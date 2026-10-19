@@ -6,7 +6,7 @@
 
 Google 계정으로 로그인하는 기업 정보 CRUD. 계정별 데이터 분리, 관리자 승인제(자동 승인 토글 있음).
 PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx, Docker Compose 3 컨테이너.
-로컬 `http://127.0.0.1:8088`, 배포는 `https://job.donhse.duckdns.org`(호스트 리버스 프록시).
+로컬 `http://127.0.0.1:8088`, 정식 배포 주소는 `https://job.donyk.link`(호스트 리버스 프록시).
 
 ## 작업 순서 — 문서가 먼저다
 
@@ -33,6 +33,7 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx, Docker Compos
 | 관리자 콘솔·계정별 등록 수 | [docs/admin.md](docs/admin.md) |
 | 관리자 요청·피드백 | [docs/requests.md](docs/requests.md) |
 | MCP·OAuth 위임·플러그인 | [docs/mcp-plugin.md](docs/mcp-plugin.md) |
+| `job.donyk.link` 도메인·OAuth·플러그인 전환 | [계획](docs/01-plan/features/custom-domain-oauth.plan.md) · [설계](docs/02-design/features/custom-domain-oauth.design.md) |
 | 화면 배치·색·컴포넌트 | [docs/design-system.md](docs/design-system.md) |
 | `nginx.conf`, `compose*.yaml`, `.github/**`, 배포 | [docs/nginx-deploy.md](docs/nginx-deploy.md) |
 | "왜 이렇게 했지?" | [docs/decisions.md](docs/decisions.md) — 되돌리기 전에 반드시 읽는다 |
