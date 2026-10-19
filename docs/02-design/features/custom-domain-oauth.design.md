@@ -1,6 +1,6 @@
 # 새 도메인 OAuth·플러그인 연동 설계
 
-작성: 2026-10-19 (KST) · 기능: `custom-domain-oauth` · 상태: 설계 완료, 구현·배포 전
+작성: 2026-10-19 (KST) · 기능: `custom-domain-oauth` · 상태: 구현·배포 완료, 실제 클라이언트 검증 중
 근거: [계획](../../01-plan/features/custom-domain-oauth.plan.md), [기존 MCP 계약](../../mcp-plugin.md), [인증 세션](../../auth-session.md), [배포](../../nginx-deploy.md), [기존 결정](../../decisions.md).
 
 ## 1. 구조와 확인 결과
@@ -18,14 +18,14 @@ PUBLIC_BASE_URL=https://job.donyk.link
 GitHub plugins/jobsight/.mcp.json → 동일한 공개 MCP URL (별도 정적 배포물)
 ```
 
-실서비스를 읽기 전용으로 확인한 결과, 새 origin의 `/health`는 200이지만 `/plugin/config`와 두 검색 문서는 구 origin을 광고한다. Google 시작 응답의 `Location`에서도 구 callback을 확인했다. 배포 컨테이너와 `.env`의 base URL 역시 구 주소다.
-외부 프록시에는 `41-job-donyk.conf`가 있고 새 인증서로 같은 앱 upstream을 제공한다. 이 파일의 `.pending` 주석은 실제 활성 상태와 달라 구현 시 운영 문서와 함께 정리한다.
+설계 수립 시 실서비스를 읽기 전용으로 확인한 결과, 새 origin의 `/health`는 200이지만 `/plugin/config`와 두 검색 문서는 구 origin을 광고했다. Google 시작 응답의 `Location`에서도 구 callback을 확인했다. 당시 배포 컨테이너와 `.env`의 base URL 역시 구 주소였다.
+외부 프록시에는 `41-job-donyk.conf`가 있고 새 인증서로 같은 앱 upstream을 제공한다. 설계 당시 실제 활성 상태와 달랐던 `.pending` 주석은 이후 배포에서 운영 문서와 함께 정리했다.
 
-현재 새 도메인 스모크: `timeout 55s bash scripts/smoke.sh https://job.donyk.link`, 실제 종료코드 **1**(시간 초과가 아님). issuer·authorization endpoint·token endpoint·resource·Google redirect_uri·새 MCP resource를 보낸 authorize 진입점의 Location, **6개 실패**다. HTTP 200만으로 연동 성공을 판단할 수 없다.
+설계 수립 시 새 도메인 스모크: `timeout 55s bash scripts/smoke.sh https://job.donyk.link`, 실제 종료코드 **1**(시간 초과가 아님). issuer·authorization endpoint·token endpoint·resource·Google redirect_uri·새 MCP resource를 보낸 authorize 진입점의 Location, **6개 실패**였다. HTTP 200만으로 연동 성공을 판단할 수 없다.
 
 ## 2. URL 계약
 
-아래 값은 구현 후 기대값이며, 현재 배포값이 아니다. origin에는 끝 `/`를 두지 않는다.
+아래 URL 계약은 구현 후 배포 응답에서도 확인했다. origin에는 끝 `/`를 두지 않는다.
 
 | 대상 | 기대값 |
 |---|---|
@@ -59,7 +59,7 @@ Google callback은 Google Console에, ChatGPT callback은 CIMD 검증 또는 `MC
 3. 일반 로그인은 `/`, MCP에서 시작했다면 새 origin의 `/oauth2/authorize`로 복귀한다. 사용자 입력 redirect URL을 목적지로 채택하지 않는다.
 4. 기존 Google sub·사용자 UUID·업무 데이터는 그대로 사용한다. 쿠키는 도메인을 넘을 수 없으므로 재로그인이 정상 절차다.
 
-현재는 새 도메인에서 시작하고 구 callback으로 돌아가므로 세션 쿠키가 누락되어 `authorization_request_not_found` 등이 날 수 있다. 이는 코드·쿠키 구조로부터의 추론이며 실제 Google 왕복 오류는 이번 조사에서 재현하지 않았다.
+설계 기준 버전은 새 도메인에서 시작하고 구 callback으로 돌아가므로 세션 쿠키가 누락되어 `authorization_request_not_found` 등이 날 수 있었다. 이는 코드·쿠키 구조로부터의 추론이며 설계 조사 당시 Google 실제 왕복 오류를 재현한 결과는 아니다.
 
 ### MCP·OAuth
 
@@ -136,4 +136,16 @@ Host-only cookie·Secure=true·SameSite=Lax·REST CSRF·MCP Bearer 전용·소�
 
 구현 완료 시 필수 명령은 컨테이너의 `./gradlew compileJava compileTestJava test --no-daemon`(전체 통합 테스트는 Docker 소켓 포함), 프런트 변경 시 `npm run type-check && npm test`, 프록시 `nginx -t`, `bash scripts/smoke.sh https://job.donyk.link`다. 종료코드와 Gradle `BUILD SUCCESSFUL`을 모두 확인한다. 설치된 플러그인의 실제 MCP URL·OAuth 연결과 재시작 후 토큰 유지도 기록한다.
 
-새 도메인 baseline의 6개 실패가 사라지고 추가 회귀 검사·실제 로그인·클라이언트 검증까지 끝나야 서비스 전환을 완료로 표시한다. 이번 단계는 설계 문서 작성만 완료한 상태이며, Google 실제 왕복·ChatGPT/Codex 새 도메인 연결·token 회전은 미검증이다.
+새 도메인 baseline의 6개 실패가 사라지고 추가 회귀 검사·실제 로그인·클라이언트 검증까지 끝나야 서비스 전환을 완료로 표시한다.
+
+## 8. 배포 후 검증 상태 (2026-10-19)
+
+- 원격 main의 직무 삭제·헬스체크 변경을 보존해 통합한 `8222ede`를 배포하고 push했다.
+- 백엔드 전체 74개, 프런트 79개 테스트와 빌드, 새 주소 스모크 59개, 구 주소 정책 26개가 통과했다.
+- Google 실제 callback은 `https://job.donyk.link/login/oauth2/code/google`다. 사용자가 Console 등록값을 수정한 뒤
+  로그인 성공을 확인했고, 프록시에서도 Google callback 302 → 홈의 계정 조회 200 흐름을 확인했다.
+- `/mcp`를 브라우저로 직접 열었을 때 401은 정상이다. Google 세션을 MCP Bearer 인증으로 대체하지 않는다.
+- ChatGPT/Codex 새 URL 연결·권한 동의·실제 도구 조회와 클라이언트의 실제 refresh/재시작 후 연결 유지는 미검증이다.
+  통합 테스트의 코드 교환·JDBC 재조회·도구 조회·refresh 회전 성공과 구분한다.
+
+상세 근거와 남은 항목: [분석](../../03-analysis/custom-domain-oauth.analysis.md), [배포 보고](../../04-report/custom-domain-oauth.report.md).

@@ -1,14 +1,15 @@
 # 새 도메인 OAuth·플러그인 연동 계획
 
-작성: 2026-10-19 (KST) · 기능: `custom-domain-oauth` · 상태: 계획 완료, 구현 전
+작성: 2026-10-19 (KST) · 기능: `custom-domain-oauth` · 상태: 구현·배포 완료, 실제 플러그인 재연결 검증 중
 
 ## 목적과 진입점
 
 정식 공개 주소를 `https://job.donyk.link`로 통일해 Google 로그인과 ChatGPT/Codex MCP 연결이 같은 origin에서 동작하게 한다.
-Google Console의 새 redirect URI 등록은 사용자 완료 사항이다. 등록값 자체와 실제 로그인 왕복은 아직 대조하지 않았다.
+Google Console의 새 redirect URI는 사용자가 등록한다. 배포 후 `redirect_uri_mismatch`를 보고받아 실제
+`Location`의 새 callback과 대조했고, 사용자가 재등록한 뒤 실제 Google 로그인·홈 복귀 성공을 확인했다.
 진입점은 Google 로그인, `/plugin`, `/mcp`, OAuth 검색 문서, GitHub 플러그인 설치다.
 
-## 확인된 현재 상태
+## 계획 수립 시 기준 상태
 
 | 영역 | 2026-10-19 읽기 전용 확인 |
 |---|---|
@@ -27,7 +28,8 @@ Google Console의 새 redirect URI 등록은 사용자 완료 사항이다. 등�
 - MCP는 PKCE S256·정확한 resource·scope·현재 계정 상태·소유자 격리를 유지한다.
 - 기존 플러그인은 새 MCP URL로 재연결한다. 구 audience access token과 refresh token의 무음 승계를 막는다.
 - 구현 시 구 도메인은 사이트 진입 안내만 새 주소로 보내고, OAuth callback·Bearer·token POST를 도메인 간 전달하지 않는다.
-- 이번 산출물은 계획·설계 문서다. 코드·`.env`·프록시·배포·사용자 연결은 변경하지 않는다.
+- 최초 계획·설계 단계에서는 문서만 작성했다. 이후 사용자 승인에 따라 코드·`.env`·프록시·배포까지 진행했다.
+  사용자 연결을 임의로 삭제하지 않으며, 새 URL로 재연결하는 마지막 동의는 사용자가 완료한다.
 - DCR 도입, Google 클라이언트 재발급, DB 구조 변경, 저장소 공개 전환, Codex 원격 제어는 범위 밖이다.
 
 ## 실행 순서
@@ -40,14 +42,14 @@ Google Console의 새 redirect URI 등록은 사용자 완료 사항이다. 등�
 | 4. 실제 인증 | Google 왕복, ChatGPT/Codex 재연결·조회·갱신 | 각 클라이언트의 실제 성공 확인 |
 | 5. 기록 | 운영 문서와 검증 결과 갱신 | 미검증·롤백 영향 구분 |
 
-구현·배포 일정은 미정이다. 의존 순서는 위와 같고, 실제 로그인·클라이언트 동의에는 사용자 조작이 필요할 수 있다.
+2026-10-19 구현·배포와 Google 실제 왕복을 확인했다. ChatGPT/Codex 새 연결과 실제 도구 조회는 사용자 인증 후 검증한다.
 
 ## 성공 기준과 주요 위험
 
-- [ ] 새 도메인의 Google callback, issuer, resource, challenge, 가이드, ZIP, GitHub 플러그인 주소가 일치한다.
+- [x] 새 도메인의 Google callback, issuer, resource, challenge, 가이드, ZIP, GitHub 플러그인 주소가 일치한다.
 - [ ] 새 도메인 스모크가 PASS이고 Google 실제 로그인 및 플러그인 도구 조회·토큰 회전이 성공한다.
 - [ ] 구 audience access/refresh 토큰은 새 resource에서 거부되고, 새 연결은 재시작 후에도 유지된다.
-- [ ] 구 도메인에서 새 로그인 세션이 만들어지지 않으며 프로토콜 요청의 외부 리다이렉트·자격증명 전달이 없다.
+- [x] 구 도메인에서 새 로그인 세션이 만들어지지 않으며 프로토콜 요청의 외부 리다이렉트·자격증명 전달이 없다.
 - 도메인 이동 후 기존 쿠키는 따라오지 않아 재로그인이 필요하다. 같은 Google sub의 기존 계정·데이터를 재사용한다.
 - PUBLIC_BASE_URL만 바꾸면 기존 refresh token이 새 audience 토큰으로 재발급될 수 있다. 전환 전 거부 테스트·가드를 추가한다.
 - 이 서버의 컨테이너 재생성은 즉시 공개 서비스에 반영된다. 테스트는 운영 Compose 재생성 전에 격리 실행한다.
@@ -56,3 +58,5 @@ Google Console의 새 redirect URI 등록은 사용자 완료 사항이다. 등�
 ## 문서
 
 [상세 설계](../../02-design/features/custom-domain-oauth.design.md) · [MCP 계약](../../mcp-plugin.md) · [배포](../../nginx-deploy.md) · [세션](../../auth-session.md)
+
+[검증 분석](../../03-analysis/custom-domain-oauth.analysis.md) · [배포 결과와 남은 검증](../../04-report/custom-domain-oauth.report.md)

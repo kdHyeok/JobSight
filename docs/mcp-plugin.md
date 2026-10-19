@@ -44,6 +44,11 @@ OAuth 메타데이터의 issuer, 인증/토큰 URL, S256 선언과 MCP resource 
 
 ## 함정
 
+사이트에서 Google 로그인한 뒤 브라우저로 `/mcp`를 직접 열어도 401이 정상이다. MCP는 세션 쿠키가 아닌
+클라이언트가 OAuth로 받은 Bearer 토큰을 요구한다. 직접 접속 결과를 플러그인 연결 실패로 판정하지 않는다.
+Google `redirect_uri_mismatch`가 표시되면 시작 응답의 `Location`에서 실제 callback을 확인하고 같은 Google
+client ID의 Console 등록값을 대조한다. Google 등록값만 수정했다면 서버 재배포는 필요 없다.
+
 로컬 loopback·tailnet 전용 주소는 ChatGPT 클라우드에서 바로 접근할 수 없다. 공개 HTTPS 배포 또는
 클라이언트가 지원하는 사설 네트워크 연결이 필요하다. 등록 가능한 패키지 작성과 공개 배포/스토어 승인은 별개다.
 공고 수정의 positions/steps, 직무 참고 연결은 전체 교체다. 변경 전에 조회하고 유지할 값을 포함해야 한다.
@@ -131,6 +136,18 @@ Spring 프록시가 적용된 운영 빈의 도구 설명도 다시 읽을 수 �
 - 플러그인·스킬 공식 구조 검사 통과. 로컬 ZIP은 `artifacts/jobsight-plugin-local.zip`에 생성했다.
 - 실제 Google 로그인 왕복은 내장 브라우저의 로컬 연결 오류로 검증하지 못했다.
   ChatGPT 연결은 공개 HTTPS 주소와 정확한 callback 설정 전이므로 검증하지 못했다.
+
+### 새 도메인 배포 검증 (0.3.1, 2026-10-19)
+
+- `8222ede`를 새 공개 origin에 배포하고 main에 push했다. config·metadata·challenge·다운로드 ZIP·GitHub 패키지 주소가 일치한다.
+- 컨테이너에서 백엔드 컴파일·전체 테스트 74개, 프런트 타입 검사·79개 테스트·빌드가 종료코드 0으로 통과했다.
+- 새 도메인 스모크 59개, 구 도메인 정책 검사 26개 PASS. 구 code/refresh의 audience 승계를 거부한다.
+- Google Console callback 재등록 후 사용자의 실제 사이트 로그인 성공과 서버 callback·홈 복귀를 확인했다.
+- 새 ChatGPT/Codex 연결의 권한 동의·실제 도구 조회·자동 refresh는 미검증이다. 기존 연결을 성공으로 간주하지 않는다.
+- Codex Git 마켓플레이스 사용자는 `codex plugin marketplace upgrade jobsight` → `codex plugin add jobsight@jobsight`
+  → 앱 재시작 → 새 OAuth 동의를 진행한다. 마켓플레이스를 삭제·재등록하거나 저장소를 public으로 바꿀 필요는 없다.
+
+전체 결과·미검증 항목: [배포 보고](04-report/custom-domain-oauth.report.md).
 
 ### 원격 main 통합 검증
 
