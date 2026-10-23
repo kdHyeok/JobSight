@@ -58,6 +58,10 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 
 CI/CD 파이프라인은 없다. 서버에 SSH 로 들어가 `git pull` 하고 다시 올린다.
 
+정식 저장소는 `https://github.com/kdHyeok/JobSight`다. 기존 clone은
+`git remote set-url origin https://github.com/kdHyeok/JobSight.git`으로 원격만 바꾼다.
+아래 로컬 디렉터리·Compose 프로젝트·볼륨 이름은 저장소 이름 변경과 무관하게 유지한다.
+
 ### 서버 준비 (1회)
 
 ```bash

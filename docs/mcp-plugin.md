@@ -2,14 +2,19 @@
 
 ## 목적과 진입점
 
-GitHub 저장소는 `https://github.com/kdHyeok/JobSight`다. 저장소 이름 변경은 Git 원격과 Codex
-marketplace source, 설치 안내에 반영한다. marketplace 이름 `jobsight`와 MCP 서비스 URL은 유지한다.
-이전 주소로 등록한 클라이언트에서 source 충돌이 나면 `codex plugin marketplace remove jobsight` 후
-`codex plugin marketplace add kdHyeok/JobSight --ref main`으로 source를 재등록한다.
-
 새 도메인 `job.donyk.link` 전환은 [계획](01-plan/features/custom-domain-oauth.plan.md)과
 [설계](02-design/features/custom-domain-oauth.design.md)를 따른다. 공개 MCP URL은 `https://job.donyk.link/mcp`다.
 GitHub 플러그인 0.3.1은 이 URL을 사용한다. 구 주소의 플러그인 연결은 새 주소로 재인증해야 한다.
+
+### 저장소 주소 변경 (2026-10-23)
+
+Git 저장소의 정식 주소는 `https://github.com/kdHyeok/JobSight`다. 기존 clone의 origin과 플러그인 가이드의
+설치·복사 명령, clone·설치 문서를 이 주소에 맞춘다. 마켓플레이스와 플러그인 식별자는 `jobsight`로 유지한다.
+MCP·Google OAuth의 공개 origin과 callback, Docker 프로젝트·볼륨·기존 로컬 디렉터리 이름은 바꾸지 않는다.
+이전 주소로 등록한 클라이언트에서 source 충돌이 나면 `codex plugin marketplace remove jobsight` 후
+`codex plugin marketplace add kdHyeok/JobSight --ref main`으로 source를 재등록한다.
+검증은 새 원격 main 조회, 프런트 타입 검사·테스트·빌드, `bash scripts/smoke.sh`로 한다.
+소스 안내 변경을 운영 화면에 노출하려면 별도 프런트 재배포가 필요하다.
 
 `plugins/jobsight`를 ChatGPT/Codex용 플러그인으로 패키징한다. MCP는 기존 Spring 애플리케이션의
 `/mcp`에서 JSON 응답형 Streamable HTTP로 실행하고, 기존 CRUD 컨트롤러·서비스와 DTO 검증을 재사용한다.
