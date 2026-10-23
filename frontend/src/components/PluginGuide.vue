@@ -8,7 +8,7 @@ const loading = ref(false)
 const error = ref('')
 const notice = ref('')
 const commandNotice = ref('')
-const installCommand = 'codex plugin marketplace add kdHyeok/jobsite-v006 --ref main\ncodex plugin add jobsight@jobsight'
+const installCommand = 'codex plugin marketplace add kdHyeok/JobSight --ref main\ncodex plugin add jobsight@jobsight'
 const updateCommand = 'codex plugin marketplace upgrade jobsight\ncodex plugin add jobsight@jobsight'
 async function copyCommand(command: string) {
   try { await navigator.clipboard.writeText(command); commandNotice.value = '명령을 복사했습니다.' }

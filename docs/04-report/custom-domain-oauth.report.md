@@ -23,7 +23,7 @@
 
 - Codex Git 마켓플레이스 설치: `codex plugin marketplace upgrade jobsight` 후 `codex plugin add jobsight@jobsight`,
   앱 완전 종료·재실행 → 새 대화의 JobSight 연결·권한 동의. 마켓플레이스 삭제·재등록은 필요 없다.
-- `jobsight` 마켓플레이스가 없다는 오류라면 먼저 `codex plugin marketplace add kdHyeok/jobsite-v006 --ref main`으로 등록한다.
+- `jobsight` 마켓플레이스가 없다는 오류라면 먼저 `codex plugin marketplace add kdHyeok/JobSight --ref main`으로 등록한다.
 - ChatGPT 웹: 플러그인의 사용자 지정 MCP 서버 추가에서 `https://job.donyk.link/mcp`, OAuth·CIMD로 연결한다.
 - 새 연결이 확인되기 전 기존 연결을 삭제하지 않는다. 실제 마지막 로그인·권한 동의는 사용자가 수행한다.
 

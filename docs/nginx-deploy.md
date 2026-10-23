@@ -61,7 +61,7 @@ CI/CD 파이프라인은 없다. 서버에 SSH 로 들어가 `git pull` 하고 �
 ### 서버 준비 (1회)
 
 ```bash
-git clone https://github.com/kdHyeok/jobsite-v006.git ~/jobsite-v006
+git clone https://github.com/kdHyeok/JobSight.git ~/jobsite-v006
 cd ~/jobsite-v006
 cp .env.example .env
 mkdir -p .secrets && chmod 700 .secrets

@@ -2,6 +2,11 @@
 
 ## 목적과 진입점
 
+GitHub 저장소는 `https://github.com/kdHyeok/JobSight`다. 저장소 이름 변경은 Git 원격과 Codex
+marketplace source, 설치 안내에 반영한다. marketplace 이름 `jobsight`와 MCP 서비스 URL은 유지한다.
+이전 주소로 등록한 클라이언트에서 source 충돌이 나면 `codex plugin marketplace remove jobsight` 후
+`codex plugin marketplace add kdHyeok/JobSight --ref main`으로 source를 재등록한다.
+
 새 도메인 `job.donyk.link` 전환은 [계획](01-plan/features/custom-domain-oauth.plan.md)과
 [설계](02-design/features/custom-domain-oauth.design.md)를 따른다. 공개 MCP URL은 `https://job.donyk.link/mcp`다.
 GitHub 플러그인 0.3.1은 이 URL을 사용한다. 구 주소의 플러그인 연결은 새 주소로 재인증해야 한다.
@@ -75,7 +80,7 @@ ChatGPT 연결, Codex GitHub 설치·업데이트 명령만 제공한다. CIMD·
 표시 URL은 `/plugin/config`가 PUBLIC_BASE_URL로 내려주며 브라우저 Host로 조립하지 않는다.
 SKILL.md 정본은 plugins/jobsight에 하나만 두고 Gradle 리소스에 포함한다. Docker named context로 공개 플러그인 파일만 전달한다.
 MCP initialize.instructions와 resources/read에서도 동일 지침을 제공한다. 이는 클라이언트의 스킬 설치를 보장하는 기능은 아니다.
-Codex는 GitHub marketplace에서 설치한다. `.agents/plugins/marketplace.json`이 `plugins/jobsight`의 MCP 설정과 스킬을 가리킨다. 설치 명령은 `codex plugin marketplace add kdHyeok/jobsite-v006 --ref main` 다음 `codex plugin add jobsight@jobsight`다. 최신 main 반영은 `codex plugin marketplace upgrade jobsight` 후 다시 plugin add 한다. 이 변경을 push한 이후 사용 가능하며 비공개 저장소는 Git 읽기 권한이 필요하다. ZIP 엔드포인트는 호환용으로만 유지하고 사이트에서는 GitHub 설치를 안내한다. 설치와 별개로 OAuth 동의는 필요하다.
+Codex는 GitHub marketplace에서 설치한다. `.agents/plugins/marketplace.json`이 `plugins/jobsight`의 MCP 설정과 스킬을 가리킨다. 설치 명령은 `codex plugin marketplace add kdHyeok/JobSight --ref main` 다음 `codex plugin add jobsight@jobsight`다. 최신 main 반영은 `codex plugin marketplace upgrade jobsight` 후 다시 plugin add 한다. 이 변경을 push한 이후 사용 가능하며 비공개 저장소는 Git 읽기 권한이 필요하다. ZIP 엔드포인트는 호환용으로만 유지하고 사이트에서는 GitHub 설치를 안내한다. 설치와 별개로 OAuth 동의는 필요하다.
 
 검증: marketplace 식별자·플러그인 구조 검사 및 프런트 타입 검사·43개 테스트 통과. 실제 GitHub에서 설치와 Codex OAuth 연결은 push 전이므로 미검증이다. 메뉴 권한·닫기·가이드 전환과 설치 명령 복사는 프런트 테스트에 포함한다.
 

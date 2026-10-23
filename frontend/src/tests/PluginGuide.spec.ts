@@ -25,7 +25,7 @@ describe('플러그인 연결 가이드', () => {
     expect(page.text()).not.toContain('jobsight.read')
     expect(page.text()).not.toContain('수동 OAuth')
     const command = page.get('.guide-command').text()
-    expect(command).toContain('codex plugin marketplace add kdHyeok/jobsite-v006 --ref main')
+    expect(command).toContain('codex plugin marketplace add kdHyeok/JobSight --ref main')
     expect(command).toContain('codex plugin add jobsight@jobsight')
     expect(command).not.toContain('Invoke-Expression')
     await page.findAll('button').find(b => b.text() === '설치 명령 복사')!.trigger('click')
