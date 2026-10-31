@@ -107,6 +107,23 @@ Windows 개발 환경에서는 `scripts/start.ps1`가 고정 Compose 프로젝�
 기존 수동 OAuth callback을 유지하는 서버는 `-f compose.yaml -f compose.mcp.yaml`을 함께 사용한다.
 base URL을 바꿀 때는 구 code/refresh 승계를 막는 코드도 함께 배포하고, 가이드·ZIP·GitHub 플러그인 URL을 대조한다.
 
+### 2026-10-31 드롭다운 배포 검증
+
+- 변경 커밋: `98b47b8` (`main` push 완료). 이력서 지원 직무·자기소개 연결 이력서의 검색 드롭다운과 관련 테스트·문서만 포함한다.
+- 컨테이너에서 프런트 타입 검사·전체 테스트 95개·빌드 종료코드 0. 배포용 `docker compose -f compose.yaml -f compose.mcp.yaml build frontend`도 종료코드 0이다.
+- 기존 프런트 실행 이미지를 `jobsite-v006-frontend:pre-dropdown-20261031-98b47b8`로 보관한 뒤 아래 명령으로 프런트만 교체했다. 백엔드·DB는 컨테이너 ID·이미지·시작 시각이 모두 유지됐으며, 세 컨테이너 모두 healthy다.
+
+```bash
+docker compose -f compose.yaml -f compose.mcp.yaml up -d --no-deps --no-build --wait --wait-timeout 120 frontend
+bash scripts/smoke.sh https://job.donyk.link
+```
+
+- 배포 후 공개 스모크 59개 PASS(종료코드 0). `/`, `/resumes`, `/introductions`의 HTML이 새 자산을 참조하며 공개 JS(`index-KGzONS1k.js`)·CSS(`index-DQZz7-Em.css`)의 SHA256이 실행 컨테이너 파일과 일치한다.
+- 공개 사이트의 실제 JS·CSS를 Chrome에서 실행하고 API만 가짜 응답으로 대체해 두 드롭다운을 검증했다. 항목 40개·휠 스크롤·끝 항목 선택·검색·연속 선택·키보드·닫기·저장 payload·390px 모바일 배치가 통과했다. 자기소개의 검색 Enter 자동 저장 방지와 긴 이름 칩도 확인했다.
+- 실제 계정의 데이터 쓰기와 Google 로그인 왕복은 이번 배포에서 다시 수행하지 않았다. OAuth 설정·백엔드·DB·외부 프록시 설정은 변경하지 않았다.
+
+이 프런트 배포만 되돌릴 때는 보관한 이미지를 `docker tag jobsite-v006-frontend:pre-dropdown-20261031-98b47b8 jobsite-v006-frontend:latest`로 지정하고 위 `up`·스모크 명령을 다시 실행한다. `--no-build`를 유지해야 보관한 이미지가 소스 빌드로 덮어써지지 않는다.
+
 ### 롤백
 
 ```bash
