@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, useId, watch } from 'vue'
 import {
   createSelfIntroduction,
   deleteSelfIntroduction,
@@ -24,12 +24,92 @@ const editingId = ref<string | null>(null)
 const deleteTarget = ref<SelfIntroduction | null>(null)
 const draft = reactive<SelfIntroductionPayload>({ resumeIds: [], question: '', answer: '' })
 const resumeQuery = ref('')
+const resumePicker = ref<HTMLElement | null>(null)
+const resumeInput = ref<HTMLInputElement | null>(null)
+const resumeMenu = ref<HTMLElement | null>(null)
+const resumeMenuOpen = ref(false)
+const resumeMenuMaxHeight = ref(320)
+const activeResumeIndex = ref(-1)
+const resumeListId = `intro-resumes-${useId()}`
 
 const resumeNames = computed(() => new Map(resumes.value.map((resume) => [resume.id, resume.name])))
+const selectedResumes = computed(() => draft.resumeIds.map((id) => ({ id, name: resumeNames.value.get(id) ?? '삭제된 이력서' })))
 const filteredResumes = computed(() => {
   const needle = resumeQuery.value.trim().toLowerCase()
-  return resumes.value.filter((resume) => !needle || resume.name.toLowerCase().includes(needle))
+  return resumes.value
+    .filter((resume) => !draft.resumeIds.includes(resume.id))
+    .filter((resume) => !needle || resume.name.toLowerCase().includes(needle))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 })
+const activeResumeId = computed(() => resumeMenuOpen.value && filteredResumes.value[activeResumeIndex.value]
+  ? `${resumeListId}-${activeResumeIndex.value}` : undefined)
+watch(filteredResumes, () => {
+  activeResumeIndex.value = -1
+  if (resumeMenu.value) resumeMenu.value.scrollTop = 0
+})
+function fitResumeMenu() {
+  if (!resumeMenuOpen.value || !resumeInput.value) return
+  const viewport = window.visualViewport
+  const height = viewport?.height ?? window.innerHeight
+  const spaceBelow = (viewport?.offsetTop ?? 0) + height - resumeInput.value.getBoundingClientRect().bottom - 12
+  resumeMenuMaxHeight.value = Math.max(48, Math.min(320, height * 0.45, spaceBelow))
+}
+watch(resumeMenuOpen, async (open) => {
+  if (!open) return
+  await nextTick()
+  if (window.innerHeight - (resumeInput.value?.getBoundingClientRect().bottom ?? 0) < 80) {
+    resumeInput.value?.scrollIntoView?.({ block: 'center' })
+  }
+  fitResumeMenu()
+})
+
+function closeResumeMenu() {
+  resumeMenuOpen.value = false
+  activeResumeIndex.value = -1
+}
+function resetResumeSearch() {
+  resumeQuery.value = ''
+  closeResumeMenu()
+}
+function dismissResumeMenu(event: Event) {
+  if (event.target instanceof Node && !resumePicker.value?.contains(event.target)) closeResumeMenu()
+}
+function addResume(id: string) {
+  if (!draft.resumeIds.includes(id)) draft.resumeIds = [...draft.resumeIds, id]
+  resumeQuery.value = ''
+  activeResumeIndex.value = -1
+  resumeMenuOpen.value = true
+  resumeInput.value?.focus()
+}
+function removeResume(id: string) {
+  draft.resumeIds = draft.resumeIds.filter((value) => value !== id)
+}
+async function onResumeKeydown(event: KeyboardEvent) {
+  if (event.isComposing) return
+  if (event.key === 'Escape') {
+    if (resumeMenuOpen.value) { event.preventDefault(); event.stopPropagation() }
+    closeResumeMenu()
+  } else if (event.key === 'Tab') {
+    closeResumeMenu()
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    resumeMenuOpen.value = true
+    const count = filteredResumes.value.length
+    if (!count) return
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    activeResumeIndex.value = activeResumeIndex.value < 0
+      ? (step === 1 ? 0 : count - 1)
+      : Math.max(0, Math.min(count - 1, activeResumeIndex.value + step))
+    await nextTick()
+    document.getElementById(activeResumeId.value ?? '')?.scrollIntoView?.({ block: 'nearest' })
+  } else if (event.key === 'Enter') {
+    // 이 입력은 문항 폼 안에 있다. 활성 항목이 없어도 검색 Enter로 폼을 저장하지 않는다.
+    event.preventDefault()
+    const resume = resumeMenuOpen.value ? filteredResumes.value[activeResumeIndex.value] : undefined
+    if (resume) addResume(resume.id)
+    else resumeMenuOpen.value = true
+  }
+}
 
 async function load() {
   loading.value = true
@@ -45,11 +125,13 @@ async function load() {
 }
 
 function openNew() {
+  resetResumeSearch()
   editingId.value = ''
   Object.assign(draft, { resumeIds: resumes.value[0] ? [resumes.value[0].id] : [], question: '', answer: '' })
 }
 
 function openEdit(item: SelfIntroduction) {
+  resetResumeSearch()
   editingId.value = item.id
   Object.assign(draft, { resumeIds: [...item.resumeIds], question: item.question, answer: item.answer ?? '' })
 }
@@ -59,6 +141,7 @@ function editFromDoubleClick(event: MouseEvent, item: SelfIntroduction) {
 }
 
 function closeEditor() {
+  resetResumeSearch()
   editingId.value = null
 }
 
@@ -94,12 +177,24 @@ async function remove() {
 }
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', dismissResumeMenu)
+  document.addEventListener('focusin', dismissResumeMenu)
+  window.addEventListener('resize', fitResumeMenu)
+  window.visualViewport?.addEventListener('resize', fitResumeMenu)
+  window.visualViewport?.addEventListener('scroll', fitResumeMenu)
   try {
     resumes.value = await listResumes()
   } catch {
     resumes.value = []
   }
   await load()
+})
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', dismissResumeMenu)
+  document.removeEventListener('focusin', dismissResumeMenu)
+  window.removeEventListener('resize', fitResumeMenu)
+  window.visualViewport?.removeEventListener('resize', fitResumeMenu)
+  window.visualViewport?.removeEventListener('scroll', fitResumeMenu)
 })
 </script>
 
@@ -130,11 +225,48 @@ onMounted(async () => {
       <form class="form-grid" @submit.prevent="save">
         <fieldset class="field full resume-links">
           <legend>연결 이력서 <span class="page-count">{{ draft.resumeIds.length }}</span></legend>
-          <input v-model="resumeQuery" type="search" placeholder="이력서 이름 검색" aria-label="연결 이력서 검색" />
-          <label v-for="resume in filteredResumes" :key="resume.id" class="position-option compact-option">
-            <input v-model="draft.resumeIds" type="checkbox" :value="resume.id" />
-            <span>{{ resume.name }}</span>
-          </label>
+          <div ref="resumePicker" class="resume-link-search">
+            <div class="resume-search-control">
+              <input
+                ref="resumeInput"
+                v-model="resumeQuery"
+                type="search"
+                placeholder="이력서 이름 검색"
+                aria-label="연결 이력서 검색"
+                role="combobox"
+                aria-autocomplete="list"
+                :aria-expanded="resumeMenuOpen"
+                :aria-controls="resumeMenuOpen ? resumeListId : undefined"
+                :aria-activedescendant="activeResumeId"
+                autocomplete="off"
+                @focus="resumeMenuOpen = true"
+                @click="resumeMenuOpen = true"
+                @input="resumeMenuOpen = true"
+                @keydown="onResumeKeydown"
+              />
+              <span class="resume-search-caret" :class="{ 'is-open': resumeMenuOpen }" aria-hidden="true">▾</span>
+            </div>
+            <div v-if="resumeMenuOpen" :id="resumeListId" ref="resumeMenu" class="resume-picker" :style="{ maxHeight: `${resumeMenuMaxHeight}px` }" role="listbox" aria-label="연결할 이력서" aria-multiselectable="true">
+              <button
+                v-for="(resume, index) in filteredResumes"
+                :id="`${resumeListId}-${index}`"
+                :key="resume.id"
+                type="button"
+                class="resume-option"
+                :class="{ active: index === activeResumeIndex }"
+                role="option"
+                aria-selected="false"
+                tabindex="-1"
+                :title="resume.name"
+                @mousedown.prevent
+                @click="addResume(resume.id)"
+              ><span><strong>{{ resume.name }}</strong></span></button>
+              <p v-if="!filteredResumes.length" class="body-copy empty resume-picker__empty" role="status">{{ !resumes.length ? '연결할 이력서가 없습니다.' : resumeQuery.trim() ? '검색 결과가 없습니다.' : '추가할 이력서가 없습니다.' }}</p>
+            </div>
+          </div>
+          <div v-if="selectedResumes.length" class="selected-resumes">
+            <button v-for="resume in selectedResumes" :key="resume.id" type="button" class="chip" :aria-label="`${resume.name} 연결 해제`" :title="resume.name" @click="removeResume(resume.id)"><span>{{ resume.name }}</span> ×</button>
+          </div>
         </fieldset>
         <label class="field full">
           <span>질문</span>

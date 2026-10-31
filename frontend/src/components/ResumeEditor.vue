@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 import type { Position } from '../types/position'
 import AttachmentField from './AttachmentField.vue'
 import ResumeSection from './ResumeSection.vue'
@@ -31,6 +31,12 @@ const name = ref(props.resume.name)
 const content = ref<ResumeContent>(fillContent(props.resume.content))
 const positionIds = ref<string[]>([...props.resume.positionIds])
 const positionQuery = ref('')
+const positionPicker = ref<HTMLElement | null>(null)
+const positionInput = ref<HTMLInputElement | null>(null)
+const positionMenu = ref<HTMLElement | null>(null)
+const positionMenuOpen = ref(false)
+const activePositionIndex = ref(-1)
+const positionListId = `resume-positions-${useId()}`
 const exportOpen = ref(false)
 const attachmentIds = ref<string[]>([])
 const exportError = ref('')
@@ -39,6 +45,8 @@ watch(() => props.resume, (resume) => {
   name.value = resume.name
   content.value = fillContent(resume.content)
   positionIds.value = [...resume.positionIds]
+  positionQuery.value = ''
+  closePositionMenu()
 })
 
 /** 저장한 시점의 문서와 깊은 비교. 입력마다 새 객체를 만드니 JSON 비교가 정직하다. */
@@ -54,7 +62,15 @@ watch(dirty, (isDirty) => {
   if (isDirty) window.addEventListener('beforeunload', guard)
   else window.removeEventListener('beforeunload', guard)
 }, { immediate: true })
-onUnmounted(() => window.removeEventListener('beforeunload', guard))
+onMounted(() => {
+  document.addEventListener('pointerdown', dismissPositionMenu)
+  document.addEventListener('focusin', dismissPositionMenu)
+})
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', guard)
+  document.removeEventListener('pointerdown', dismissPositionMenu)
+  document.removeEventListener('focusin', dismissPositionMenu)
+})
 
 function setBasic(key: string, value: string) {
   content.value = { ...content.value, basic: { ...content.value.basic, [key]: value } }
@@ -77,6 +93,12 @@ const positionMatches = computed(() => {
     .filter((item) => !query || `${item.name} ${item.companyName ?? ''} ${item.postingTitle ?? ''}`.toLocaleLowerCase().includes(query))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 })
+const activePositionId = computed(() => positionMenuOpen.value && positionMatches.value[activePositionIndex.value]
+  ? `${positionListId}-${activePositionIndex.value}` : undefined)
+watch(positionMatches, () => {
+  activePositionIndex.value = -1
+  if (positionMenu.value) positionMenu.value.scrollTop = 0
+})
 const attachmentCandidates = computed(() => {
   const found: { id: string; label: string }[] = []
   if (content.value.basic.portfolioFileId) found.push({ id: content.value.basic.portfolioFileId, label: '기본정보 · 포트폴리오 파일' })
@@ -88,11 +110,44 @@ const attachmentCandidates = computed(() => {
 })
 
 function addPosition(id: string) {
-  positionIds.value = [...positionIds.value, id]
+  if (!positionIds.value.includes(id)) positionIds.value = [...positionIds.value, id]
   positionQuery.value = ''
+  activePositionIndex.value = -1
+  positionMenuOpen.value = true
+  positionInput.value?.focus()
 }
 function removePosition(id: string) {
   positionIds.value = positionIds.value.filter((value) => value !== id)
+}
+function closePositionMenu() {
+  positionMenuOpen.value = false
+  activePositionIndex.value = -1
+}
+function dismissPositionMenu(event: Event) {
+  if (event.target instanceof Node && !positionPicker.value?.contains(event.target)) closePositionMenu()
+}
+async function onPositionKeydown(event: KeyboardEvent) {
+  if (event.isComposing) return
+  if (event.key === 'Escape') {
+    if (positionMenuOpen.value) { event.preventDefault(); event.stopPropagation() }
+    closePositionMenu()
+  } else if (event.key === 'Tab') {
+    closePositionMenu()
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault()
+    positionMenuOpen.value = true
+    const count = positionMatches.value.length
+    if (!count) return
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    activePositionIndex.value = activePositionIndex.value < 0
+      ? (step === 1 ? 0 : count - 1)
+      : Math.max(0, Math.min(count - 1, activePositionIndex.value + step))
+    await nextTick()
+    document.getElementById(activePositionId.value ?? '')?.scrollIntoView?.({ block: 'nearest' })
+  } else if (event.key === 'Enter' && positionMenuOpen.value) {
+    const position = positionMatches.value[activePositionIndex.value]
+    if (position) { event.preventDefault(); addPosition(position.id) }
+  }
 }
 async function downloadSelected() {
   exportError.value = ''
@@ -146,14 +201,48 @@ async function exportPdf() {
 
     <section class="resume-section">
       <div class="resume-section__head"><h2>지원 직무 <span class="page-count">{{ positionIds.length }}</span></h2></div>
-      <label class="field full"><span>직무 검색</span><input v-model="positionQuery" placeholder="직무명, 기업명, 공고명 검색" /></label>
-      <p v-if="positions.length === 0" class="body-copy empty">연결할 모집 직무가 없습니다.</p>
-      <div v-else-if="positionMatches.length" class="position-picker">
-        <button v-for="position in positionMatches" :key="position.id" type="button" class="position-option" @click="addPosition(position.id)">
-          <span><strong>{{ position.name }}</strong><small>{{ position.companyName || '회사 미입력' }} · {{ position.postingTitle || '공고 미입력' }}</small></span>
-        </button>
+      <div ref="positionPicker" class="resume-position-search">
+        <div class="field full">
+          <label :for="`${positionListId}-search`">직무 검색</label>
+          <div class="position-search-control">
+            <input
+              :id="`${positionListId}-search`"
+              ref="positionInput"
+              v-model="positionQuery"
+              placeholder="직무명, 기업명, 공고명 검색"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="positionMenuOpen"
+              :aria-controls="positionMenuOpen ? positionListId : undefined"
+              :aria-activedescendant="activePositionId"
+              autocomplete="off"
+              @focus="positionMenuOpen = true"
+              @click="positionMenuOpen = true"
+              @input="positionMenuOpen = true"
+              @keydown="onPositionKeydown"
+            />
+            <span class="position-search-caret" :class="{ 'is-open': positionMenuOpen }" aria-hidden="true">▾</span>
+          </div>
+        </div>
+        <div v-if="positionMenuOpen" :id="positionListId" ref="positionMenu" class="position-picker" role="listbox" aria-label="연결할 모집 직무" aria-multiselectable="true">
+          <button
+            v-for="(position, index) in positionMatches"
+            :id="`${positionListId}-${index}`"
+            :key="position.id"
+            type="button"
+            class="position-option"
+            :class="{ active: index === activePositionIndex }"
+            role="option"
+            aria-selected="false"
+            tabindex="-1"
+            @mousedown.prevent
+            @click="addPosition(position.id)"
+          >
+            <span><strong>{{ position.name }}</strong><small>{{ position.companyName || '회사 미입력' }} · {{ position.postingTitle || '공고 미입력' }}</small></span>
+          </button>
+          <p v-if="!positionMatches.length" class="body-copy empty position-picker__empty" role="status">{{ !positions.length ? '연결할 모집 직무가 없습니다.' : positionQuery.trim() ? '검색 결과가 없습니다.' : '추가할 모집 직무가 없습니다.' }}</p>
+        </div>
       </div>
-      <p v-else class="body-copy empty">{{ positionQuery.trim() ? '검색 결과가 없습니다.' : '추가할 모집 직무가 없습니다.' }}</p>
       <div class="selected-positions">
         <button v-for="position in selectedPositions" :key="position.id" type="button" class="chip" :aria-label="`${position.name} 연결 해제`" @click="removePosition(position.id)">{{ position.name }} ×</button>
       </div>
