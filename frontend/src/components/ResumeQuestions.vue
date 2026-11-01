@@ -3,9 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { createSelfIntroduction, listSelfIntroductions, updateSelfIntroduction } from '../api/self-introductions'
 import type { SelfIntroduction } from '../types/self-introduction'
 
-const props = defineProps<{ resumeId: string }>()
+/**
+ * questions 는 부모가 이력서와 함께 받아 둔 첫 목록이다. 있으면 다시 부르지 않는다.
+ * 없으면(생략·null) 지금처럼 직접 부른다. 추가·연결·수정 뒤 다시 부르는 것은 언제나 여기서 한다.
+ */
+const props = defineProps<{ resumeId: string; questions?: SelfIntroduction[] | null }>()
 const emit = defineEmits<{ openIntroductions: [] }>()
-const items = ref<SelfIntroduction[]>([])
+const items = ref<SelfIntroduction[]>(props.questions ?? [])
 const matches = ref<SelfIntroduction[]>([])
 const question = ref('')
 const answer = ref('')
@@ -67,8 +71,15 @@ async function saveEdit(item: SelfIntroduction) {
   } finally { saving.value = false }
 }
 
-watch(() => props.resumeId, load)
-onMounted(load)
+/** 부모가 목록을 넘겼으면 그 왕복은 이미 끝났다. 같은 요청을 한 번 더 보내지 않는다. */
+function loadIfMissing() {
+  if (!props.questions) load()
+}
+
+// 다른 이력서로 바뀌면 부모가 새 목록과 새 id 를 함께 넘긴다. 목록이 왔으면 그걸 쓰고, 못 받았으면 직접 부른다.
+watch(() => props.questions, (value) => { if (value) items.value = value })
+watch(() => props.resumeId, loadIfMissing)
+onMounted(loadIfMissing)
 </script>
 
 <template>

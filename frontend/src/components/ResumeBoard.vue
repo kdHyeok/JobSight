@@ -10,10 +10,12 @@ import {
   updateResume,
 } from '../api/resumes'
 import { listPositions } from '../api/positions'
+import { listSelfIntroductions } from '../api/self-introductions'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ResumeEditor from './ResumeEditor.vue'
 import type { Resume, ResumePayload, ResumeSummary } from '../types/resume'
 import type { Position } from '../types/position'
+import type { SelfIntroduction } from '../types/self-introduction'
 
 /**
  * /resumes 는 카드 목록, /resumes?focus=<id> 는 그 버전의 편집기.
@@ -25,6 +27,8 @@ const emit = defineEmits<{ openResume: [id: string]; closeResume: []; openIntrod
 const resumes = ref<ResumeSummary[]>([])
 const current = ref<Resume | null>(null)
 const positions = ref<Position[]>([])
+/** 편집기를 열 때 이력서와 함께 받은 연결 문항. null 이면 문항 칸이 직접 불러온다. */
+const questions = ref<SelfIntroduction[] | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const notice = ref('')
@@ -59,9 +63,17 @@ async function loadCurrent(id: string) {
   loading.value = true
   loadError.value = ''
   try {
-    const [resume, availablePositions] = await Promise.all([getResume(id), listPositions()])
+    // 문항은 이력서 id 만 있으면 부를 수 있다. 편집기가 그려진 뒤에 부르면 왕복 하나(공개 도메인에서 약 0.3초)를
+    // 더 기다리므로 여기서 함께 보낸다. 문항 실패가 이력서 열기를 막지 않게 null 로 넘기고, 그때는 문항 칸이
+    // 스스로 다시 불러 오류를 보여 준다.
+    const [resume, availablePositions, linkedQuestions] = await Promise.all([
+      getResume(id),
+      listPositions(),
+      listSelfIntroductions('', id).catch(() => null),
+    ])
     current.value = resume
     positions.value = availablePositions
+    questions.value = linkedQuestions
   } catch (error) {
     current.value = null
     fail(error, '이력서를 불러오지 못했습니다.')
@@ -163,6 +175,7 @@ onMounted(reload)
       :saving="saving"
       :api-field-errors="formErrors"
       :positions="positions"
+      :questions="questions"
       @save="save"
       @copy="copy"
       @remove="deleteTarget = current"
