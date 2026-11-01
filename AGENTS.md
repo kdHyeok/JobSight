@@ -30,7 +30,7 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx, Docker Compos
 | 이력서(버전·섹션 JSON) | [docs/resumes.md](docs/resumes.md) |
 | 이력서 연결 직무·자기소개 문항 | [docs/self-introductions.md](docs/self-introductions.md) |
 | 이력서 증빙 파일 첨부 | [docs/attachments.md](docs/attachments.md) |
-| 경험·자소서 임베딩/그래프 검색(구상) | [docs/experience-graph-search.md](docs/experience-graph-search.md) |
+| 경험·자소서 임베딩/그래프 검색, 이력서 조회 지연 | [모델·실측](docs/experience-graph-search.md) · [설계(미구현)](docs/02-design/features/experience-graph.design.md) |
 | 관리자 콘솔·계정별 등록 수 | [docs/admin.md](docs/admin.md) |
 | 관리자 요청·피드백 | [docs/requests.md](docs/requests.md) |
 | MCP·OAuth 위임·플러그인 | [docs/mcp-plugin.md](docs/mcp-plugin.md) |
