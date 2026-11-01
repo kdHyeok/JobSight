@@ -107,13 +107,18 @@ async function create() {
 
 async function save(payload: ResumePayload) {
   if (!current.value) return
+  const seq = loadSeq
   saving.value = true
   formErrors.value = {}
   notice.value = ''
   try {
-    current.value = await updateResume(current.value.id, payload)
+    const saved = await updateResume(current.value.id, payload)
+    // 저장 중에 다른 이력서로 옮겼으면 그 화면을 덮지 않는다. 저장은 서버에서 끝났고, 돌아오면 다시 불러온다.
+    if (seq !== loadSeq) return
+    current.value = saved
     notice.value = '저장했습니다.'
   } catch (error) {
+    if (seq !== loadSeq) return
     fail(error, '저장 중 오류가 발생했습니다.')
   } finally {
     saving.value = false
