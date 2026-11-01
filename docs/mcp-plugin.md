@@ -2,12 +2,32 @@
 
 ## 목적과 진입점
 
+새 도메인 `job.donyk.link` 전환은 [계획](01-plan/features/custom-domain-oauth.plan.md)과
+[설계](02-design/features/custom-domain-oauth.design.md)를 따른다. 공개 MCP URL은 `https://job.donyk.link/mcp`다.
+GitHub 플러그인 0.3.1은 이 URL을 사용한다. 구 주소의 플러그인 연결은 새 주소로 재인증해야 한다.
+
+### 저장소 주소 변경 (2026-10-23)
+
+Git 저장소의 정식 주소는 `https://github.com/kdHyeok/JobSight`다. 기존 clone의 origin과 플러그인 가이드의
+설치·복사 명령, clone·설치 문서를 이 주소에 맞춘다. 마켓플레이스와 플러그인 식별자는 `jobsight`로 유지한다.
+MCP·Google OAuth의 공개 origin과 callback, Docker 프로젝트·볼륨·기존 로컬 디렉터리 이름은 바꾸지 않는다.
+이전 주소로 등록한 클라이언트에서 source 충돌이 나면 `codex plugin marketplace remove jobsight` 후
+`codex plugin marketplace add kdHyeok/JobSight --ref main`으로 source를 재등록한다.
+검증은 새 원격 main 조회, 프런트 타입 검사·테스트·빌드, `bash scripts/smoke.sh`로 한다.
+소스 안내 변경을 운영 화면에 노출하려면 별도 프런트 재배포가 필요하다.
+
 `plugins/jobsight`를 ChatGPT/Codex용 플러그인으로 패키징한다. MCP는 기존 Spring 애플리케이션의
 `/mcp`에서 JSON 응답형 Streamable HTTP로 실행하고, 기존 CRUD 컨트롤러·서비스와 DTO 검증을 재사용한다.
 도구 설명은 기존 `@Operation`, 입력 스키마는 실제 요청 DTO에서 만든다. `SKILL.md`는 사이트 조작과 데이터 관계를 설명한다.
 
 ## 인증과 불변 조건
 
+- Codex native CIMD는 `https://chatgpt.com/oauth/codex/<id>/client.json`만 추가 허용한다.
+  공개 문서의 `application_type=native`, 해당 ID의 `http://127.0.0.1/callback/<id>`와
+  `http://localhost/callback/<id>` 두 콜백을 검증한다. loopback IP의 임시 포트는 Spring 기본 검증에 맡기며
+  다른 호스트·경로·쿼리로 허용 범위를 넓히지 않는다. PKCE와 사용자 동의는 그대로 강제한다.
+  설치만으로 인증되지 않으며 `codex mcp login jobsight --oauth-client-registration cimd`가 필요하다.
+  플러그인 MCP URL은 현재 공개 설정과 같은 `https://job.donyk.link/mcp`를 사용한다.
 - 사용자 신원은 기존 Google OIDC만 사용한다. MCP OAuth는 그 사용자가 외부 클라이언트에 주는 위임이다.
 - Spring Authorization Server의 authorization code + S256 PKCE + 동의 화면을 사용한다.
 - ChatGPT CIMD 문서 URL을 client_id로 지원한다. HTTPS의 고정 chatgpt.com 문서 경로만 조회하고 리다이렉트·임의 호스트·과대 응답은 거부한다. 문서의 client_id, callback, none 인증과 authorization_code를 검증하며 PKCE·동의를 강제한다.
@@ -16,6 +36,9 @@
 - 매 MCP 요청에서 계정 활성 상태·현재 역할을 DB에서 다시 확인한다. 도구는 `jobsight.read`,
   `jobsight.write`, 관리자 작업은 추가로 `jobsight.admin` 및 실제 ADMIN 역할을 요구한다.
 - resource는 `PUBLIC_BASE_URL + /mcp` 하나다. OAuth 토큰은 이 서버에서만 유효하며 Google 토큰을 전달하지 않는다.
+- code 교환은 저장된 인가 요청의 resource, refresh는 저장된 access token metadata의 단일 aud를 검사한다.
+  현재 resource와 다르거나 누락된 구 연결은 `invalid_grant`로 거부한다. 만료된 access token의 정상 refresh는 허용하며,
+  도메인 전환을 이유로 기존 승인·동의 행이나 업무 데이터를 일괄 삭제하지 않는다.
 - OAuth 승인·토큰은 Spring JDBC 저장소로 PostgreSQL에 보관한다. access token은 1시간,
   회전형 refresh token은 90일이며 서버 재시작 후에도 연결을 유지한다. 계정 정지·삭제 시에는 남은 토큰 기간과 무관하게 MCP 요청을 거부한다.
 - OAuth 승인 행에는 Google `AppOidcUser` 객체를 직렬화하지 않는다. 인가 요청 동안에는 사용자 ID와 권한만
@@ -37,6 +60,11 @@ OAuth 메타데이터의 issuer, 인증/토큰 URL, S256 선언과 MCP resource 
 
 ## 함정
 
+사이트에서 Google 로그인한 뒤 브라우저로 `/mcp`를 직접 열어도 401이 정상이다. MCP는 세션 쿠키가 아닌
+클라이언트가 OAuth로 받은 Bearer 토큰을 요구한다. 직접 접속 결과를 플러그인 연결 실패로 판정하지 않는다.
+Google `redirect_uri_mismatch`가 표시되면 시작 응답의 `Location`에서 실제 callback을 확인하고 같은 Google
+client ID의 Console 등록값을 대조한다. Google 등록값만 수정했다면 서버 재배포는 필요 없다.
+
 로컬 loopback·tailnet 전용 주소는 ChatGPT 클라우드에서 바로 접근할 수 없다. 공개 HTTPS 배포 또는
 클라이언트가 지원하는 사설 네트워크 연결이 필요하다. 등록 가능한 패키지 작성과 공개 배포/스토어 승인은 별개다.
 공고 수정의 positions/steps, 직무 참고 연결은 전체 교체다. 변경 전에 조회하고 유지할 값을 포함해야 한다.
@@ -57,7 +85,7 @@ ChatGPT 연결, Codex GitHub 설치·업데이트 명령만 제공한다. CIMD·
 표시 URL은 `/plugin/config`가 PUBLIC_BASE_URL로 내려주며 브라우저 Host로 조립하지 않는다.
 SKILL.md 정본은 plugins/jobsight에 하나만 두고 Gradle 리소스에 포함한다. Docker named context로 공개 플러그인 파일만 전달한다.
 MCP initialize.instructions와 resources/read에서도 동일 지침을 제공한다. 이는 클라이언트의 스킬 설치를 보장하는 기능은 아니다.
-Codex는 GitHub marketplace에서 설치한다. `.agents/plugins/marketplace.json`이 `plugins/jobsight`의 MCP 설정과 스킬을 가리킨다. 설치 명령은 `codex plugin marketplace add kdHyeok/jobsite-v006 --ref main` 다음 `codex plugin add jobsight@jobsight`다. 최신 main 반영은 `codex plugin marketplace upgrade jobsight` 후 다시 plugin add 한다. 이 변경을 push한 이후 사용 가능하며 비공개 저장소는 Git 읽기 권한이 필요하다. ZIP 엔드포인트는 호환용으로만 유지하고 사이트에서는 GitHub 설치를 안내한다. 설치와 별개로 OAuth 동의는 필요하다.
+Codex는 GitHub marketplace에서 설치한다. `.agents/plugins/marketplace.json`이 `plugins/jobsight`의 MCP 설정과 스킬을 가리킨다. 설치 명령은 `codex plugin marketplace add kdHyeok/JobSight --ref main` 다음 `codex plugin add jobsight@jobsight`다. 최신 main 반영은 `codex plugin marketplace upgrade jobsight` 후 다시 plugin add 한다. 이 변경을 push한 이후 사용 가능하며 비공개 저장소는 Git 읽기 권한이 필요하다. ZIP 엔드포인트는 호환용으로만 유지하고 사이트에서는 GitHub 설치를 안내한다. 설치와 별개로 OAuth 동의는 필요하다.
 
 검증: marketplace 식별자·플러그인 구조 검사 및 프런트 타입 검사·43개 테스트 통과. 실제 GitHub에서 설치와 Codex OAuth 연결은 push 전이므로 미검증이다. 메뉴 권한·닫기·가이드 전환과 설치 명령 복사는 프런트 테스트에 포함한다.
 
@@ -125,6 +153,18 @@ Spring 프록시가 적용된 운영 빈의 도구 설명도 다시 읽을 수 �
 - 실제 Google 로그인 왕복은 내장 브라우저의 로컬 연결 오류로 검증하지 못했다.
   ChatGPT 연결은 공개 HTTPS 주소와 정확한 callback 설정 전이므로 검증하지 못했다.
 
+### 새 도메인 배포 검증 (0.3.1, 2026-10-19)
+
+- `8222ede`를 새 공개 origin에 배포하고 main에 push했다. config·metadata·challenge·다운로드 ZIP·GitHub 패키지 주소가 일치한다.
+- 컨테이너에서 백엔드 컴파일·전체 테스트 74개, 프런트 타입 검사·79개 테스트·빌드가 종료코드 0으로 통과했다.
+- 새 도메인 스모크 59개, 구 도메인 정책 검사 26개 PASS. 구 code/refresh의 audience 승계를 거부한다.
+- Google Console callback 재등록 후 사용자의 실제 사이트 로그인 성공과 서버 callback·홈 복귀를 확인했다.
+- 새 ChatGPT/Codex 연결의 권한 동의·실제 도구 조회·자동 refresh는 미검증이다. 기존 연결을 성공으로 간주하지 않는다.
+- Codex Git 마켓플레이스 사용자는 `codex plugin marketplace upgrade jobsight` → `codex plugin add jobsight@jobsight`
+  → 앱 재시작 → 새 OAuth 동의를 진행한다. 마켓플레이스를 삭제·재등록하거나 저장소를 public으로 바꿀 필요는 없다.
+
+전체 결과·미검증 항목: [배포 보고](04-report/custom-domain-oauth.report.md).
+
 ### 원격 main 통합 검증
 
 - `4586ba9`의 공개 도메인 배포 설정과 기존 UI 수정을 보존하면서 MCP 변경을 통합했다.
@@ -170,6 +210,30 @@ Spring 프록시가 적용된 운영 빈의 도구 설명도 다시 읽을 수 �
 - 수정 후 PostgreSQL 통합 테스트는 최초 access token과 refresh로 회전된 access token 양쪽에서 실제
   `tools/list` 및 `self_intro_list` 제목을 검증한다. 백엔드 전체 61개와 공개 스모크 45개가 통과했고,
   배포 서버의 기존 ChatGPT access token으로 공개 `/mcp`를 직접 호출해 46개 도구와 해당 제목을 확인했다.
+
+### Codex native OAuth 연결 복구 검증 (2026-10-19)
+
+- Codex 로그의 `notLoggedIn`으로 도구 미노출을 확인했고, 실제 CIMD 로그인은 기존 경로 제한으로 400을 반환했다.
+- 공식 Codex CIMD 문서의 native 콜백을 검증하도록 수정하고 공개 서버 백엔드에 배포했다.
+  이전 이미지는 `jobsite-v006-backend:pre-codex-oauth-20261019`로 보관했다.
+- 서버와 분리한 임시 소스에서 Java 21 컨테이너의 `compileJava compileTestJava test --tests '*Mcp*Test'`:
+  종료코드 0, `BUILD SUCCESSFUL`, 25개 통과(실패·오류·skip 0).
+  Codex 임시 loopback 포트의 인가 코드 교환과 MCP initialize, 잘못된 문서 콜백 거부를 포함한다.
+- 실제 Codex OAuth 로그인·사용자 동의 완료 후 이 채팅에 도구 46개가 노출되었다.
+  `account_get`의 authenticated=true/ADMIN과 `company_list`의 정상 배열 17개를 확인했다.
+- 배포 후 공개 `scripts/smoke.sh https://job.donyk.link`: 45개 PASS, 종료코드 0. 컨테이너 3개 healthy.
+- 업무 데이터 쓰기와 삭제는 검증하지 않았다.
+
+### 실제 Codex 자동 토큰 갱신 검증 (2026-10-19)
+
+- 현재 Codex OAuth 승인 한 건의 access token 만료 시각만 서버에서 조기 만료시켰다.
+  원래 발급·만료 시각은 토큰 원문 없이 서버 임시 파일에 보존했고 다른 연결은 변경하지 않았다.
+- 재로그인이나 수동 토큰 교환 없이 이 채팅의 `account_get`을 호출해 authenticated=true/ADMIN을 확인했다.
+- DB에서 access token과 refresh token 발급 시각이 모두 한국 시각 15:34:22에서 15:48:48로 갱신됐음을 확인했다.
+  새 access token 만료는 16:48:48, refresh token 만료는 2027-01-17 15:48:48이며 read/write scope는 유지됐다.
+- 이어서 `company_list`가 오류 없이 기업 17개를 반환했다. 토큰 원문은 조회·출력·복사하지 않았다.
+- 이 검증은 서버의 만료 응답을 받은 실제 Codex 클라이언트의 자동 갱신이다.
+  1시간 자연 만료를 기다리는 경우와 앱 재시작 후 갱신은 별도로 검증하지 않았다.
 
 ## 함정 — scope는 세 곳에서 광고된다
 

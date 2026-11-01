@@ -2,7 +2,7 @@
 # 배포·설정 변경 뒤 반드시 통과해야 하는 최소 검증.
 #
 #   bash scripts/smoke.sh                 # .env 의 PUBLIC_BASE_URL 사용
-#   bash scripts/smoke.sh https://job.donhse.duckdns.org
+#   bash scripts/smoke.sh https://job.donyk.link
 #
 # 이 스크립트가 잡는 것은 이 프로젝트에서 실제로 반복됐던 실패들이다:
 #   - nginx 가 포트 없는 절대 URL 로 리다이렉트 (redirect_uri_mismatch, /admin 302)
@@ -14,6 +14,8 @@
 
 set -u
 cd "$(dirname "$0")/.."
+
+curl() { command curl --connect-timeout 5 --max-time 15 "$@"; }
 
 BASE="${1:-}"
 if [ -z "$BASE" ] && [ -f .env ]; then
@@ -54,6 +56,13 @@ case "$mcp_challenge" in
   *"jobsight.read jobsight.write"*) check "MCP challenge advertises write" "read+write" "read+write" ;;
   *) check "MCP challenge advertises write" "read+write" "${mcp_challenge:-missing}" ;;
 esac
+case "$mcp_challenge" in
+  *"resource_metadata=\"$BASE/.well-known/oauth-protected-resource\""*) check "MCP challenge canonical metadata URL" "match" "match" ;;
+  *) check "MCP challenge canonical metadata URL" "match" "missing" ;;
+esac
+check "MCP same-origin Bearer requirement" "401" "$(code -X POST -H "Origin: $BASE" -H 'Content-Type: application/json' -d '{}' "$BASE/mcp")"
+check "MCP foreign Origin rejected" "403" "$(code -X POST -H 'Origin: https://untrusted.example' -H 'Content-Type: application/json' -d '{}' "$BASE/mcp")"
+check "GET path-specific resource metadata" "200" "$(code "$BASE/.well-known/oauth-protected-resource/mcp")"
 check "GET OAuth server metadata"            "200" "$(code "$BASE/.well-known/oauth-authorization-server")"
 # 미인증 authorize 는 Google 로그인으로 보낸다. Tomcat 이 절대 URL 로 바꾸면 앞단 스킴을
 # 잘못 잡아 http:// 로 나가고, HSTS 를 모르는 OAuth 클라이언트가 평문 홉에서 끊긴다.
@@ -78,14 +87,35 @@ done
 check "OAuth PKCE S256 advertised" "S256" "$(printf '%s' "$oauth_metadata" | grep -o '"code_challenge_methods_supported":\[[^]]*\]' | grep -o 'S256')"
 check "OAuth refresh_token advertised" "refresh_token" "$(printf '%s' "$oauth_metadata" | grep -o '"grant_types_supported":\[[^]]*\]' | grep -o 'refresh_token')"
 check "OAuth CIMD discovery" "true" "$(printf '%s' "$oauth_metadata" | grep -o '"client_id_metadata_document_supported":true' | cut -d: -f2)"
+case "$oauth_metadata" in
+  *'"token_endpoint_auth_methods_supported":["none"]'*) check "OAuth public client auth" "none" "none" ;;
+  *) check "OAuth public client auth" "none" "missing" ;;
+esac
 check "GET plugin guide" "200" "$(code "$BASE/plugin")"
 check "GET plugin config" "200" "$(code "$BASE/plugin/config")"
+plugin_config="$(curl -fsS "$BASE/plugin/config" | tr -d '\r\n\t ')"
+for field in "\"mcpUrl\":\"$BASE/mcp\"" "\"authorizationUrl\":\"$BASE/oauth2/authorize\"" "\"tokenUrl\":\"$BASE/oauth2/token\""; do
+  case "$plugin_config" in
+    *"$field"*) check "Plugin $field" "present" "present" ;;
+    *) check "Plugin $field" "present" "missing" ;;
+  esac
+done
 check "GET plugin skill" "200" "$(code "$BASE/plugin/skill")"
 check "GET plugin package" "200" "$(code "$BASE/plugin/download")"
 case "$resource_metadata" in
   *"\"resource\":\"$BASE/mcp\""*) check "MCP resource == BASE/mcp" "match" "match" ;;
   *) check "MCP resource == BASE/mcp" "match" "missing" ;;
 esac
+case "$resource_metadata" in
+  *"\"authorization_servers\":[\"$BASE\"]"*) check "MCP authorization server == BASE" "match" "match" ;;
+  *) check "MCP authorization server == BASE" "match" "missing" ;;
+esac
+for path in '/.well-known/oauth-authorization-server' '/.well-known/oauth-protected-resource' '/plugin/config'; do
+  case "$(header "$BASE$path" Content-Type)" in
+    application/json*) check "JSON response $path" "JSON" "JSON" ;;
+    *) check "JSON response $path" "JSON" "missing" ;;
+  esac
+done
 check "GET /api/companies"                  "401"  "$(code "$BASE/api/companies")"
 check "GET /api/companies/{id}/contents"    "401"  "$(code "$BASE/api/companies/00000000-0000-0000-0000-000000000000/contents")"
 check "GET /api/postings"                   "401"  "$(code "$BASE/api/postings")"
@@ -130,6 +160,16 @@ if [ "$google_enabled" = "true" ]; then
     *SameSite=Lax*) check "  JSESSIONID SameSite" "Lax" "Lax" ;;
     *SameSite=Strict*) check "  JSESSIONID SameSite" "Lax" "Strict" ;;
     *) check "  JSESSIONID SameSite" "Lax" "(없음)" ;;
+  esac
+  case "$cookies" in
+    *[Dd][Oo][Mm][Aa][Ii][Nn]=*) check "  JSESSIONID host-only" "yes" "no" ;;
+    *) check "  JSESSIONID host-only" "yes" "yes" ;;
+  esac
+  case "$BASE" in https://*)
+    case "$cookies" in
+      *Secure*) check "  JSESSIONID Secure (HTTPS)" "yes" "yes" ;;
+      *) check "  JSESSIONID Secure (HTTPS)" "yes" "no" ;;
+    esac ;;
   esac
 else
   printf '  skip  %-48s %s\n' "Google 미설정 (login-options.googleEnabled=false)" "-"

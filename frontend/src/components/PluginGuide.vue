@@ -8,7 +8,7 @@ const loading = ref(false)
 const error = ref('')
 const notice = ref('')
 const commandNotice = ref('')
-const installCommand = 'codex plugin marketplace add kdHyeok/jobsite-v006 --ref main\ncodex plugin add jobsight@jobsight'
+const installCommand = 'codex plugin marketplace add kdHyeok/JobSight --ref main\ncodex plugin add jobsight@jobsight'
 const updateCommand = 'codex plugin marketplace upgrade jobsight\ncodex plugin add jobsight@jobsight'
 async function copyCommand(command: string) {
   try { await navigator.clipboard.writeText(command); commandNotice.value = '명령을 복사했습니다.' }
@@ -56,6 +56,7 @@ onMounted(load)
     </section>
     <section class="guide-card" aria-labelledby="guide-oauth">
       <h2 id="guide-oauth">2. ChatGPT에서 OAuth 연결</h2>
+      <p>이전 서비스 주소로 연결했다면 위 MCP URL로 새 연결을 만들고 다시 인증해 주세요. 새 연결이 동작하면 이전 연결을 제거할 수 있습니다.</p>
       <ol>
         <li>ChatGPT 설정에서 개발자 모드를 켜고 앱/플러그인 연결 추가를 엽니다.</li>
         <li>이름은 JobSight, MCP 서버 URL은 복사한 주소를 입력합니다.</li>

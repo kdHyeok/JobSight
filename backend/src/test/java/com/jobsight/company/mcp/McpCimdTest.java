@@ -12,6 +12,28 @@ import static org.assertj.core.api.Assertions.*;
 class McpCimdTest {
     static final String CLIENT = "https://chatgpt.com/oauth/SXflabHme2Pl/client.json";
     static final String CALLBACK = "https://chatgpt.com/connector/oauth/SXflabHme2Pl";
+    static final String CODEX = "https://chatgpt.com/oauth/codex/dIUUlcNtfXHU/client.json";
+    static Map<String, Object> codexDocument() {
+        var doc = document();
+        doc.put("client_id", CODEX);
+        doc.put("application_type", "native");
+        doc.put("redirect_uris", List.of("http://127.0.0.1/callback/dIUUlcNtfXHU", "http://localhost/callback/dIUUlcNtfXHU"));
+        return doc;
+    }
+    @Test void resolvesCodexAndRejectsUntrustedCallbacks() {
+        var doc = codexDocument();
+        var client = new ChatGptClients(manual(), url -> doc, Clock.systemUTC()).findByClientId(CODEX);
+        assertThat(client).isNotNull();
+        assertThat(client.getClientSettings().isRequireProofKey()).isTrue();
+        assertThat(client.getClientSettings().isRequireAuthorizationConsent()).isTrue();
+        for (String callback : List.of("http://evil.test/callback/dIUUlcNtfXHU", "http://127.0.0.1/callback/other",
+                "http://127.0.0.1/callback/dIUUlcNtfXHU?next=evil", "http://127.0.0.1:1234/callback/dIUUlcNtfXHU")) {
+            doc.put("redirect_uris", List.of(callback, "http://localhost/callback/dIUUlcNtfXHU"));
+            assertThat(new ChatGptClients(manual(), url -> doc, Clock.systemUTC()).findByClientId(CODEX)).isNull();
+        }
+        doc.putAll(codexDocument()); doc.put("application_type", "web");
+        assertThat(new ChatGptClients(manual(), url -> doc, Clock.systemUTC()).findByClientId(CODEX)).isNull();
+    }
     static RegisteredClient manual() {
         return RegisteredClient.withId("manual").clientId("manual")
                 .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)

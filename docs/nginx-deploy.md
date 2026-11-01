@@ -1,5 +1,9 @@
 # nginx · Compose · 배포
 
+`job.donyk.link` 전환의 [계획](01-plan/features/custom-domain-oauth.plan.md)·
+[설계](02-design/features/custom-domain-oauth.design.md)를 따른다. 구 주소용 설정 정본은
+`deploy/nginx/40-job-legacy.conf`이며 외부 프록시의 `conf.d/40-job.conf`에 설치한다.
+
 ## nginx (`frontend/nginx.conf`)
 
 컨테이너 안에서 **80** 을 듣고 밖에서는 **8088**(로컬 직결) 또는 **443**(공개 도메인) 으로 보인다. 이 차이가 이 프로젝트 버그의 절반이었다.
@@ -34,14 +38,14 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 이 저장소 밖에 있다. 별도 compose 프로젝트다.
 
 ```
-브라우저 → https://job.donhse.duckdns.org        (호스트 443, 192.168.0.211)
+브라우저 → https://job.donyk.link                (호스트 443, 192.168.0.211)
         → reverse_proxy 컨테이너  nginx:1.28-alpine, listen 8443 ssl
-           /home/quincy/HDD/apps/reverse-proxy/conf.d/40-job.conf
+           /home/quincy/HDD/apps/reverse-proxy/conf.d/41-job-donyk.conf
         → jobsite-v006-frontend-1:80             jobsite-v006_app 네트워크, 컨테이너명 직결
         → backend:8080
 ```
 
-- TLS 는 Let's Encrypt `donhse.duckdns.org` 인증서의 SAN 으로 `job.` 를 덮는다. 종단은 프록시가 하고 이 저장소는 평문 80 만 다룬다.
+- TLS는 Let's Encrypt `donyk.link` 와일드카드 인증서로 덮는다. 구 도메인 인증서는 구 vhost와 ACME 갱신에 유지한다. 종단은 프록시가 하고 이 저장소는 평문 80만 다룬다.
 - 프록시가 `X-Forwarded-Proto https` 를 고정으로 넣는다. Spring 은 `forward-headers-strategy: framework` 로 이를 받아 secure 판정에 쓴다. `redirect_uri` 는 여기에 의존하지 않고 `PUBLIC_BASE_URL` 로 조립한다. 내부 nginx 가 이 값을 덮어쓰지 않아야 한다 — 덮어쓰면 authorize 진입점의 `Location` 이 평문으로 나간다.
 - 프록시가 `proxy_set_header Host $host` 를 쓴다. 공개 포트가 기본 443 이라 지금은 포트 누락이 없다. **비표준 포트로 옮기면 그 순간 `$host` 함정에 걸린다** — 그때는 `$http_host` 로 바꾼다.
 - upstream 을 변수(`set $job_up …`)로 두고 `resolver 127.0.0.11` 로 런타임 재해석한다. 이게 없으면 컨테이너를 재생성한 뒤 프록시가 죽은 IP 를 계속 잡는다.
@@ -54,10 +58,14 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 
 CI/CD 파이프라인은 없다. 서버에 SSH 로 들어가 `git pull` 하고 다시 올린다.
 
+정식 저장소는 `https://github.com/kdHyeok/JobSight`다. 기존 clone은
+`git remote set-url origin https://github.com/kdHyeok/JobSight.git`으로 원격만 바꾼다.
+아래 로컬 디렉터리·Compose 프로젝트·볼륨 이름은 저장소 이름 변경과 무관하게 유지한다.
+
 ### 서버 준비 (1회)
 
 ```bash
-git clone https://github.com/kdHyeok/jobsite-v006.git ~/jobsite-v006
+git clone https://github.com/kdHyeok/JobSight.git ~/jobsite-v006
 cd ~/jobsite-v006
 cp .env.example .env
 mkdir -p .secrets && chmod 700 .secrets
@@ -69,7 +77,7 @@ chmod 644 .secrets/*
 `.env` 를 공개 도메인 값으로 채운다. `.env` 와 `.secrets/` 는 `.gitignore` 대상이라 `git pull` 이 덮어쓰지 않는다.
 
 ```
-PUBLIC_BASE_URL=https://job.donhse.duckdns.org
+PUBLIC_BASE_URL=https://job.donyk.link
 SESSION_COOKIE_SECURE=true
 APP_ADMIN_EMAIL=<본인 Gmail>
 GOOGLE_CLIENT_ID=<클라이언트 ID>
@@ -78,6 +86,11 @@ GOOGLE_CLIENT_ID=<클라이언트 ID>
 Google Cloud Console 의 Authorized redirect URI 에 `{PUBLIC_BASE_URL}/login/oauth2/code/google` 을 추가한다. 로컬용(`http://127.0.0.1:8088/…`)과 별개 항목이다.
 
 새 도메인을 붙이려면 이 저장소가 아니라 프록시 스택의 `conf.d/` 에 vhost 를 추가하고 그 스택을 reload 한다.
+
+구 주소는 알려진 화면 GET/HEAD만 새 고정 origin으로 302 이동하고 query는 모두 버린다. Google callback도
+code/state를 전달하지 않고 `/?authError=DOMAIN_CHANGED`로 보낸다. 구 `/mcp`는 새 metadata challenge로 401,
+OAuth 프로토콜 경로는 400 `invalid_target`, 나머지 API·변경 요청은 410이다. metadata GET은 새 canonical JSON을 제공한다.
+Bearer·POST body·세션 쿠키를 새 도메인으로 프록시/리다이렉트하지 않는다. `/health`와 HTTP ACME 갱신은 유지한다.
 
 ### 매 배포
 
@@ -91,6 +104,25 @@ bash scripts/smoke.sh          # PASS 여야 배포 완료
 Windows 개발 환경에서는 `scripts/start.ps1`가 고정 Compose 프로젝트를 다른 worktree가 실행 중인지 먼저 확인한다. `-Takeover`는 컨테이너만 현재 작업공간 설정으로 재생성하고 DB 볼륨은 유지한다.
 
 `smoke.sh` 는 `.env` 의 `PUBLIC_BASE_URL` 을 읽는다. 출력 첫 줄이 공개 도메인인지 확인한다.
+기존 수동 OAuth callback을 유지하는 서버는 `-f compose.yaml -f compose.mcp.yaml`을 함께 사용한다.
+base URL을 바꿀 때는 구 code/refresh 승계를 막는 코드도 함께 배포하고, 가이드·ZIP·GitHub 플러그인 URL을 대조한다.
+
+### 2026-10-31 드롭다운 배포 검증
+
+- 변경 커밋: `98b47b8` (`main` push 완료). 이력서 지원 직무·자기소개 연결 이력서의 검색 드롭다운과 관련 테스트·문서만 포함한다.
+- 컨테이너에서 프런트 타입 검사·전체 테스트 95개·빌드 종료코드 0. 배포용 `docker compose -f compose.yaml -f compose.mcp.yaml build frontend`도 종료코드 0이다.
+- 기존 프런트 실행 이미지를 `jobsite-v006-frontend:pre-dropdown-20261031-98b47b8`로 보관한 뒤 아래 명령으로 프런트만 교체했다. 백엔드·DB는 컨테이너 ID·이미지·시작 시각이 모두 유지됐으며, 세 컨테이너 모두 healthy다.
+
+```bash
+docker compose -f compose.yaml -f compose.mcp.yaml up -d --no-deps --no-build --wait --wait-timeout 120 frontend
+bash scripts/smoke.sh https://job.donyk.link
+```
+
+- 배포 후 공개 스모크 59개 PASS(종료코드 0). `/`, `/resumes`, `/introductions`의 HTML이 새 자산을 참조하며 공개 JS(`index-KGzONS1k.js`)·CSS(`index-DQZz7-Em.css`)의 SHA256이 실행 컨테이너 파일과 일치한다.
+- 공개 사이트의 실제 JS·CSS를 Chrome에서 실행하고 API만 가짜 응답으로 대체해 두 드롭다운을 검증했다. 항목 40개·휠 스크롤·끝 항목 선택·검색·연속 선택·키보드·닫기·저장 payload·390px 모바일 배치가 통과했다. 자기소개의 검색 Enter 자동 저장 방지와 긴 이름 칩도 확인했다.
+- 실제 계정의 데이터 쓰기와 Google 로그인 왕복은 이번 배포에서 다시 수행하지 않았다. OAuth 설정·백엔드·DB·외부 프록시 설정은 변경하지 않았다.
+
+이 프런트 배포만 되돌릴 때는 보관한 이미지를 `docker tag jobsite-v006-frontend:pre-dropdown-20261031-98b47b8 jobsite-v006-frontend:latest`로 지정하고 위 `up`·스모크 명령을 다시 실행한다. `--no-build`를 유지해야 보관한 이미지가 소스 빌드로 덮어써지지 않는다.
 
 ### 롤백
 

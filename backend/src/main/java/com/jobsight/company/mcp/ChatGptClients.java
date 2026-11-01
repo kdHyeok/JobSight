@@ -34,7 +34,7 @@ final class ChatGptClients implements RegisteredClientRepository {
         return client != null ? client : resolve(id);
     }
     static boolean allowed(String id) {
-        return id != null && id.matches("https://chatgpt\\.com/oauth/(?:[A-Za-z0-9_-]{1,128}/)?client\\.json");
+        return id != null && id.matches("https://chatgpt\\.com/oauth/(?:(?:codex/)?[A-Za-z0-9_-]{1,128}/)?client\\.json");
     }
     // ponytail: serialized cache misses, 128 clients; use bounded concurrent loading if traffic requires it.
     private synchronized RegisteredClient resolve(String id) {
@@ -54,13 +54,21 @@ final class ChatGptClients implements RegisteredClientRepository {
                     || !supportedGrants.contains("refresh_token")
                     || !(responses instanceof List<?> supportedResponses) || !supportedResponses.contains("code")) return null;
             String prefix = "https://chatgpt.com/oauth/";
-            String callback = id.equals(prefix + "client.json") ? "https://chatgpt.com/connector_platform_oauth_redirect"
-                    : "https://chatgpt.com/connector/oauth/" + id.substring(prefix.length(), id.length() - "/client.json".length());
-            if (!List.of(callback).equals(doc.get("redirect_uris"))) return null;
+            List<String> callbacks;
+            if (id.startsWith(prefix + "codex/")) {
+                String key = id.substring((prefix + "codex/").length(), id.length() - "/client.json".length());
+                callbacks = List.of("http://127.0.0.1/callback/" + key, "http://localhost/callback/" + key);
+                if (!"native".equals(doc.get("application_type"))) return null;
+            } else {
+                callbacks = List.of(id.equals(prefix + "client.json") ? "https://chatgpt.com/connector_platform_oauth_redirect"
+                        : "https://chatgpt.com/connector/oauth/" + id.substring(prefix.length(), id.length() - "/client.json".length()));
+            }
+            if (!(doc.get("redirect_uris") instanceof List<?> redirects) || redirects.size() != callbacks.size()
+                    || !redirects.containsAll(callbacks)) return null;
             var client = RegisteredClient.withId(id).clientId(id).clientName("ChatGPT · JobSight")
                     .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
                     .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                    .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN).redirectUri(callback)
+                    .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN).redirectUris(uris -> uris.addAll(callbacks))
                     .clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(true).build())
                     .tokenSettings(McpOAuthConfig.tokenSettings());
             McpOAuthConfig.SCOPES.forEach(client::scope);

@@ -152,8 +152,14 @@ class McpOAuthTest {
     }
 
     @Test void cimdClientCompletesSpringPkceFlow() throws Exception {
-        var resolver = new ChatGptClients(McpCimdTest.manual(), url -> McpCimdTest.document(), java.time.Clock.systemUTC());
-        var client = resolver.findByClientId(McpCimdTest.CLIENT);
+        cimdPkceFlow(McpCimdTest.CLIENT, McpCimdTest.CALLBACK, McpCimdTest.document());
+    }
+    @Test void codexClientCompletesPkceFlowWithEphemeralLoopbackPort() throws Exception {
+        cimdPkceFlow(McpCimdTest.CODEX, "http://127.0.0.1:62861/callback/dIUUlcNtfXHU", McpCimdTest.codexDocument());
+    }
+    private void cimdPkceFlow(String clientId, String callback, Map<String, Object> document) throws Exception {
+        var resolver = new ChatGptClients(McpCimdTest.manual(), url -> document, java.time.Clock.systemUTC());
+        var client = resolver.findByClientId(clientId);
         clients.save(client); // verified remote document fixture; production resolves via the same repository contract
         consents.save(OAuth2AuthorizationConsent.withId(client.getId(), account.getId().toString())
                 .scope(McpOAuthConfig.READ).build());
@@ -161,15 +167,15 @@ class McpOAuthTest {
         String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
                 MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
         var response = mvc.perform(get(ApiPaths.MCP_AUTHORIZE).session(session())
-                .queryParam("response_type", "code").queryParam("client_id", McpCimdTest.CLIENT)
-                .queryParam("redirect_uri", McpCimdTest.CALLBACK).queryParam("scope", McpOAuthConfig.READ)
+                .queryParam("response_type", "code").queryParam("client_id", clientId)
+                .queryParam("redirect_uri", callback).queryParam("scope", McpOAuthConfig.READ)
                 .queryParam("state", "cimd-test").queryParam("resource", RESOURCE)
                 .queryParam("code_challenge", challenge).queryParam("code_challenge_method", "S256"))
                 .andExpect(status().is3xxRedirection()).andReturn().getResponse();
         var query = UriComponentsBuilder.fromUri(URI.create(response.getRedirectedUrl())).build().getQueryParams();
         assertThat(query.getFirst("state")).isEqualTo("cimd-test");
         var exchanged = mvc.perform(post(ApiPaths.MCP_TOKEN).param("grant_type", "authorization_code")
-                .param("client_id", McpCimdTest.CLIENT).param("redirect_uri", McpCimdTest.CALLBACK)
+                .param("client_id", clientId).param("redirect_uri", callback)
                 .param("code", query.getFirst("code")).param("code_verifier", verifier).param("resource", RESOURCE))
                 .andExpect(status().isOk()).andReturn().getResponse();
         String token = mapper.readTree(exchanged.getContentAsString()).get("access_token").asText();
