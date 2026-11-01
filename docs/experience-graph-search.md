@@ -1,8 +1,8 @@
-# 경험 그래프 검색 (구상 — 미구현)
+# 경험 그래프 검색 (첫 구상 — 저장·검색 부분은 폐기, 모델 실측만 유효)
 
-> **2026-11-02**: 저장 구조는 [설계](02-design/features/experience-graph.design.md) 가 대체한다. 이 문서의 `stories`·`links` 다형 간선·`pgvector` 구상과 V22 예약은 그 설계의 D3·D11 로 폐기 대상이다. 착수할 때 이 문서를 그 설계 기준의 한 화면 문서로 다시 쓴다. 임베딩 모델 선택과 실측(아래)은 그대로 유효하다.
+> **폐기 안내 (2026-11-02)**: 저장 구조와 검색은 [설계](02-design/features/experience-graph.design.md) 가 대체했다. 제목에 **(폐기)** 가 붙은 절 — `stories` 정본, `links` 다형 간선, `pgvector` 컬럼, V22 예약, 단계 — 은 그 설계의 D3·D11 로 폐기됐으니 구현 근거로 쓰지 않는다. pgvector 사용 여부는 설계 5단계에서 `REAL[]` 과 다시 비교한다. **지금도 유효한 절**: 모델 선택 근거, 실측, 함정(512토큰 잘림·배칭). 착수할 때 이 문서를 그 설계 기준의 한 화면 문서로 다시 쓴다.
 
-## 목적
+## 목적 (폐기 — 첫 구상)
 
 자기소개 문항을 검색하면 **같은 뜻의 과거 문항**이 첫 번째로 나오고, 이력서의 활동·경력·프로젝트를
 "유사 경험·스토리" 로 이어서 찾을 수 있게 한다. 지금은 `SelfIntroductionService.rank()` 의 메모리 BM25
@@ -11,7 +11,7 @@
 계정당 데이터는 수십~수백 건이다. 그래프 DB·검색 서버·Python GraphRAG 파이프라인은 규모에 맞지 않는다.
 **Postgres 하나(pgvector) + Java 안 임베딩 + 관계 테이블 1개** 로 끝낸다.
 
-## 저장 구조
+## 저장 구조 (폐기)
 
 ```
 app_users ─1:N─▶ stories                     ← 경험의 정본. 이력서 버전이 아니라 "나의 경험" 하나가 한 행
@@ -39,7 +39,7 @@ links   ← 그래프 간선. 노드는 새 테이블이 아니라 기존 행이
   `source=auto` 로 구분해 나중에 넣는다. 자동 추출이 없어도 검색은 동작해야 한다.
 - 소유자 격리는 그대로: 모든 조회는 `owner_id` 조건, 타인 데이터는 404. `links` 도 `owner_id` 컬럼을 들고 양끝이 같은 소유자인지 저장 시 검사한다.
 
-## 검색 흐름
+## 검색 흐름 (폐기)
 
 ```
 질의 q
@@ -59,7 +59,7 @@ links   ← 그래프 간선. 노드는 새 테이블이 아니라 기존 행이
   CPU 에서 문서 1건이 142ms 다(PyTorch 기준). 경험 10건을 한 번에 저장하면 1.4초가 응답에 그대로 붙는다.
   그래서 해시 비교가 선택이 아니라 필수다. 그래도 넘치면 그때 비동기로 옮긴다 — ONNX 로 재 보기 전에는 큐를 만들지 않는다.
 
-## 도입할 것
+## 도입할 것 (폐기)
 
 | 무엇 | 선택 | 이유 |
 |---|---|---|
@@ -138,7 +138,7 @@ GPU 의 8.7ms 와의 차이는 DB 왕복에 묻힌다. 이 숫자는 PyTorch 값
 - Graph RAG 참고(설계 아이디어): [LightRAG](https://pypi.org/project/lightrag-hku) · [nano-graphrag 해설](https://gonamlui.com/blog/brief-breakdown-of-nano-graphrag-a-lightweight-alternative-to-graphrag) · [오픈소스 Graph RAG 도구 5선](https://typegraph.ai/blog/best-open-source-graph-rag-tools)
 - Java 프레임워크 비교: [Spring AI vs LangChain4j](https://dev.to/jamilxt/spring-ai-vs-langchain4j-which-java-ai-framework-should-you-choose-in-2026-4mop)
 
-## 단계
+## 단계 (폐기)
 
 1. `V22__stories_and_links.sql`: `CREATE EXTENSION vector` · `stories` · `self_introduction_stories` · `links` · `self_introductions` 임베딩 컬럼. compose 이미지 교체.
 2. `stories` CRUD + 이력서 행 `storyId` + "과거 경험 불러오기". 임베딩 없이도 동작.
