@@ -21,9 +21,17 @@ const saving = ref(false)
 const errorMessage = ref('')
 const linkedIds = computed(() => new Set(items.value.map((item) => item.id)))
 
+/** 마지막으로 보낸 목록 조회의 순번. 이력서가 바뀐 뒤 도착한 예전 응답은 버린다. */
+let loadSeq = 0
+
 async function load() {
-  try { items.value = await listSelfIntroductions('', props.resumeId) }
-  catch (error) { errorMessage.value = error instanceof Error ? error.message : '문항을 불러오지 못했습니다.' }
+  const seq = ++loadSeq
+  try {
+    const result = await listSelfIntroductions('', props.resumeId)
+    if (seq === loadSeq) items.value = result
+  } catch (error) {
+    if (seq === loadSeq) errorMessage.value = error instanceof Error ? error.message : '문항을 불러오지 못했습니다.'
+  }
 }
 
 async function add() {
@@ -76,9 +84,20 @@ function loadIfMissing() {
   if (!props.questions) load()
 }
 
-// 다른 이력서로 바뀌면 부모가 새 목록과 새 id 를 함께 넘긴다. 목록이 왔으면 그걸 쓰고, 못 받았으면 직접 부른다.
-watch(() => props.questions, (value) => { if (value) items.value = value })
-watch(() => props.resumeId, loadIfMissing)
+// 부모가 새 목록을 넘기면 그것이 최신이다. 진행 중인 자체 조회 결과는 버린다.
+watch(() => props.questions, (value) => {
+  if (!value) return
+  loadSeq++
+  items.value = value
+})
+// 다른 이력서로 바뀌면 이전 이력서의 목록·수정 상태·오류를 남기지 않는다. 목록을 못 받았으면 직접 부른다.
+watch(() => props.resumeId, () => {
+  loadSeq++
+  items.value = props.questions ?? []
+  editingId.value = ''
+  errorMessage.value = ''
+  loadIfMissing()
+})
 onMounted(loadIfMissing)
 </script>
 
