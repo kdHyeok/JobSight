@@ -1,6 +1,6 @@
 # JobSight 경험-지원 관계 구조 최종 설계
 
-작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2 만 적용) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절).
+작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2 만 적용) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
 
 아래에서 `B/` 는 `backend/src/main/java/com/jobsight/company/`, `M/` 은 `backend/src/main/resources/db/migration/`, `F/` 는 `frontend/src/components/` 를 줄여 쓴 것이다.
 
@@ -253,7 +253,7 @@ submissions (공고별 제출 기록, 확인 수준) · writing_guides (계정�
 | 경험 ↔ 키워드 | N:M | 양쪽 CASCADE |
 | 사건 ↔ 역량 | N:M, 사건당 3개 이하 | CASCADE |
 | 이력서 ↔ 경험 | N:M (한 이력서 안에서 한 경험은 한 행). 행은 쓴 경험 개정 번호를 함께 든다 | 이력서를 지우면 연결만 사라진다. 경험 원본은 남는다. 이력서가 쓰는 경험은 **DB가 삭제를 막는다**: 경험 쪽 FK가 `NO ACTION DEFERRABLE INITIALLY DEFERRED` 다. 서비스는 먼저 409 `EXPERIENCE_IN_USE` 와 이력서 이름 목록을 준다 |
-| 경험 → 개정 이력 | 1:N | 경험을 지우면 CASCADE. 개정 이력은 고치지 않고 쌓기만 한다 |
+| 경험 → 개정 이력 | 1:N | 경험을 지우면 CASCADE. 개정 이력은 고치지 않고 쌓기만 한다. 병합된 경험은 지우지 않으므로(6.3) 그 개정 이력도 남는다 |
 | 공고 → 제출 기록 | 1:N | 공고를 지우면 CASCADE. 기록이 가리키는 첨부는 정리 대상에서 뺀다 |
 | 자소서 ↔ 직무 / 사건 / 문항 유형 | N:M (각 10 / 10 / 3 이하) | 자소서 쪽과 직무 쪽은 CASCADE. 사건 쪽 FK는 위와 같은 이유로 지연 `NO ACTION` 이다. 연결된 사건(그 사건을 가진 경험 포함)을 지우려 하면 `detach:true` 없이는 409 `EPISODE_IN_USE`, `detach:true` 면 연결 행을 먼저 지운다 |
 
@@ -368,12 +368,14 @@ CREATE TABLE experiences (
     revision        INT          NOT NULL DEFAULT 1,  -- 사실 개정 번호. facts 가 바뀔 때만 +1 하고 experience_revisions 에 남긴다
     dossier_based_on INT,                           -- 소재집을 만든 사실 개정 번호. revision 과 다르면 '소재집 갱신 필요'
     reviewed_revision INT,                          -- 사용자가 웹에서 검토를 마친 개정 번호. revision 보다 낮거나 없으면 'AI 기록'
+    merged_into     UUID,                           -- 병합된 source 면 target id. 지우지 않고 남겨 과거 (경험 id, 개정) 참조를 보존한다(6.3)
     version         BIGINT       NOT NULL DEFAULT 0,  -- 동시 수정 검사(@Version)
     embedding_dirty BOOLEAN      NOT NULL DEFAULT true,
     source_revision BIGINT       NOT NULL DEFAULT 0,  -- 검색 텍스트(사실·소재집·메모·키워드)가 바뀔 때마다 +1 (4.4)
     created_at      TIMESTAMPTZ  NOT NULL,
     updated_at      TIMESTAMPTZ  NOT NULL,
-    UNIQUE (id, owner_id)
+    UNIQUE (id, owner_id),
+    FOREIGN KEY (merged_into, owner_id) REFERENCES experiences (id, owner_id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX experiences_owner_key_idx ON experiences (owner_id, kind, title_key);
 CREATE INDEX experiences_embedding_dirty_idx ON experiences (updated_at) WHERE embedding_dirty;
@@ -463,7 +465,8 @@ CREATE TABLE resume_experiences (                   -- JSON 행 experienceId·ex
     owner_id            UUID NOT NULL,
     resume_id           UUID NOT NULL,
     experience_id       UUID NOT NULL,
-    experience_revision INT  NOT NULL,              -- 이 기업용 문구를 쓸 때 본 경험 개정 번호
+    based_on_experience_id UUID NOT NULL,           -- 이 기업용 문구를 쓸 때 본 경험. JSON 행의 experienceId 그대로다(병합된 source 일 수 있다)
+    based_on_revision      INT  NOT NULL,           -- 그때의 개정 번호. experience_id 는 병합을 따라간 지금의 경험이다
     PRIMARY KEY (resume_id, experience_id),
     FOREIGN KEY (resume_id, owner_id)     REFERENCES resumes (id, owner_id)     ON DELETE CASCADE,
     -- CASCADE 가 아니다: 쓰이는 경험의 삭제를 DB 가 막는다. 지연이어야 계정 삭제 연쇄가 통과한다(2.3)
@@ -476,10 +479,12 @@ CREATE TABLE self_introduction_episodes (           -- uses
     owner_id             UUID       NOT NULL,
     self_introduction_id UUID       NOT NULL,
     episode_id           UUID       NOT NULL,
-    experience_revision  INT        NOT NULL,   -- 답변을 쓸 때 본 경험 개정 번호. 정정 개정이 생기면 '재검토 필요'
+    experience_id        UUID       NOT NULL,   -- 답변을 쓸 때 사건이 속했던 경험. 병합으로 사건이 옮겨가도 바꾸지 않는다
+    experience_revision  INT        NOT NULL,   -- 그 경험의 개정 번호. (experience_id, experience_revision) 쌍으로 개정 이력을 찾는다
     source               VARCHAR(4) NOT NULL CHECK (source IN ('USER','AI')),
     PRIMARY KEY (self_introduction_id, episode_id),
     FOREIGN KEY (self_introduction_id, owner_id) REFERENCES self_introductions (id, owner_id) ON DELETE CASCADE,
+    FOREIGN KEY (experience_id, owner_id)        REFERENCES experiences (id, owner_id)        DEFERRABLE INITIALLY DEFERRED,
     CONSTRAINT self_introduction_episodes_episode_fk   -- 2.3 과 같은 이유로 지연 NO ACTION
     FOREIGN KEY (episode_id, owner_id)           REFERENCES episodes (id, owner_id)           ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED
 );
@@ -729,7 +734,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 | `experience_index` | `kinds?[]`, `ids?[]`(10개 이하. 주면 상세 모드), `cursor?` | **맨 앞**: `counts`(종류별 경험 수, 사건 수, AI 기록 수, 미등록 행 수, 출처 미상 자소서 수)와 `complete`. 미등록 행이 있으면 `importHint`(웹 가져오기 화면 안내). 경험 한 줄: `{id, kind, title, period, skills[], domains[], episodes[{id, title, competencies}], inResumes[{id,name}], usedInSelfIntros}`. 그다음 **`unlinkedRows[]`**: 은행에 없는 행을 (kind, title_key)로 묶은 것. 정렬은 PROJECT → CAREER → ACTIVITY → TRAINING → OTHER, 한 쪽에 60개. 상세 모드는 사실·소재집·근거(인용·주변 문맥·위치·해시, 첨부는 메타와 웹 주소), 개정 번호와 검토 상태, 연결된 이력서 행의 개정 번호와 "재검토 필요"·"원본 반영 검토" 표시, 사건 STAR, 키워드(trust), 이 사건을 쓴 자소서 `{id, question, company · position, trust}` | × |
 | `experience_search` | `positionId?`, `postingId?`, `posting?`(저장하지 않는 공고 다섯 칸, 4.1), `requirements?[]`(클라이언트가 공고에서 뽑은 요구, 4.2), `question?`, `q?`, `competencies?[]`, `kinds?[]`, `limit?=8 (≤20)` | `query`(직무, 회사, 업종, 요구 키와 칸, 문항 유형과 신뢰도, 이 직무용 직접 출처 자소서 `{id, question}`), `results[]`(5.4), `uncovered[]`, `coverageIncomplete`, `warnings[]`, `degraded[]` | × |
 | `experience_save` | `{id?, expectedVersion?, kind, title, startYm, memo, facts?, dossier?, changeKind?: ADD\|CORRECT, skills?[], domains?[], episodes?[{id?, title, situation, task, action, result, outcomes[], competencies[], sortOrder}], removeEpisodeIds?[]}`. null=유지. `facts`·`dossier` 는 6.5 모양이다. 기존 사실 값을 바꾸거나 지우면 `changeKind:CORRECT`, 추가만이면 ADD다. 서버가 판정해 맞지 않으면 400. 근거에 인용이 없거나 로컬 경로뿐이면 400. 키워드는 이름으로 받아 서버가 정규화한다 | `{id, version, revision, needsReview[](정정으로 재검토가 필요해진 이력서·자소서), episodes[{id, version}], normalizedSkills[], warnings[]}` | ○ (출처 AI) |
-| `resume_add_experiences` | `id`, `items[{experienceId, from?: FACTS\|ROW, rowRef?{resumeId, section, index}}]`, `expectedVersion?`(행 추가라 선택) | 경험마다 행을 만들어 종류에 맞는 섹션 끝에 붙인다. 기본(`FACTS`)은 경험 원본의 사실로 중립 문구를 만들고, `ROW` 는 사용자가 고른 기존 기업용 행의 문구에서 시작한다. 어느 쪽이든 행에 `experienceId` 와 지금의 `experienceRevision` 을 쓴다. 전부 들어가거나 전부 실패한다. 이미 있는 경험은 건너뛴다. 반환은 outline 모양과 새 `version` | ○ |
+| `resume_add_experiences` | `id`, `items[{experienceId, from?: FACTS\|ROW, rowRef?{resumeId, section, index}}]`, `expectedVersion?`(행 추가라 선택) | 경험마다 행을 만들어 종류에 맞는 섹션 끝에 붙인다. 기본(`FACTS`)은 경험 원본의 사실로 중립 문구를 만들고, `ROW` 는 사용자가 고른 기존 기업용 행의 문구에서 시작한다. `FACTS` 는 행에 `experienceId` 와 지금의 `experienceRevision` 을 쓰고, `ROW` 는 복사한 행의 `experienceId`·`experienceRevision` 을 그대로 가져온다(10.5 R32). 정정 전 개정의 문구를 복사하면 새 행에도 "재검토 필요"가 붙는다. 전부 들어가거나 전부 실패한다. 이미 있는 경험은 건너뛴다. 반환은 outline 모양과 새 `version` | ○ |
 | `writing_guide_get` | 없음 | `{version, body, updatedAt}`. 경험별 주의사항은 `experience_index` 상세에 있다(6.7) | × |
 
 **3단계 최소판** (경험 테이블 전): `experience_index` 는 계정의 모든 이력서 경험 행을 `(kind, title_key, 시작 연월 숫자)` 로 묶어 `groups[{kind, title, period, sources[{resumeId, resumeName, section, index, resumeVersion}]}]` 와 `counts`·`complete` 만 준다. 가져오기 계획(6.3)과 같은 묶음 함수를 쓴다. AI가 새 이력서를 만들 때 이 목차와 대조하게 해서 "프로젝트 누락"을 먼저 막는다. `experience_search` 첫 판은 이 묶음을 RESUME_ROW 후보로 쓴다.
@@ -850,7 +855,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 | 경험의 존재와 정체 | `experiences.id` (행에는 `experienceId` 앵커) |
 | **경험 사실** (기간, 개인 역할, 행동, 결과, 측정 범위, 근거) | **경험 원본** `experiences.facts`. 개정마다 `experience_revisions` 에 남는다 |
 | 작성 재료 (상세 서술, 문항별 활용 포인트, 표현 예시, 주의) | 같은 레코드의 `experiences.dossier`. 어느 사실 개정에서 만들었는지(`dossier_based_on`) 남긴다 |
-| 기업별 표현 | 이력서 행의 실제 문구 + `experienceId` + 쓴 `experienceRevision` |
+| 기업별 표현 | 이력서 행의 실제 문구 + `experienceId` + 쓴 `experienceRevision`. 병합 뒤에도 고쳐 쓰지 않는다 |
 | 사건, 사건 결과, 역량·키워드 태그 | 새 테이블 |
 | 이력서 ↔ 경험 관계 | `resume_experiences` (JSON에서 파생, FK) |
 | 답변을 어디에 냈고 무엇을 썼나 | `self_introduction_*` (쓴 경험 개정 번호 포함) |
@@ -859,10 +864,11 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 
 - **경험 원본이 정본이고 이력서 행은 표현이다** (10.4 R23). 새 회사에 지원할 때 과거 이력서에서 경험을 다시 뽑지 않는다. 원본을 먼저 읽고, 과거 지원서는 표현과 전개를 참고하는 자료로 쓴다.
 - **원본이 바뀌어도 과거 문서는 그대로다** (R25). 이력서 행은 쓴 문구를 그대로 보존하고, 화면에서 최신 원본으로 다시 그리지 않는다.
+- **참조는 (경험 id, 개정 번호) 쌍으로 고정한다** (10.5 R31). 이력서 행과 자소서 연결은 작성 당시의 쌍을 그대로 든다. 병합된 경험은 지우지 않고 `merged_into` 로 target을 가리키므로, 쌍은 언제나 개정 이력에서 찾을 수 있다. "지금 어느 경험인가"는 `merged_into` 를 따라가서 구한다.
 - **차이는 세 가지로 나눈다** (R25). 모든 문구 차이에 경고하면 사용자가 경고를 무시하게 된다.
   - 표현 축약·순서 변경: 정상적인 기업별 편집이다. 표시하지 않는다.
   - 행에만 있는 새 사실(원본에 없는 수치·기술 키): "원본 반영 검토"로 보여 준다. 원본을 자동으로 바꾸지 않는다.
-  - 원본 사실 정정(`CORRECT` 개정): 그 경험을 정정 전 개정으로 쓴 이력서 행과 자소서에 "재검토 필요"를 붙인다. 추가(`ADD`) 개정에는 붙이지 않는다.
+  - 원본 사실 정정(`CORRECT` 개정): 참조한 개정보다 **나중에 만들어진** `CORRECT` 개정이 지금의 경험(병합됐으면 target)에 있으면 그 이력서 행과 자소서에 "재검토 필요"를 붙인다. 개정 번호가 아니라 개정 시각으로 비교한다. 병합 뒤에는 source와 target의 번호를 서로 비교할 수 없기 때문이다. 추가(`ADD`) 개정에는 붙이지 않는다.
 - 이 전환으로 대표 행, "가장 최근에 수정한 이력서" 대체 규칙, 보존본이 필요 없어졌다(10.4). 기업용 문구가 사라져도 사실은 원본에 남기 때문이다.
 - **같은 키를 세 곳에 함께 추가해야 한다.** `experienceId`·`experienceRevision` 을 `ResumeContent` 의 `Activity`·`Experience`·`Project`·`Training`, `ResumeRowRequest`, `frontend/src/types/resume.ts` 에 함께 넣는다. Jackson 3는 모르는 키를 조용히 버리므로, 한 곳이라도 빠지면 저장은 성공하고 값만 사라진다. PUT→GET 왕복 테스트로 막는다.
 - `docs/decisions.md:50` 의 "본문 JSON에 ID를 섞지 않는다"에 대한 예외다(D2).
@@ -875,9 +881,9 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 2. `experienceId` 가 있는 행은 세 가지를 검사한다.
    - 그 경험이 내 것인지 count로 확인한다. 없으면 404다.
    - 종류와 섹션이 맞는지 확인한다. 다르면 400 `EXPERIENCE_SECTION_MISMATCH` 다.
-   - 한 이력서 안에서 같은 id가 두 번 나오면 400이다.
+   - 한 이력서 안에서 같은 경험이 두 번 나오면 400이다. 병합을 따라간 지금의 경험 id로 비교한다.
 3. `experienceId` 가 없는 행은 `(kind, title_key)` 로 찾는다. **정확히 1건이 맞고 시작 연월 숫자가 충돌하지 않을 때만** 연결한다. 그 밖에는 미연결로 둔다. 새 경험은 만들지 않는다.
-4. 연결한 행에 `experienceId` 를 써 넣는다. 행에 `experienceRevision` 이 없으면 그 경험의 지금 개정 번호를 쓴다. `resume_experiences` 에는 차이만 반영한다.
+4. 연결한 행에 `experienceId` 를 써 넣는다. 행에 `experienceRevision` 이 없으면 그 경험의 지금 개정 번호를 쓴다. `experienceId` 가 병합된 경험이면 `merged_into` 를 따라 target과 연결하되, 행의 `experienceId`·`experienceRevision` 은 고쳐 쓰지 않는다. `resume_experiences` 에는 연결(`experience_id`)과 작성 근거(`based_on_*`)를 함께 두고 차이만 반영한다.
 5. **행 문구로 경험 원본을 바꾸지 않는다.** 행에만 있는 새 사실(원본에 없는 수치·기술 키)은 저장하지 않고, 질의 때 "원본 반영 검토"로 보여 줄 뿐이다(6.1).
 6. 이력서 저장은 경험의 검색 텍스트를 바꾸지 않으므로 경험 임베딩을 건드리지 않는다(4.4).
 7. **웹 저장에서 이전에 있던 `experienceId` 가 사라지면** 응답에 `unlinkedWarnings[]` 를 싣는다. 웹에서 조용히 끊기는 것을 막기 위해서다. 웹은 이를 토스트로 보여 준다.
@@ -902,9 +908,9 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
    - **충돌 검사** (10.2 R5): source와 target이 같은 이력서에 함께 있으면, 병합 뒤 그 이력서에 같은 `experienceId` 행이 둘이 되어 6.2의 중복 금지와 충돌한다. 계획에서 그 이력서와 두 행을 보여 주고, 사용자가 한 행을 지우거나 다른 경험에 연결할 때까지 409 `MERGE_CONFLICT` 로 거절한다. 자동으로 행을 지우거나 서술을 덮어쓰지 않는다.
    1. 사건의 `experience_id` 를 target으로 바꾼다. 사건을 참조하는 FK는 `(id, owner_id)` 뿐이라 막히지 않는다.
    2. 키워드 연결을 `ON CONFLICT DO NOTHING` 으로 옮긴다.
-   3. 관련 이력서를 id 순으로 잠그고 JSON의 `experienceId` 를 고쳐 쓴다. 잠근 이력서의 `version` 이 계획과 다르면 거절한다.
-   4. source의 사실과 근거를 target에 합쳐 새 개정(`MERGE`)을 만든다. 서로 다른 사실 값은 `facts.conflicts[]` 로 남기고 사용자가 고른다. 옮겨진 행의 `experienceRevision` 은 합친 개정 번호로 바꾼다. target의 `source_revision` 을 올린다.
-   5. source를 지운다.
+   3. **이력서 JSON은 고쳐 쓰지 않는다.** source를 쓰는 이력서들의 `resume_experiences.experience_id` 만 target으로 바꾼다(`based_on_*` 은 그대로). T9 계정 잠금이 같은 계정의 저장과 순서를 정한다.
+   4. source의 사실과 근거를 target에 합쳐 새 개정(`MERGE`)을 만든다. 서로 다른 사실 값은 `facts.conflicts[]` 로 남기고 사용자가 고른다. 과거 문서가 든 (경험 id, 개정 번호)는 바꾸지 않는다. target의 `source_revision` 을 올린다.
+   5. **source는 지우지 않는다**(10.5 R31). `merged_into = target` 으로 표시하고 목록과 검색에서 숨긴다. source id로 조회하면 target으로 안내한다. source의 개정 이력이 남아 있으므로, source의 4차 개정을 쓴 자소서도 그 근거를 그대로 찾는다.
 4. **사건 나누기와 자소서 연결**은 5.6 "경험 정리" 절차(AI 제안 → 사용자 승인)로 한다.
 
 **운영 데이터 검증 원칙**:
@@ -916,7 +922,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 
 - **이력서 복제**: `experienceId` 와 `experienceRevision` 을 그대로 복사한다.
 - **이력서 삭제**: `resume_experiences` 가 CASCADE로 지워진다. 경험 원본과 개정 이력, 자소서, 제출 기록은 남는다. 기업용 문구가 사라져도 사실은 원본에 있으므로 따로 보존할 것이 없다.
-- **경험 삭제**: 이력서가 쓰고 있으면 409와 이력서 이름 목록을 돌려준다. 이 확인과 삭제 사이에 다른 요청이 연결해도 지연 FK가 삭제를 막는다(2.3). 사건이 자소서에 쓰이고 있으면 `detach:true` 없이는 409 `EPISODE_IN_USE`, `detach:true` 면 연결을 먼저 지우고 응답에 끊긴 자소서 수를 싣는다.
+- **경험 삭제**: 병합으로 남은 경험(`merged_into` 있음)은 지우지 않는다. 과거 참조가 가리키기 때문이다. 이력서가 쓰고 있으면 409와 이력서 이름 목록을 돌려준다. 이 확인과 삭제 사이에 다른 요청이 연결해도 지연 FK가 삭제를 막는다(2.3). 사건이 자소서에 쓰이고 있으면 `detach:true` 없이는 409 `EPISODE_IN_USE`, `detach:true` 면 연결을 먼저 지우고 응답에 끊긴 자소서 수를 싣는다.
 - **직무 삭제**: `self_introduction_positions` 가 CASCADE로 지워진다. 공고 수정이 직무를 지웠다 다시 만드는 경로는 1단계에서 먼저 막는다(T3).
 - **계정 삭제**: 지연 FK 두 개가 있어도 통과해야 한다. 임시 테이블로는 확인했고(2.3), 실제 스키마는 4단계 테스트에 넣는다.
 
@@ -1014,7 +1020,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | **1. 손실과 잘못된 대상 수정 막기** | ① batch fetch(P1) ② 직렬 요청 줄이기: 자소서 동시 요청(적용함), 첨부 메타 동봉(P5) ③ `findOwnedForUpdate` 를 `update`·`updateBasic`·`mutateRows` 에 적용(T1) ④ `V{n}__resume_version` 과 `expectedVersion`: 행 번호 수정·삭제와 전체 교체는 필수, 추가는 선택, 모든 쓰기 응답에 새 `version`(T2) ⑤ `resume_update` null=유지(T3), 행 갱신 병합(T4), 행 도구 개요 반환(T5) ⑥ `posting_update` null=유지와 이름 매칭(T3). 2단계 written_for가 직무 id에 기대므로 먼저 막는다 ⑦ `AttachmentField.vue:52,65` 즉시 삭제 제거(T7) ⑧ 도구 설명과 SKILL의 도구별 수정 규칙, 행 도구 순차 호출과 409 처리 규칙(5.6) | 병렬 `addRow` 2건 → 2행. AI가 읽은 `version` 으로 0번 수정을 보내기 전에 웹에서 0번을 지우면 409이고 다른 행은 그대로. `version` 없는 행 수정 → 400. `projects` 를 뺀 `resume_update` 뒤에도 행이 남는지. 이름만 보낸 `posting_update` 에서 직무 id와 `resume_positions` 보존. 복제본에서 첨부를 교체한 뒤 원본 첨부 GET 200. `now at version vN`. SQL 수와 waterfall을 기준선과 비교 | 항목별 커밋 revert. `version` 열은 남아도 무해 |
 | **2. 자소서 직접 출처와 목록** | `V{n}__self_intro_relations`, `self_intro_list` MCP 래퍼(필터, 미리보기, limit, 출처, fallback, `alreadyUsedFor`), 원문은 `self_intro_get`, 자소서 생성·수정의 `positionIds`·`questionTypes`, 요청 DTO 분리, 웹 "어느 지원용?" 후보 칩과 AI 기록 확정 UI, 정규식 문항 유형 | 과거 답변이 출처와 함께 정확히 조회되는지. 골드셋 재측정, 특히 타사 혼입률. 다른 계정 직무 id로 연결 → 404. 웹 자소서 목록 응답이 바뀌지 않았는지(답변 전문). `q` 101자 → 400 | 낮음. 테이블은 무시해도 된다 |
 | **3. 공고를 저장하지 않는 경험 찾기 (첫 완성 목표)** | 마이그레이션 없음. `experience_search` 첫 판: 입력은 `positionId` 또는 저장하지 않는 `posting`(4.1)과 클라이언트가 뽑은 `requirements[]`(4.2), 후보는 RESUME_ROW 묶음뿐, 신호는 LEXICAL·REQUIREMENT(다섯 칸, 칸별 가중), 결과마다 원문 출처 `source`. `experience_index` 최소판(5.2). `resume_get(view=outline)`(version, 섹션별 count, 행 머리, `unlinkedRows`). SKILL 2번 절차를 "고른 뒤에 저장"으로 바꾼다. **전환 경로다**: 4단계에서 응답 형식은 그대로 두고 자료원만 경험 원본으로 바꾼다. 이력서 검색과 경험 검색을 따로 운영하지 않는다 | 공고 20개를 넘겨도 `job_postings` 행 수가 그대로인지. 기술 환경 칸에만 있는 키가 `uncovered` 에 나오지 않는지. 내 자료에 없는 필수 기술이 `uncovered` 에 나오는지. 지원 자격이 점수에 섞이지 않고 `qualifications[]` 로 나오는지. 골드셋에서 정답 경험 행이 상위 5에 있는지와 출처가 맞는지. 하네스에 붙여 "프로젝트 누락"이 줄었는지 | 낮음. 도구 등록을 빼면 끝난다 |
-| **4. 경험 원본과 근거 (중앙 관리)** | `V{n}__experiences`(`facts`, `dossier`, `revision`, `experience_revisions`, 지연 FK 두 개), `experienceId`·`experienceRevision` 세 곳 동시 추가, 링커, 웹 가져오기(원본 초안과 충돌 칸)·병합(충돌 검사)·경험 원본 편집과 검토 화면·"원본 반영 검토"·"재검토 필요" 표시, `ApiPaths`·`routes.ts`·`nginx.conf` 표 동시 갱신, MCP `experience_save`(사실 개정, `changeKind`)·`resume_add_experiences`(원본 또는 고른 기업용 행에서)·`experience_index` 전체판(근거 발췌 포함), T9 계정 잠금, REST·MCP 공통 오류 변환, `missing[]`·`LINKED_ROWS_MISSING`, `experience_search` 자료원을 경험 원본으로 교체(응답 형식 유지), 별칭 시드 사전, 자소서 연결의 경험 개정 번호 | `experienceId`·`experienceRevision` PUT→GET 왕복. 경험 원본을 고쳐도 과거 이력서 행의 문구와 개정 번호가 그대로인지. 정정(`CORRECT`) 개정 뒤 그 경험을 쓴 이력서·자소서에 "재검토 필요"가 붙고, 추가(`ADD`)·표현 차이에는 붙지 않는지. 행에만 있는 새 수치가 "원본 반영 검토"로 나오는지. 링커 멱등. 제목 키가 2건 맞으면 미연결로 남는지. 복합 FK가 다른 소유자 연결을 거부. 같은 이력서에 있는 두 경험 병합 → 409. **사건이 있는 경험의 병합**. 사용 중 확인 직후 연결한 경험의 삭제가 거부되는지. 경험·사건 삭제가 REST 409와 MCP 도구 오류 코드로 같게 나오는지(Testcontainers). 로컬 경로만 있는 근거 → 400. 계정 삭제 cascade 통과. `REAL[]` 매핑 validate 통과. 운영 사본은 집계 비교 SQL만. 골드셋 재측정. 로그인 왕복 | 중간. MCP 등록과 화면을 끄면 멈춘다. 이력서 행 텍스트는 원본 그대로다 |
+| **4. 경험 원본과 근거 (중앙 관리)** | `V{n}__experiences`(`facts`, `dossier`, `revision`, `experience_revisions`, 지연 FK 두 개), `experienceId`·`experienceRevision` 세 곳 동시 추가, 링커, 웹 가져오기(원본 초안과 충돌 칸)·병합(충돌 검사)·경험 원본 편집과 검토 화면·"원본 반영 검토"·"재검토 필요" 표시, `ApiPaths`·`routes.ts`·`nginx.conf` 표 동시 갱신, MCP `experience_save`(사실 개정, `changeKind`)·`resume_add_experiences`(원본 또는 고른 기업용 행에서)·`experience_index` 전체판(근거 발췌 포함), T9 계정 잠금, REST·MCP 공통 오류 변환, `missing[]`·`LINKED_ROWS_MISSING`, `experience_search` 자료원을 경험 원본으로 교체(응답 형식 유지), 별칭 시드 사전, 자소서 연결의 경험 개정 번호 | `experienceId`·`experienceRevision` PUT→GET 왕복. 경험 원본을 고쳐도 과거 이력서 행의 문구와 개정 번호가 그대로인지. 정정(`CORRECT`) 개정 뒤 그 경험을 쓴 이력서·자소서에 "재검토 필요"가 붙고, 추가(`ADD`)·표현 차이에는 붙지 않는지. 행에만 있는 새 수치가 "원본 반영 검토"로 나오는지. 링커 멱등. 제목 키가 2건 맞으면 미연결로 남는지. 복합 FK가 다른 소유자 연결을 거부. 같은 이력서에 있는 두 경험 병합 → 409. 병합 뒤에도 source 개정을 쓴 자소서·이력서의 (경험 id, 개정) 참조가 개정 이력에서 찾아지는지, 병합 뒤 target에 정정이 생기면 source 옛 개정을 쓴 문서에 "재검토 필요"가 붙는지. `ROW` 복사가 원래 행의 개정 번호를 가져오는지. **사건이 있는 경험의 병합**. 사용 중 확인 직후 연결한 경험의 삭제가 거부되는지. 경험·사건 삭제가 REST 409와 MCP 도구 오류 코드로 같게 나오는지(Testcontainers). 로컬 경로만 있는 근거 → 400. 계정 삭제 cascade 통과. `REAL[]` 매핑 validate 통과. 운영 사본은 집계 비교 SQL만. 골드셋 재측정. 로그인 왕복 | 중간. MCP 등록과 화면을 끄면 멈춘다. 이력서 행 텍스트는 원본 그대로다 |
 | **5. 의미 검색과 필요시 리랭커** | `embedder` 컨테이너(기본 CPU), `compose.gpu.yaml`, `V{n}__self_intro_embeddings`, 스위퍼(원문 버전 조건, D13·D14), `self_intro_list(q)` 에 DENSE + 리랭커 K=10, `experience_search` 에 DENSE와 재현 정보 `context`(6.7). **벡터 저장은 `REAL[]` 과 pgvector를 비교해 정한다**(D11). 컨테이너 3 → 4. `.env.example`·`compose.yaml`·`docs/local-dev.md` 동기화. **문항 의미 검색은 `self_introductions` 만 쓰므로 경험 은행과 무관하다.** 골드셋에서 BM25 부족이 확인되면 이 단계의 자소서 부분만 2단계 바로 뒤로 당긴다(R11) | 골드셋에서 앞 단계보다 회수율이 오르는지. CPU 리랭커 지연 실측. embedder를 멈춘 상태에서 저장 성공과 `degraded`, 재기동 후 dirty 0으로 수렴. 스위퍼가 읽은 뒤 원문이 바뀌면 그 회차는 쓰지 않는지. 해시가 같은 조각은 재계산하지 않는지 | 낮음. 컨테이너를 내리면 이전 검색으로 돌아간다. DB 이미지는 그대로다 |
 | **6. 추가 신호와 정리** | DOMAIN·PAST_USE·COMPETENCY·PAST_QUESTION 중 골드셋에서 이득이 확인된 것만, 병합 UI 다듬기, `experience_index` 점검 플래그(사건 없는 경험, 역량 없는 사건, 어디에도 쓰이지 않은 사건, AI 기록 수, 미등록 행, 출처 미상 자소서, truncated), 별칭 편집 UI, 사용률 로그를 근거로 쓰이지 않는 CRUD 도구 정리 검토 | 신호마다 켜기 전후 골드셋 기여 기록. 계정 단위 플래그 수 추적 | 낮음 |
 | **성능 트랙** (단계와 별개) | `V{n}__indexes`(1.5), P3·P4·P6~P11, T6(행 추가의 섹션 상한 검증). 측정하면서 진행한다 | 토큰 조회 `EXPLAIN` Index Scan. SQL 상한 테스트. 1.0 방식으로 다시 잰 지연. nginx를 건드리면 로그인 왕복 | 코드 revert. 인덱스는 남아도 무해 |
@@ -1213,3 +1219,12 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | R29 | 3단계는 전환 경로로 명시하고, 같은 응답 형식에서 자료원만 바꿔야 한다 | 채택 | 4.2, 7 |
 | R30 | 작성 기준은 계정당 문서 하나와 경험별 주의사항으로 시작한다 | 채택(우리 제안에 리뷰 동의) | 2.5, 5.2, 6.7 |
 | — | 작성 검토 이력 테이블, 접수 근거 자동 대조, 첨부 바이너리의 MCP 전달 | 보류. 필요가 확인될 때 | 2.6 |
+
+### 10.5 5차 리뷰: 세 PR 검토 (2026-11-02, #1 `6dd0940`, #2 `af50316`, #3 `4d77774`)
+
+P1 1건, P2 3건. 설계에 해당하는 두 건을 여기 남긴다. 나머지 두 건은 해당 PR에서 고쳤다: #1 두 작업공간의 로그인 쿠키 충돌은 `docs/local-dev.md` 에 브라우저 프로필 분리를 적었고, #2 저장 중 이동 경쟁은 `ResumeBoard.save` 에 조회 순번 확인과 테스트를 더했다.
+
+| # | 지적 | 처리 | 반영 위치 |
+|---|---|---|---|
+| R31 | [P1] 병합이 source를 지워 개정 이력도 함께 사라진다. 자소서 연결에는 개정 번호만 있어, 사건이 target으로 옮겨지면 그 번호를 target 기준으로 잘못 읽는다. 이력서도 작성 당시와 다른 개정을 가리키게 된다 | 채택. source는 `merged_into` 로 남기고 지우지 않는다. 참조는 (경험 id, 개정 번호) 쌍으로 고정하고, 자소서 연결에 경험 id를 더했다. 이력서 JSON은 병합 때 고쳐 쓰지 않는다. "재검토 필요"는 개정 시각으로 비교한다 | 2.3, 2.5, 6.1, 6.2, 6.3, 6.4, 7 |
+| R32 | [P2] `resume_add_experiences(from: ROW)` 가 과거 문구를 복사하면서 최신 개정 번호를 기록해, 정정 전 문구를 최신 사실 근거처럼 만들고 "재검토 필요"를 놓친다 | 채택. `ROW` 는 원래 행의 (경험 id, 개정 번호)를 그대로, `FACTS` 만 최신 개정을 쓴다 | 5.2, 7 |
