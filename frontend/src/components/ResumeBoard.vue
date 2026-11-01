@@ -47,7 +47,11 @@ function fail(error: unknown, fallback: string) {
   }
 }
 
+/** 마지막으로 보낸 조회의 순번. 이보다 앞선 조회의 응답은 늦게 와도 화면에 반영하지 않는다. */
+let loadSeq = 0
+
 async function loadList() {
+  loadSeq++
   loading.value = true
   loadError.value = ''
   try {
@@ -60,6 +64,7 @@ async function loadList() {
 }
 
 async function loadCurrent(id: string) {
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
   try {
@@ -71,14 +76,17 @@ async function loadCurrent(id: string) {
       listPositions(),
       listSelfIntroductions('', id).catch(() => null),
     ])
+    // A 를 연 뒤 B 를 열면 A 응답이 B 보다 늦게 올 수 있다. 그때 A 로 덮지 않는다.
+    if (seq !== loadSeq) return
     current.value = resume
     positions.value = availablePositions
     questions.value = linkedQuestions
   } catch (error) {
+    if (seq !== loadSeq) return
     current.value = null
     fail(error, '이력서를 불러오지 못했습니다.')
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

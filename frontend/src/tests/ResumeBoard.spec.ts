@@ -51,6 +51,31 @@ describe('이력서 편집기 열기', () => {
     expect(introductions.listSelfIntroductions).toHaveBeenCalledTimes(1)
   })
 
+  it('A 를 연 뒤 B 를 열면, 늦게 도착한 A 응답이 B 와 B 의 문항을 덮지 않는다', async () => {
+    const resumeA = { ...resume, id: 'a', name: 'A' } as Resume
+    const resumeB = { ...resume, id: 'b', name: 'B' } as Resume
+    const questionsA = [{ ...linked[0], id: 'qa', question: 'A 문항' }]
+    const questionsB = [{ ...linked[0], id: 'qb', question: 'B 문항' }]
+    let finishA!: (value: Resume) => void
+    vi.mocked(resumes.getResume).mockReset()
+      .mockReturnValueOnce(new Promise((resolve) => { finishA = resolve }))
+      .mockResolvedValueOnce(resumeB)
+    vi.mocked(introductions.listSelfIntroductions)
+      .mockImplementation((_query, resumeId) => Promise.resolve(resumeId === 'a' ? questionsA : questionsB))
+
+    const wrapper = shallowMount(ResumeBoard, { props: { focus: 'a' } })
+    await flushPromises()
+    await wrapper.setProps({ focus: 'b' })
+    await flushPromises()
+
+    finishA(resumeA)
+    await flushPromises()
+
+    const editor = wrapper.findComponent(ResumeEditor)
+    expect(editor.props('resume')).toEqual(resumeB)
+    expect(editor.props('questions')).toEqual(questionsB)
+  })
+
   it('문항 요청이 실패해도 이력서는 열리고, 문항 칸이 직접 다시 부르도록 null 을 넘긴다', async () => {
     vi.mocked(resumes.getResume).mockReset().mockResolvedValue(resume)
     vi.mocked(introductions.listSelfIntroductions).mockRejectedValue(new Error('일시 오류'))
