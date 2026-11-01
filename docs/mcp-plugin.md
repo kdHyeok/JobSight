@@ -110,6 +110,7 @@ docker compose -f compose.yaml -f compose.mcp.yaml up -d --build
 5. `account_get`, 기업 목록부터 확인한다. 쿠키/토큰을 사람이 복사하는 방식으로 연결하지 않는다.
    access token은 1시간 유효하며 클라이언트가 90일 회전형 refresh token으로 자동 갱신한다.
    90일 동안 갱신하지 않았거나 사용자가 연결을 해제한 뒤에는 OAuth로 다시 연결한다.
+
 6. 스킬 포함 플러그인 업로드가 가능한 클라이언트에는 아래 ZIP을 등록한다. MCP만 연결한 경우
    스킬은 자동 설치되지 않으므로 `plugins/jobsight/skills/jobsight/SKILL.md`도 해당 클라이언트의 스킬 기능으로 등록한다.
 
@@ -122,6 +123,38 @@ ZIP 루트는 `.codex-plugin/plugin.json`, `.mcp.json`, `skills/jobsight/SKILL.m
 로컬 Codex는 이 폴더를 개발 플러그인으로 설치하거나 HTTP MCP 서버로 연결한다. 사전 등록 client ID와
 클라이언트가 사용하는 고정 callback을 설정할 수 있어야 한다(CIMD 미지원 클라이언트). DCR 지원을 주장하지 않는다.
 스토어 공개는 별도 심사·실제 공개 URL·개인정보처리방침 등 게시 요구사항을 충족한 후 진행한다.
+
+### Claude Code — 사전 등록 + 고정 포트 콜백
+
+Claude Code 는 위 「수동 대안」 경로를 쓴다. 자동 연결이 안 되는 이유는 두 가지이고 둘 다 서버 쪽 제약이다.
+
+- client_id 가 `https://claude.ai/oauth/claude-code-client-metadata` 다. `ChatGptClients` 는 `chatgpt.com/oauth/...client.json`
+  형태만 통과시키므로 CIMD 로는 등록되지 않는다. DCR(`registration_endpoint`)도 제공하지 않아 우회 경로가 없다.
+- 콜백이 `http://localhost:<임의 포트>/callback` 이다. 등록된 URI 와 **글자 그대로** 같아야 통과하므로 임의 포트는 맞출 수 없다.
+
+그래서 포트를 하나 고정해 `MCP_REDIRECT_URIS` 에 넣고, 클라이언트도 같은 포트로 등록한다. 운영에는
+`http://localhost:3118/callback` 을 추가해 두었다.
+
+```bash
+# 서버: 기존 값 뒤에 쉼표로 덧붙인다(기존 ChatGPT·Codex 콜백을 지우지 않는다)
+MCP_REDIRECT_URIS=<기존 값>,http://localhost:3118/callback
+docker compose -f compose.yaml -f compose.mcp.yaml up -d
+
+# 클라이언트
+claude mcp add --transport http jobsight https://job.donyk.link/mcp \
+  --client-id jobsight-plugin --callback-port 3118
+```
+
+인증하는 동안 그 포트가 비어 있어야 한다. 바꾸려면 서버 값과 클라이언트 등록 포트를 **함께** 바꾼다.
+서버 반영 확인은 authorize 가 302 를 돌려주는지 본다 — 등록 안 된 포트는 401 이다.
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "https://job.donyk.link/oauth2/authorize?response_type=code&client_id=jobsight-plugin\
+&redirect_uri=http%3A%2F%2Flocalhost%3A3118%2Fcallback&scope=jobsight.read&state=t\
+&resource=https%3A%2F%2Fjob.donyk.link%2Fmcp\
+&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
+```
 
 ## 도구 계약과 검증 범위
 
