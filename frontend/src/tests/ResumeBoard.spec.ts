@@ -76,6 +76,32 @@ describe('이력서 편집기 열기', () => {
     expect(editor.props('questions')).toEqual(questionsB)
   })
 
+  it('A 저장 중 B 로 옮기면, 늦게 끝난 A 저장 응답이 B 와 B 의 문항을 덮지 않는다', async () => {
+    const resumeA = { ...resume, id: 'a', name: 'A' } as Resume
+    const resumeB = { ...resume, id: 'b', name: 'B' } as Resume
+    const questionsB = [{ ...linked[0], id: 'qb', question: 'B 문항' }]
+    vi.mocked(resumes.getResume).mockReset()
+      .mockImplementation((id) => Promise.resolve(id === 'a' ? resumeA : resumeB))
+    vi.mocked(introductions.listSelfIntroductions)
+      .mockImplementation((_query, resumeId) => Promise.resolve(resumeId === 'a' ? linked : questionsB))
+    let finishSave!: (value: Resume) => void
+    vi.mocked(resumes.updateResume).mockReset()
+      .mockReturnValue(new Promise((resolve) => { finishSave = resolve }))
+
+    const wrapper = shallowMount(ResumeBoard, { props: { focus: 'a' } })
+    await flushPromises()
+    wrapper.findComponent(ResumeEditor).vm.$emit('save', {})
+    await wrapper.setProps({ focus: 'b' })
+    await flushPromises()
+
+    finishSave({ ...resumeA, name: 'A 저장됨' } as Resume)
+    await flushPromises()
+
+    const editor = wrapper.findComponent(ResumeEditor)
+    expect(editor.props('resume')).toEqual(resumeB)
+    expect(editor.props('questions')).toEqual(questionsB)
+  })
+
   it('문항 요청이 실패해도 이력서는 열리고, 문항 칸이 직접 다시 부르도록 null 을 넘긴다', async () => {
     vi.mocked(resumes.getResume).mockReset().mockResolvedValue(resume)
     vi.mocked(introductions.listSelfIntroductions).mockRejectedValue(new Error('일시 오류'))
