@@ -53,6 +53,8 @@ PUBLIC_BASE_URL=http://127.0.0.1:8089   # 포트가 WEB_PORT 와 달라지면 OA
 
 포트를 바꾸면 Google Console 의 Authorized redirect URI 에 `http://127.0.0.1:8089/login/oauth2/code/google` 을 **추가로 등록**해야 그 작업공간에서 로그인이 된다. 등록 전에도 앱은 정상 기동하고 Google 로그인만 실패한다.
 
+**두 작업공간에 동시에 로그인하려면 브라우저 프로필을 나누거나, 한쪽은 시크릿 창을 쓴다.** 쿠키는 포트를 구분하지 않는다(RFC 6265 8.5). 두 작업공간이 같은 `127.0.0.1` 에서 같은 쿠키 이름(`JSESSIONID`, `JOBSIGHT_REFRESH`)을 쓰므로, 한쪽에 로그인하면 다른 쪽의 세션·리프레시 쿠키를 덮어써 그쪽이 로그아웃된다. 스모크 스크립트는 브라우저 쿠키를 쓰지 않으므로 영향이 없다.
+
 ```powershell
 .\scripts\start.ps1
 # 다른 worktree가 띄운 컨테이너를 현재 작업공간으로 명시적으로 교체할 때만
