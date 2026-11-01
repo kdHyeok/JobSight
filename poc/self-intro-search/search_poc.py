@@ -55,7 +55,7 @@ def bm25(corpus, query):
     terms = list(dict.fromkeys(tokenize(query)))
     if not terms or not corpus:
         return []
-    docs = {item["id"]: tokenize(item["question"] + " " + item.get("answer", "")) for item in corpus}
+    docs = {item["id"]: tokenize(item["question"] + " " + (item.get("answer") or "")) for item in corpus}
     average = sum(len(words) for words in docs.values()) / len(docs)
     total = len(corpus)
 
@@ -134,7 +134,11 @@ class Reranker:
 
 
 def evaluate(rankings_by_query, queries, cutoff=10):
-    """Recall@1 과 MRR@10. 정답이 여러 개면 가장 높이 오른 것을 쓴다."""
+    """Hit@1 과 MRR@10. 정답이 여러 개면 가장 높이 오른 것을 쓴다.
+
+    Hit@1 은 "정답 중 하나라도 1등인가"다. Recall@1 이 아니다: 정답이 둘인 질의에서 하나를 1등으로 찾으면
+    Hit@1 은 1, Recall@1 은 0.5 다. 지금 평가 세트는 질의마다 정답이 하나라 두 값이 같다.
+    """
     hits, reciprocal = 0, 0.0
     for item in queries:
         ranking = rankings_by_query[item["query"]]
@@ -203,11 +207,11 @@ def main():
             per_arm.setdefault(name, {})[item["query"]] = ranking
         elapsed[item["query"]] = time.perf_counter() - started
 
-    print("\n%-10s %10s %10s" % ("방식", "Recall@1", "MRR@10"))
+    print("\n%-10s %10s %10s" % ("방식", "Hit@1", "MRR@10"))
     print("-" * 32)
     for name, rankings in per_arm.items():
-        recall, mrr = evaluate(rankings, queries)
-        print("%-10s %10.3f %10.3f" % (name, recall, mrr))
+        hit, mrr = evaluate(rankings, queries)
+        print("%-10s %10.3f %10.3f" % (name, hit, mrr))
 
     print("\n질의당 다섯 방식 합산 시간 중앙값 %.0fms"
           % (1000 * sorted(elapsed.values())[len(elapsed) // 2]))
@@ -230,7 +234,7 @@ def self_check():
     corpus = [
         {"id": "a", "question": "협업 경험을 쓰시오", "answer": ""},
         {"id": "b", "question": "갈등 해결 경험을 쓰시오", "answer": "협업으로 풀었다"},
-        {"id": "c", "question": "지원 동기", "answer": ""},
+        {"id": "c", "question": "지원 동기", "answer": None},   # DB 에서 뽑으면 답변이 null 일 수 있다
     ]
     ranked = bm25(corpus, "협업")
     assert set(ranked) == {"a", "b"}, ranked        # 부분 문자열 매칭: '협업으로' 도 잡힌다
@@ -247,8 +251,8 @@ def self_check():
 
     rankings = {"질의1": ["a", "b"], "질의2": ["b", "a"]}
     queries = [{"query": "질의1", "expect": ["a"]}, {"query": "질의2", "expect": ["a"]}]
-    recall, mrr = evaluate(rankings, queries)
-    assert recall == 0.5, recall
+    hit, mrr = evaluate(rankings, queries)
+    assert hit == 0.5, hit
     assert abs(mrr - 0.75) < 1e-9, mrr              # 1/1 과 1/2 의 평균
 
     assert prefixed("x", "doc", "symmetric") == "query: x"
