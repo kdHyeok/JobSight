@@ -99,6 +99,18 @@ vi.mock('../api/self-introductions', () => ({
   deleteSelfIntroduction: vi.fn(),
 }))
 
+vi.mock('../api/experiences', () => ({
+  listExperiences: vi.fn(() => Promise.resolve({ experiences: [], unlinked: [], index: { counts: { unlinkedRows: 0 } } })),
+  getExperiences: vi.fn(() => Promise.resolve([])),
+  getExperience: vi.fn(),
+  createExperience: vi.fn(),
+  updateExperience: vi.fn(),
+  reviewExperience: vi.fn(),
+  deleteExperience: vi.fn(),
+  getImportPlan: vi.fn(),
+  applyImport: vi.fn(),
+}))
+
 vi.mock('../api/admin', () => ({
   listUsers: vi.fn(() => Promise.resolve([])),
   fetchSettings: vi.fn(() =>
@@ -233,7 +245,7 @@ describe('App 접근 제어', () => {
     expect(wrapper.find('.auth-card').exists()).toBe(false)
     // 홈은 채용공고. 상단에서 일반 작업 화면을 전환한다.
     expect(wrapper.find('.page-head').text()).toContain('채용공고')
-    expect(wrapper.findAll('.segmented button').map((b) => b.text())).toEqual(['채용공고', '모집 직무', '기업', '이력서', '자기소개'])
+    expect(wrapper.findAll('.segmented button').map((b) => b.text())).toEqual(['채용공고', '모집 직무', '기업', '이력서', '자기소개', '경험'])
     // 아바타는 이름 첫 글자, 툴팁은 이메일
     const avatar = wrapper.get('.avatar')
     expect(avatar.text()).toBe('홍')

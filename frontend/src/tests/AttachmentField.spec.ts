@@ -117,6 +117,7 @@ describe('이력서 편집기의 첨부 칸', () => {
 
     expect(wrapper.text()).toContain('포트폴리오.pdf')
     expect(wrapper.text()).toContain('자격증.pdf')
-    expect(calls()).toEqual([])
+    // 편집기는 경험 원본 목차를 따로 읽는다(경험 조작용). 첨부 메타 요청만 없어야 한다.
+    expect(calls().filter((call) => call.includes(API.attachments))).toEqual([])
   })
 })

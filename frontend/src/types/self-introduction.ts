@@ -50,6 +50,14 @@ export interface SelfIntroduction {
   questionTypes?: QuestionTypeLink[]
   /** 저장(확정 포함)마다 오른다. 다음 수정의 expectedVersion 이다 — docs/self-introductions.md 불변 조건 12. */
   version: number
+  /** 작성 근거(쓴 경험)와 그때 본 개정. 저장된 쌍 그대로다 — 지금 개정으로 다시 계산하지 않는다(설계 6.8). */
+  experiences?: (ExperienceRef & { source: LinkSource })[]
+}
+
+/** 작성 근거 한 쌍. 두 키 모두 필수다. */
+export interface ExperienceRef {
+  experienceId: string
+  experienceRevision: number
 }
 
 /**
@@ -62,6 +70,8 @@ export interface SelfIntroductionPayload {
   answer: string
   positionIds?: string[]
   questionTypes?: Competency[]
+  /** 쓴 경험. 웹은 이 목록으로 맞춘다([] 는 비움). 빼면(undefined) 서버가 유지한다. */
+  experiences?: ExperienceRef[]
 }
 
 /** 웹 수정은 읽어 온 version 이 필수다. 다르면 서버가 409 SELF_INTRO_STALE 로 거절한다. */

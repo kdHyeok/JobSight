@@ -392,7 +392,10 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 .resume-section__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .resume-section__head h2 { display: flex; align-items: baseline; gap: 8px; font-size: 15px; }
 .resume-row { margin-top: 10px; padding: 12px; background: var(--surface-sunken); border-radius: var(--radius); }
-.resume-row__bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.resume-row__bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+/* 경험 앵커 상태와 조작(연결·등록·갱신). 좁은 화면에서는 줄을 나눈다. */
+.resume-row__exp { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.resume-exp-select { max-width: 220px; min-height: 30px; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); font-size: 12px; }
 .resume-row .field input, .resume-row .field textarea { background: var(--surface); }
 .resume-position-search, .position-search-control, .resume-link-search, .resume-search-control { position: relative; }
 .resume-position-search label { color: var(--muted); font-size: 12px; }
