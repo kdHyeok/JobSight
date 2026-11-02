@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { fetchMe, logout } from './api/auth'
 import AdminView from './components/AdminView.vue'
 import CompanyWorkspace from './components/CompanyWorkspace.vue'
+import ExperienceBoard from './components/ExperienceBoard.vue'
 import LoginView from './components/LoginView.vue'
 import PositionBoard from './components/PositionBoard.vue'
 import PostingBoard from './components/PostingBoard.vue'
@@ -34,6 +35,7 @@ const onPositionsRoute = computed(() => path.value.startsWith(ROUTES.positions))
 const onCompaniesRoute = computed(() => path.value.startsWith(ROUTES.companies))
 const onResumesRoute = computed(() => path.value.startsWith(ROUTES.resumes))
 const onIntroductionsRoute = computed(() => path.value.startsWith(ROUTES.introductions))
+const onExperiencesRoute = computed(() => path.value.startsWith(ROUTES.experiences))
 const onPluginRoute = computed(() => path.value === ROUTES.plugin)
 /** 다른 화면에서 열어 달라고 넘긴 항목 id. 각 보드가 목록을 읽은 뒤 그 드로어를 연다. */
 const focusId = computed(() => new URLSearchParams(search.value).get(FOCUS_QUERY))
@@ -101,7 +103,7 @@ onUnmounted(() => {
       <nav v-if="me.authenticated" class="segmented" aria-label="화면 전환">
         <button
           type="button"
-          :class="{ active: !onAdminRoute && !onPositionsRoute && !onCompaniesRoute && !onResumesRoute && !onIntroductionsRoute && !onPluginRoute }"
+          :class="{ active: !onAdminRoute && !onPositionsRoute && !onCompaniesRoute && !onResumesRoute && !onIntroductionsRoute && !onExperiencesRoute && !onPluginRoute }"
           @click="navigate(ROUTES.home)"
         >
           채용공고
@@ -117,6 +119,9 @@ onUnmounted(() => {
         </button>
         <button type="button" :class="{ active: onIntroductionsRoute }" @click="navigate(ROUTES.introductions)">
           자기소개
+        </button>
+        <button type="button" :class="{ active: onExperiencesRoute }" @click="navigate(ROUTES.experiences)">
+          경험
         </button>
       </nav>
       <span v-else />
@@ -190,6 +195,13 @@ onUnmounted(() => {
     />
 
     <SelfIntroductionBoard v-else-if="onIntroductionsRoute" />
+
+    <ExperienceBoard
+      v-else-if="onExperiencesRoute"
+      :focus="focusId"
+      @open-resume="navigate(ROUTES.resumes, $event)"
+      @open-introductions="navigate(ROUTES.introductions)"
+    />
 
     <PostingBoard
       v-else

@@ -10,6 +10,8 @@ import {
 import { ApiClientError } from '../api/http'
 import { listResumes } from '../api/resumes'
 import { listPositions } from '../api/positions'
+import { listExperiences } from '../api/experiences'
+import type { ExperienceLine } from '../types/experience'
 import type { Position } from '../types/position'
 import type { ResumeSummary } from '../types/resume'
 import {
@@ -27,6 +29,8 @@ import ConfirmDialog from './ConfirmDialog.vue'
 const items = ref<SelfIntroduction[]>([])
 const resumes = ref<ResumeSummary[]>([])
 const positions = ref<Position[]>([])
+/** 쓴 경험 선택지(경험 원본 목차). 못 불러와도 문항 화면은 연다. */
+const experienceLines = ref<ExperienceLine[]>([])
 const query = ref('')
 const activeQuery = ref('')
 const loading = ref(true)
@@ -39,7 +43,7 @@ const editingId = ref<string | null>(null)
  */
 const editingVersion = ref(0)
 const deleteTarget = ref<SelfIntroduction | null>(null)
-const draft = reactive<Required<SelfIntroductionPayload>>({ resumeIds: [], question: '', answer: '', positionIds: [], questionTypes: [] })
+const draft = reactive<Required<SelfIntroductionPayload>>({ resumeIds: [], question: '', answer: '', positionIds: [], questionTypes: [], experiences: [] })
 const resumeQuery = ref('')
 const resumePicker = ref<HTMLElement | null>(null)
 const resumeInput = ref<HTMLInputElement | null>(null)
@@ -100,6 +104,25 @@ function addType(code: string) {
 }
 function removeType(code: Competency) {
   draft.questionTypes = draft.questionTypes.filter((value) => value !== code)
+}
+/**
+ * "쓴 경험"(작성 근거, 설계 6.8). 새로 고른 경험은 그 경험의 지금 개정과 짝을 짓는다 — 이 답변을 쓸 때 본 개정이다.
+ * 이미 고른 경험의 개정은 바꾸지 않는다(저장된 쌍 그대로).
+ */
+const experienceById = computed(() => new Map(experienceLines.value.map((line) => [line.id, line])))
+const selectableExperiences = computed(() => experienceLines.value
+  .filter((line) => !draft.experiences.some((ref) => ref.experienceId === line.id)))
+function addExperience(id: string) {
+  const line = experienceById.value.get(id)
+  if (line && draft.experiences.length < 10 && !draft.experiences.some((ref) => ref.experienceId === id)) {
+    draft.experiences = [...draft.experiences, { experienceId: id, experienceRevision: line.revision }]
+  }
+}
+function removeExperience(id: string) {
+  draft.experiences = draft.experiences.filter((ref) => ref.experienceId !== id)
+}
+function experienceSource(id: string): LinkSource | undefined {
+  return editingItem.value?.experiences?.find((link) => link.experienceId === id)?.source
 }
 /** 웹의 ✓. 초안이 아니라 바로 확정한다 — 확정은 웹에서만 하는 별도 동작이다(설계 3절 규칙 3). */
 async function confirmLink(payload: SelfIntroductionConfirmPayload) {
@@ -207,7 +230,7 @@ async function load() {
 function openNew() {
   resetResumeSearch()
   editingId.value = ''
-  Object.assign(draft, { resumeIds: resumes.value[0] ? [resumes.value[0].id] : [], question: '', answer: '', positionIds: [], questionTypes: [] })
+  Object.assign(draft, { resumeIds: resumes.value[0] ? [resumes.value[0].id] : [], question: '', answer: '', positionIds: [], questionTypes: [], experiences: [] })
 }
 
 function openEdit(item: SelfIntroduction) {
@@ -220,6 +243,8 @@ function openEdit(item: SelfIntroduction) {
     answer: item.answer ?? '',
     positionIds: (item.positionLinks ?? []).map((link) => link.positionId),
     questionTypes: (item.questionTypes ?? []).map((link) => link.code),
+    // 저장된 (경험, 개정) 쌍을 그대로 들고 간다. 지금 개정으로 바꾸지 않는다(설계 6.8).
+    experiences: (item.experiences ?? []).map(({ experienceId, experienceRevision }) => ({ experienceId, experienceRevision })),
   })
 }
 
@@ -272,9 +297,10 @@ onMounted(async () => {
   window.visualViewport?.addEventListener('resize', fitResumeMenu)
   window.visualViewport?.addEventListener('scroll', fitResumeMenu)
   // 직무는 선택지·후보 칩·카드 이름에만 쓴다. 못 불러와도 문항 화면은 연다.
-  const [loadedResumes, loadedPositions] = await Promise.allSettled([listResumes(), listPositions()])
+  const [loadedResumes, loadedPositions, loadedExperiences] = await Promise.allSettled([listResumes(), listPositions(), listExperiences()])
   resumes.value = loadedResumes.status === 'fulfilled' ? loadedResumes.value : []
   positions.value = loadedPositions.status === 'fulfilled' ? loadedPositions.value : []
+  experienceLines.value = loadedExperiences.status === 'fulfilled' ? loadedExperiences.value.experiences : []
   await load()
 })
 onUnmounted(() => {
@@ -388,6 +414,20 @@ onUnmounted(() => {
           <select aria-label="문항 유형 추가" :disabled="draft.questionTypes.length >= 3" @change="addType(picked($event))">
             <option value="">유형 추가…(3개까지)</option>
             <option v-for="code in selectableTypes" :key="code" :value="code">{{ competencyLabels[code] }}</option>
+          </select>
+        </fieldset>
+        <fieldset class="field full intro-links">
+          <legend>쓴 경험 <span class="page-count">{{ draft.experiences.length }}</span></legend>
+          <div v-if="draft.experiences.length" class="link-chips">
+            <span v-for="ref in draft.experiences" :key="ref.experienceId" class="chip" :data-tone="experienceSource(ref.experienceId) === 'AI' ? 'warning' : undefined">
+              <span>{{ experienceById.get(ref.experienceId)?.title ?? '삭제된 경험' }} · 개정 {{ ref.experienceRevision }}</span>
+              <small v-if="experienceSource(ref.experienceId) === 'AI'">AI 기록</small>
+              <button type="button" class="chip-action" :aria-label="`${experienceById.get(ref.experienceId)?.title ?? '경험'} 근거 해제`" @click="removeExperience(ref.experienceId)">×</button>
+            </span>
+          </div>
+          <select aria-label="쓴 경험 추가" :disabled="draft.experiences.length >= 10 || !selectableExperiences.length" @change="addExperience(picked($event))">
+            <option value="">{{ experienceLines.length ? '이 답변에 쓴 경험 추가…' : '등록된 경험이 없습니다' }}</option>
+            <option v-for="line in selectableExperiences" :key="line.id" :value="line.id">{{ line.title }}{{ line.period ? ` (${line.period})` : '' }}</option>
           </select>
         </fieldset>
         <label class="field full">

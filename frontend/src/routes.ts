@@ -15,6 +15,8 @@ export const ROUTES = {
   companies: '/companies',
   resumes: '/resumes',
   introductions: '/introductions',
+  /** 경험 원본 목록·편집·가져오기(docs/experiences.md). API 는 아래 API.experience*. */
+  experiences: '/experiences',
   admin: '/admin',
   plugin: '/plugin',
 } as const

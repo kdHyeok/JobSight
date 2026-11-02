@@ -6,8 +6,18 @@ import AttachmentField from './AttachmentField.vue'
 import ResumeSection from './ResumeSection.vue'
 import ResumeQuestions from './ResumeQuestions.vue'
 import type { Resume, ResumeContent, ResumePayload, Row, SectionKey } from '../types/resume'
-import { BASIC_FIELDS, MAX_LENGTH, SECTIONS, fillContent, text } from '../types/resume'
+import { BASIC_FIELDS, MAX_LENGTH, SECTIONS, emptyRow, fillContent, text } from '../types/resume'
 import { downloadAttachments, downloadWord } from '../utils/resume-export'
+import { createExperience, getExperiences, listExperiences } from '../api/experiences'
+import {
+  SECTION_KINDS,
+  anchorOf,
+  experienceFromRow,
+  needsReview,
+  rowFromExperience,
+  type ExperienceDetail,
+  type ExperienceLine,
+} from '../types/experience'
 
 /**
  * 이력서 한 버전의 전체 페이지 편집기. 폼이 커서 드로어(520px)에 넣지 않는다 — design-system 규칙 7.
@@ -44,17 +54,104 @@ const exportOpen = ref(false)
 const attachmentIds = ref<string[]>([])
 const exportError = ref('')
 
+/**
+ * 경험 원본(docs/experiences.md). 목록은 연결·불러오기 선택지, 상세는 앵커가 가리키는 경험의 개정 이력('재검토 필요' 판정)이다.
+ * 못 불러와도 이력서 편집은 막지 않는다 — 경험 조작만 숨긴다.
+ */
+const experienceLines = ref<ExperienceLine[] | null>(null)
+const experienceDetails = ref<Record<string, ExperienceDetail>>({})
+/** "원본으로 갱신"을 누른 경험. 다음 저장의 refreshExperienceIds 로 나가고 저장 응답을 받으면 비운다. */
+const refreshIds = ref<string[]>([])
+const experienceNotice = ref('')
+const experienceError = ref('')
+
+const anchoredIds = (value: ResumeContent) => [...new Set(SECTIONS
+  .filter((section) => SECTION_KINDS[section.key])
+  .flatMap((section) => value[section.key].map(anchorOf))
+  .filter((id): id is string => !!id))]
+
+async function loadExperiences() {
+  try {
+    const ids = anchoredIds(content.value)
+    const [list, details] = await Promise.all([listExperiences(), ids.length ? getExperiences(ids) : Promise.resolve([])])
+    experienceLines.value = list.experiences
+    experienceDetails.value = Object.fromEntries(details.map((detail) => [detail.id, detail]))
+  } catch {
+    experienceLines.value = null
+  }
+}
+
+/** 섹션에 내려 줄 경험 선택지. 경험 앵커가 없는 섹션은 undefined(조작을 그리지 않음). */
+function sectionExperiences(key: SectionKey) {
+  const kind = SECTION_KINDS[key]
+  return kind && experienceLines.value ? experienceLines.value.filter((line) => line.kind === kind) : undefined
+}
+
+/** 행이 참조한 개정 뒤에 정정이 있는 경험. 한 이력서에 같은 경험은 한 행뿐이라 경험 id 로 모은다. */
+const staleIds = computed(() => SECTIONS.flatMap((section) => content.value[section.key])
+  .filter((row) => {
+    const id = anchorOf(row)
+    return id && needsReview(experienceDetails.value[id], row.experienceRevision)
+  })
+  .map((row) => anchorOf(row) as string))
+
+function refreshExperience(id: string) {
+  if (!refreshIds.value.includes(id)) refreshIds.value = [...refreshIds.value, id]
+}
+
+/** "경험에서 불러오기": 사실로 만든 중립 행을 섹션 끝에 붙인다. 개정은 저장할 때 서버가 지금 개정으로 정한다. */
+async function loadFromExperience(key: SectionKey, id: string) {
+  if (!id) return
+  experienceError.value = ''
+  try {
+    const detail = experienceDetails.value[id] ?? (await getExperiences([id]))[0]
+    if (!detail) return
+    experienceDetails.value = { ...experienceDetails.value, [id]: detail }
+    const section = SECTIONS.find((item) => item.key === key)!
+    setRows(key, [...content.value[key], rowFromExperience(key, detail, emptyRow(section))])
+  } catch (error) {
+    experienceError.value = error instanceof Error ? error.message : '경험을 불러오지 못했습니다.'
+  }
+}
+
+/** "경험으로 등록": 미연결 행으로 경험 원본을 만들고 그 행에 앵커를 단다. 연결은 이력서를 저장할 때 확정된다. */
+async function registerExperience(key: SectionKey, index: number) {
+  const row = content.value[key][index]
+  const payload = row && experienceFromRow(key, row)
+  experienceError.value = ''
+  if (!payload) {
+    experienceError.value = '제목(이름·기업명)을 먼저 입력해 주세요.'
+    return
+  }
+  try {
+    const saved = await createExperience(payload)
+    setRows(key, content.value[key].map((item, i) => (i === index ? { ...item, experienceId: saved.id } : item)))
+    experienceNotice.value = `"${payload.title}" 경험 원본을 만들었습니다. 이력서를 저장하면 이 행이 연결됩니다.`
+    await loadExperiences()
+  } catch (error) {
+    experienceError.value = error instanceof Error ? error.message : '경험 원본을 만들지 못했습니다.'
+  }
+}
+
 watch(() => props.resume, (resume) => {
   name.value = resume.name
   content.value = fillContent(resume.content)
   positionIds.value = [...resume.positionIds]
   positionQuery.value = ''
+  refreshIds.value = []
   closePositionMenu()
+  // 저장 응답의 unlinkedWarnings: 이번 저장으로 경험 연결이 끊긴 행(설계 6.2-9). 경험 원본은 그대로다.
+  const lost = resume.unlinkedWarnings ?? []
+  experienceNotice.value = lost.length
+    ? `경험 연결이 끊긴 행이 있습니다: ${lost.map((id) => experienceLines.value?.find((line) => line.id === id)?.title ?? id).join(', ')}. 경험 원본은 남아 있습니다.`
+    : ''
+  loadExperiences()
 })
 
 /** 저장한 시점의 문서와 깊은 비교. 입력마다 새 객체를 만드니 JSON 비교가 정직하다. */
 const dirty = computed(() =>
   name.value !== props.resume.name
+  || refreshIds.value.length > 0
   || JSON.stringify(content.value) !== JSON.stringify(fillContent(props.resume.content))
   || JSON.stringify([...positionIds.value].sort()) !== JSON.stringify([...props.resume.positionIds].sort()),
 )
@@ -66,6 +163,7 @@ watch(dirty, (isDirty) => {
   else window.removeEventListener('beforeunload', guard)
 }, { immediate: true })
 onMounted(() => {
+  loadExperiences()
   document.addEventListener('pointerdown', dismissPositionMenu)
   document.addEventListener('focusin', dismissPositionMenu)
 })
@@ -84,7 +182,9 @@ function setRows(key: SectionKey, rows: Row[]) {
 
 function submit() {
   if (!name.value.trim()) return
-  emit('save', { name: name.value.trim(), content: content.value, positionIds: [...positionIds.value] })
+  const payload: ResumePayload = { name: name.value.trim(), content: content.value, positionIds: [...positionIds.value] }
+  if (refreshIds.value.length) payload.refreshExperienceIds = [...refreshIds.value]
+  emit('save', payload)
 }
 
 const basicValue = (key: string) => content.value.basic[key as keyof typeof content.value.basic] ?? ''
@@ -267,13 +367,23 @@ async function exportPdf() {
       </div>
     </section>
 
+    <div v-if="experienceNotice || experienceError" class="page-notice">
+      <div v-if="experienceNotice" class="notice" role="status">{{ experienceNotice }}</div>
+      <div v-if="experienceError" class="notice error" role="alert">{{ experienceError }}</div>
+    </div>
     <ResumeSection
       v-for="section in SECTIONS"
       :key="section.key"
       :section="section"
       :rows="content[section.key]"
       :attachments="resume.attachments"
+      :experiences="sectionExperiences(section.key)"
+      :stale-ids="staleIds"
+      :refresh-ids="refreshIds"
       @update:rows="setRows(section.key, $event)"
+      @load="loadFromExperience(section.key, $event)"
+      @register="registerExperience(section.key, $event)"
+      @refresh="refreshExperience"
     />
     <ResumeQuestions :resume-id="resume.id" :questions="questions" @open-introductions="emit('openIntroductions')" />
   </main>

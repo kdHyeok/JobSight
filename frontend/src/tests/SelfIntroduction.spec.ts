@@ -4,6 +4,8 @@ import SelfIntroductionBoard from '../components/SelfIntroductionBoard.vue'
 import * as api from '../api/self-introductions'
 import { listResumes } from '../api/resumes'
 import { listPositions } from '../api/positions'
+import { listExperiences } from '../api/experiences'
+import type { ExperienceLine } from '../types/experience'
 import { ApiClientError } from '../api/http'
 import { highlightMatches } from '../utils/highlight'
 import type { Position } from '../types/position'
@@ -21,6 +23,7 @@ vi.mock('../api/self-introductions', () => ({
 
 vi.mock('../api/resumes', () => ({ listResumes: vi.fn() }))
 vi.mock('../api/positions', () => ({ listPositions: vi.fn() }))
+vi.mock('../api/experiences', () => ({ listExperiences: vi.fn() }))
 
 const positions = [
   { id: 'p-backend', name: '백엔드', companyName: '에이회사', postingTitle: '공채' },
@@ -42,6 +45,10 @@ const resumes = [
   { id: 'frontend', name: '프런트 이력서', createdAt: item.createdAt, updatedAt: '2026-09-17T00:00:00Z' },
   { id: 'data', name: '데이터 이력서', createdAt: item.createdAt, updatedAt: '2026-09-18T00:00:00Z' },
 ]
+const line = (id: string, title: string, revision: number) => ({
+  id, kind: 'PROJECT', title, period: null, revision, reviewed: true, skills: [], domains: [], inResumes: [], usedInSelfIntros: 0,
+}) as ExperienceLine
+const experienceLines = [line('exp-search', '검색 개선', 3), line('exp-batch', '배치 이관', 1)]
 const mountBoard = async () => {
   const wrapper = mount(SelfIntroductionBoard, { attachTo: document.body })
   await flushPromises()
@@ -53,6 +60,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     vi.mocked(api.listSelfIntroductions).mockReset().mockResolvedValue([item])
     vi.mocked(listResumes).mockReset().mockResolvedValue(resumes)
     vi.mocked(listPositions).mockReset().mockResolvedValue(positions)
+    vi.mocked(listExperiences).mockReset().mockResolvedValue({ experiences: experienceLines, unlinked: [], index: {} as never })
     vi.mocked(api.confirmSelfIntroduction).mockReset()
     vi.mocked(api.createSelfIntroduction).mockReset().mockResolvedValue(item)
     vi.mocked(api.updateSelfIntroduction).mockReset().mockResolvedValue(item)
@@ -124,7 +132,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
     expect(api.createSelfIntroduction).toHaveBeenCalledWith({
-      resumeIds: ['data'], question: '지원 동기', answer: '작성한 답변', positionIds: [], questionTypes: [],
+      resumeIds: ['data'], question: '지원 동기', answer: '작성한 답변', positionIds: [], questionTypes: [], experiences: [],
     })
     expect(wrapper.find('.intro-editor').exists()).toBe(false)
   })
@@ -141,10 +149,35 @@ describe('자기소개 문항과 연결 이력서', () => {
     await flushPromises()
     // 읽어 온 version 을 함께 보낸다. 그사이 AI 가 저장했으면 덮어쓰지 않고 409 를 받는다(불변 조건 12).
     expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, {
-      resumeIds: ['data'], question: item.question, answer: item.answer, positionIds: [], questionTypes: [],
+      resumeIds: ['data'], question: item.question, answer: item.answer, positionIds: [], questionTypes: [], experiences: [],
       expectedVersion: item.version,
     })
     expect(item.resumeIds).toEqual([resumes[0].id])
+  })
+
+  it('쓴 경험: 저장된 (경험, 개정) 쌍은 그대로, 새로 고른 경험은 지금 개정과 짝지어 목록으로 보낸다', async () => {
+    vi.mocked(api.listSelfIntroductions).mockResolvedValue([{
+      ...item, experiences: [{ experienceId: 'exp-search', experienceRevision: 2, source: 'AI' }],
+    }])
+    const wrapper = await mountBoard()
+    await wrapper.get('.intro-card .button').trigger('click')
+    const chips = wrapper.findAll('.intro-links').find((set) => set.text().includes('쓴 경험'))!
+    // 지금 개정(3)이 아니라 답변을 쓸 때 본 개정(2)을 보여 준다. MCP 가 남긴 근거는 AI 기록이다.
+    expect(chips.text()).toContain('검색 개선 · 개정 2')
+    expect(chips.text()).toContain('AI 기록')
+    await wrapper.get('select[aria-label="쓴 경험 추가"]').setValue('exp-batch')
+    await wrapper.get('.intro-editor form').trigger('submit')
+    await flushPromises()
+    expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, expect.objectContaining({
+      experiences: [{ experienceId: 'exp-search', experienceRevision: 2 }, { experienceId: 'exp-batch', experienceRevision: 1 }],
+    }))
+
+    // 빼면 빈 목록을 보낸다 — 웹은 목록으로 맞춘다([] 는 비움).
+    await wrapper.get('.intro-card .button').trigger('click')
+    await wrapper.get('[aria-label="검색 개선 근거 해제"]').trigger('click')
+    await wrapper.get('.intro-editor form').trigger('submit')
+    await flushPromises()
+    expect(api.updateSelfIntroduction).toHaveBeenLastCalledWith(item.id, expect.objectContaining({ experiences: [] }))
   })
 
   it('다른 곳에서 먼저 저장했으면(409) 안내를 띄우고 초안을 남긴 채 목록만 다시 불러온다', async () => {
@@ -177,7 +210,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
     expect(api.createSelfIntroduction).toHaveBeenCalledWith({
-      resumeIds: [], question: '지원 동기', answer: '', positionIds: ['p-front'], questionTypes: ['MOTIVATION'],
+      resumeIds: [], question: '지원 동기', answer: '', positionIds: ['p-front'], questionTypes: ['MOTIVATION'], experiences: [],
     })
   })
 

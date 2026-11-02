@@ -66,6 +66,8 @@ export interface Resume extends ResumeSummary {
   version: number
   /** content 가 가리키는 내 첨부의 메타(응답 전용). 빠진 id 는 첨부 칸이 직접 부른다 — docs/attachments.md. */
   attachments?: Record<string, AttachmentMeta>
+  /** 이번 저장으로 연결이 끊긴 경험 id(쓰기 응답 전용). 편집기가 알림으로 보여 준다 — docs/experiences.md. */
+  unlinkedWarnings?: string[]
 }
 
 export interface ResumePayload {
@@ -74,6 +76,8 @@ export interface ResumePayload {
   positionIds: string[]
   /** 문서 저장(PUT)에 필수다. 생성에는 쓰지 않는다. 다르면 409 RESUME_STALE. */
   expectedVersion?: number
+  /** "원본으로 갱신": 이 경험 행의 개정을 지금 개정으로 올린다. 개정을 올리는 웹의 유일한 길이다. */
+  refreshExperienceIds?: string[]
 }
 
 export type FieldKind = 'text' | 'ym' | 'url' | 'textarea' | 'file' | 'select' | 'terms'
