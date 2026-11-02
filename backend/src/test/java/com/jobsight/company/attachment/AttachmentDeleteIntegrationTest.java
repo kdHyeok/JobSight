@@ -10,11 +10,17 @@ import com.jobsight.company.experience.ExperienceKind;
 import com.jobsight.company.experience.dto.ExperienceFacts;
 import com.jobsight.company.experience.dto.ExperienceRequests;
 import com.jobsight.company.experience.dto.ExperienceViews;
+import com.jobsight.company.posting.ApplicationStatus;
+import com.jobsight.company.posting.EmploymentType;
+import com.jobsight.company.posting.JobPostingService;
+import com.jobsight.company.posting.dto.JobPostingRequest;
 import com.jobsight.company.resume.ResumeContent;
 import com.jobsight.company.resume.ResumeService;
 import com.jobsight.company.resume.dto.ResumeCopyRequest;
 import com.jobsight.company.resume.dto.ResumeRequest;
 import com.jobsight.company.resume.dto.ResumeResponse;
+import com.jobsight.company.submission.SubmissionService;
+import com.jobsight.company.submission.dto.SubmissionRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +37,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -70,6 +77,8 @@ class AttachmentDeleteIntegrationTest {
     @Autowired AttachmentService attachments;
     @Autowired ResumeService resumes;
     @Autowired ExperienceBankService experiences;
+    @Autowired JobPostingService postings;
+    @Autowired SubmissionService submissions;
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper mapper;
     @Autowired PlatformTransactionManager transactions;
@@ -97,6 +106,11 @@ class AttachmentDeleteIntegrationTest {
                 ResumeContent.class);
     }
 
+    private ResumeContent certificates(String... fileIds) {
+        return mapper.convertValue(Map.of("certificates", Arrays.stream(fileIds)
+                .map(fileId -> Map.of("name", "자격증", "fileId", fileId)).toList()), ResumeContent.class);
+    }
+
     private ResumeResponse resume(String name, String fileId) {
         return resumes.create(new ResumeRequest(name, certificate(fileId), List.of(), null));
     }
@@ -113,10 +127,10 @@ class AttachmentDeleteIntegrationTest {
         return ApiErrors.translate(thrown).code();
     }
 
-    private static ExperienceFacts evidenceOn(UUID attachmentId) {
-        return new ExperienceFacts(null, null, null, null, null, List.of(new ExperienceFacts.Evidence(null,
-                ExperienceFacts.SourceType.ATTACHMENT, new ExperienceFacts.Ref(null, null, null, null, attachmentId, null),
-                "수료증 사본", null, null, null, null)), null, null);
+    private static ExperienceFacts evidenceOn(UUID... attachmentIds) {
+        return new ExperienceFacts(null, null, null, null, null, Arrays.stream(attachmentIds).map(id -> new ExperienceFacts.Evidence(null,
+                ExperienceFacts.SourceType.ATTACHMENT, new ExperienceFacts.Ref(null, null, null, null, id, null),
+                "수료증 사본", null, null, null, null)).toList(), null, null);
     }
 
     private static ExperienceFacts noEvidence() {
@@ -172,10 +186,13 @@ class AttachmentDeleteIntegrationTest {
         jdbc.update("update resumes set content = jsonb_set(content, '{certificates,0,fileId}', to_jsonb(?::text)) where id = ?",
                 stale, kept.id());
         ResumeResponse reread = resumes.findById(kept.id());
+        UUID added = attachment(OWNER_ID, "새 내 파일.pdf", 0);
 
-        ResumeResponse saved = resumes.update(kept.id(), new ResumeRequest("내 것 (고침)", null, null, reread.version()));
-        assertThat(saved.name()).isEqualTo("내 것 (고침)");
-        assertThat(saved.content().certificates().get(0).fileId()).isEqualTo(stale);
+        // content 를 명시해 보낸다: 저장돼 있던 지워진 id 와 새 id 가 한 문서에 섞인다. 새 id 만 검사한다.
+        assertThat(code(catchThrowable(() -> save(reread, certificates(stale, theirs.toString())))))
+                .as("저장된 값의 통과가 새로 적은 남의 id 검사를 가리지 않는다").isEqualTo("ATTACHMENT_NOT_FOUND");
+        ResumeResponse saved = save(reread, certificates(stale, added.toString()));
+        assertThat(saved.content().certificates()).extracting(row -> row.fileId()).containsExactly(stale, added.toString());
     }
 
     /** 경험 근거(지금 facts 와 지난 개정)도 사용처다. 근거를 새로 적는 경험 쓰기에도 규칙 B 가 걸린다. */
@@ -195,6 +212,25 @@ class AttachmentDeleteIntegrationTest {
         assertThat(code(blocked)).isEqualTo("ATTACHMENT_IN_USE");
         assertThat(blocked).hasMessageContaining("지난 개정");
         assertThat(exists(file)).isTrue();
+    }
+
+    /** 경험 수정의 규칙 B: 새로 더한 근거만 잡는다. 이미 저장된(지워진) 근거는 통과하고, 남의 새 근거는 400 이다. */
+    @Test
+    void experienceUpdateLocksOnlyNewEvidence() {
+        UUID stale = attachment(OWNER_ID, "지워질 수료증.pdf", 0);
+        UUID added = attachment(OWNER_ID, "새 수료증.pdf", 0);
+        UUID theirs = attachment(OTHER_ID, "남의 수료증.pdf", 0);
+        ExperienceViews.Saved created = experiences.save(null, experience(null, evidenceOn(stale), null));
+        // 규칙 B 이전에 지워진 파일을 흉내 낸다(경험 근거에는 FK 가 없다).
+        jdbc.update("delete from attachments where id = ?", stale);
+
+        assertThat(code(catchThrowable(() -> experiences.save(created.id(),
+                experience(created.id(), evidenceOn(stale, theirs), created.version()))))).isEqualTo("ATTACHMENT_NOT_FOUND");
+        ExperienceViews.Saved updated = experiences.save(created.id(),
+                experience(created.id(), evidenceOn(stale, added), created.version()));
+
+        assertThat(updated.version()).isGreaterThan(created.version());
+        assertThat(code(catchThrowable(() -> attachments.delete(added)))).isEqualTo("ATTACHMENT_IN_USE");
     }
 
     /** 서랍 목록: 사용처와 서버 계산 deletable(미사용이고 올린 지 7일이 지남). 남의 파일은 없다. */
@@ -314,6 +350,113 @@ class AttachmentDeleteIntegrationTest {
 
         assertThat(saveResult).isNull();
         assertThat(code(catchThrowable(() -> attachments.delete(file)))).isEqualTo("ATTACHMENT_IN_USE");
+        assertThat(exists(file)).isTrue();
+    }
+
+    /** 경험 수정으로 근거를 새로 더하는 쪽이 먼저면 삭제가 기다렸다가 409 다. */
+    @Test
+    void experienceEvidenceWrittenFirstMakesDeleteConflict() throws Exception {
+        UUID file = attachment(OWNER_ID, "경험 경합.pdf", 30);
+        ExperienceViews.Saved created = experiences.save(null, experience(null, noEvidence(), null));
+
+        Throwable deleteResult = race(() -> experiences.save(created.id(),
+                experience(created.id(), evidenceOn(file), created.version())), () -> {
+            attachments.delete(file);
+            return null;
+        });
+
+        assertThat(code(deleteResult)).isEqualTo("ATTACHMENT_IN_USE");
+        assertThat(exists(file)).isTrue();
+    }
+
+    /** 삭제가 먼저면 근거를 새로 더하는 경험 수정이 400 이고, 경험은 그대로다. */
+    @Test
+    void deleteFirstMakesNewEvidenceFail() throws Exception {
+        UUID file = attachment(OWNER_ID, "경험 경합.pdf", 30);
+        ExperienceViews.Saved created = experiences.save(null, experience(null, noEvidence(), null));
+
+        Throwable saveResult = race(() -> attachments.delete(file),
+                () -> experiences.save(created.id(), experience(created.id(), evidenceOn(file), created.version())));
+
+        assertThat(code(saveResult)).isEqualTo("ATTACHMENT_NOT_FOUND");
+        assertThat(exists(file)).isFalse();
+        assertThat(jdbc.queryForObject("select version from experiences where id = ?", Long.class, created.id()))
+                .isEqualTo(created.version());
+    }
+
+    private SubmissionRequest receiptOn(UUID resumeId, UUID file) {
+        return new SubmissionRequest(SubmissionService.Level.RECEIPT_VERIFIED, List.of(resumeId), List.of(),
+                "접수가 완료되었습니다", null, List.of(file));
+    }
+
+    private UUID posting(String company) {
+        return postings.create(new JobPostingRequest(null, company, company + " 신입 공채", null, EmploymentType.FULL_TIME, null,
+                ApplicationStatus.INTERESTED, null, null, List.of(), List.of())).id();
+    }
+
+    /** 제출 기록(접수 근거)이 먼저 그 파일을 잡으면 삭제는 기다렸다가 409 다. */
+    @Test
+    void submissionFirstMakesDeleteConflict() throws Exception {
+        UUID file = attachment(OWNER_ID, "접수 확인.pdf", 30);
+        UUID postingId = posting("경합사");
+        UUID resumeId = resume("제출용", "").id();
+
+        Throwable deleteResult = race(() -> submissions.confirm(postingId, receiptOn(resumeId, file)), () -> {
+            attachments.delete(file);
+            return null;
+        });
+
+        assertThat(code(deleteResult)).isEqualTo("ATTACHMENT_IN_USE");
+        assertThat(deleteResult).hasMessageContaining("제출 기록");
+        assertThat(exists(file)).isTrue();
+    }
+
+    /** 삭제가 먼저면 제출 기록이 lockAttachments 에서 기다렸다가 400 이고, 기록은 남지 않는다. */
+    @Test
+    void deleteFirstMakesSubmissionFail() throws Exception {
+        UUID file = attachment(OWNER_ID, "접수 확인.pdf", 30);
+        UUID postingId = posting("경합이사");
+        UUID resumeId = resume("제출용", "").id();
+
+        Throwable confirmResult = race(() -> attachments.delete(file), () -> submissions.confirm(postingId, receiptOn(resumeId, file)));
+
+        assertThat(code(confirmResult)).isEqualTo("ATTACHMENT_NOT_FOUND");
+        assertThat(exists(file)).isFalse();
+        assertThat(jdbc.queryForObject("select count(*) from submissions where posting_id = ?", Integer.class, postingId)).isZero();
+    }
+
+    /** 삭제는 잠금을 3초까지만 기다린다(set local lock_timeout). 넘으면 연결을 붙잡지 않고 409 BUSY 다. */
+    @Test
+    void deleteGivesUpOnLockAfterTimeout() throws Exception {
+        UUID file = attachment(OWNER_ID, "잡힌 파일.pdf", 30);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<?> holder = pool.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                jdbc.queryForList("select id from attachments where id = ? for key share", UUID.class, file);
+                held.countDown();
+                try {
+                    release.await(20, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            assertThat(held.await(10, TimeUnit.SECONDS)).isTrue();
+
+            long started = System.nanoTime();
+            Throwable thrown = catchThrowable(() -> attachments.delete(file));
+            long waitedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+            assertThat(thrown).as("잠금 대기 상한이 없으면 잡은 쪽이 놓을 때까지 기다렸다가 지워 버린다").isNotNull();
+            assertThat(code(thrown)).isEqualTo("BUSY");
+            assertThat(waitedMs).isBetween(2_500L, 10_000L);
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
         assertThat(exists(file)).isTrue();
     }
 }
