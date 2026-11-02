@@ -14,9 +14,11 @@ import com.jobsight.company.position.Position;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.posting.JobPosting;
 import com.jobsight.company.posting.JobPostingRepository;
+import com.jobsight.company.embedding.DenseIndex;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -36,17 +38,19 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * experience_search — 설계 4.1~4.3. 공고를 저장하지 않고 내 경험과 그 출처를 찾는다. 신호는 LEXICAL·REQUIREMENT 둘,
+ * experience_search — 설계 4.1~4.3. 공고를 저장하지 않고 내 경험과 그 출처를 찾는다. 신호는 LEXICAL·REQUIREMENT·DENSE(5단계, 경험 원본만),
  * 융합은 가중 RRF(k=60)다. 4단계(전환 경로 완료): 응답 형식은 3단계 그대로이고 자료원이 경험 원본이다 —
  * EXPERIENCE 후보는 경험 원본(REQUIREMENT 의 정확 일치는 experiences.skills, 본문은 사실·소재집·메모), RESUME_ROW 후보는
  * 앵커가 없는 미연결 행 묶음뿐이다. 이력서 검색과 경험 검색을 따로 운영하지 않는다.
- * 쓰기는 없다. 트랜잭션은 readOnly 하나이고, 5단계에서 DENSE 를 더할 때 질의 벡터는 트랜잭션 밖에서 받는다(4.3 ⑥).
+ * 쓰기는 없다. 질의 벡터는 트랜잭션 밖에서 받고(4.3 ⑥), embedder 가 없으면 degraded:["dense"] 로 나머지 신호만 쓴다.
  */
 @Service
 public class ExperienceSearch {
     /** 신호 구성·가중값을 바꾸면 올린다 — 재현 정보 context.searchConfig(설계 6.7). */
-    static final String SEARCH_CONFIG = "search-v1-2026-11-experience-bank";
+    static final String SEARCH_CONFIG = "search-v2-2026-11-dense";
     private static final int RRF_K = 60;
+    /** DENSE 순위에 넣는 후보 수. 가중 RRF 의 다른 신호와 같은 척도로 상위만 본다. */
+    private static final int DENSE_TOP = 20;
     private static final int DEFAULT_LIMIT = 8;
     private static final int MAX_LIMIT = 20;
     private static final int EXCERPT = 200;
@@ -59,9 +63,15 @@ public class ExperienceSearch {
     private final JobPostingRepository postings;
     private final CompanyRepository companies;
     private final CurrentUser currentUser;
+    private final DenseIndex dense;
+    private final TransactionTemplate readOnly;
 
     public ExperienceSearch(ExperienceService experiences, ExperienceRepository bank, PositionRepository positions,
-                            JobPostingRepository postings, CompanyRepository companies, CurrentUser currentUser) {
+                            JobPostingRepository postings, CompanyRepository companies, CurrentUser currentUser,
+                            DenseIndex dense, PlatformTransactionManager transactions) {
+        this.dense = dense;
+        this.readOnly = new TransactionTemplate(transactions);
+        this.readOnly.setReadOnly(true);
         this.experiences = experiences;
         this.bank = bank;
         this.positions = positions;
@@ -101,13 +111,25 @@ public class ExperienceSearch {
         }
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * 트랜잭션은 여기 두지 않는다(설계 4.3 ⑥): 대상 직무를 읽는 readOnly 한 번 → 트랜잭션 밖에서 질의 벡터(2초, 실패하면 degraded)
+     * → 나머지를 readOnly 한 번. embedder 를 기다리는 동안 DB 연결을 쥐지 않는다.
+     */
     public ExperienceSearchResult search(ExperienceSearchRequest request) {
         if ((request.positionId() == null) == (request.posting() == null)) {
             throw new ApiRuleException(HttpStatus.BAD_REQUEST, "QUERY_REQUIRED",
                     "positionId(등록 직무) 또는 posting(저장하지 않는 공고) 중 하나만 보내세요.");
         }
-        Target target = request.positionId() != null ? saved(request.positionId()) : unsaved(request.posting());
+        Target target = readOnly.execute(status ->
+                request.positionId() != null ? saved(request.positionId()) : unsaved(request.posting()));
+        String queryText = Stream.concat(Stream.of(target.label()), Stream.concat(target.texts().values().stream(),
+                target.techStack().stream())).filter(Objects::nonNull).collect(Collectors.joining(" "));
+        DenseIndex.Query query = dense.query(queryText).orElse(null);
+        return readOnly.execute(status -> rank(request, target, queryText, query));
+    }
+
+    private ExperienceSearchResult rank(ExperienceSearchRequest request, Target target, String queryText,
+                                        DenseIndex.Query query) {
         List<RowGroups.Doc> docs = experiences.docs();
         List<RowGroups.Group> unlinked = RowGroups.unlinked(docs);
         List<Experience> bank = this.bank.findAllByOwnerIdOrderByKindAscTitleKeyAscIdAsc(currentUser.id());
@@ -150,26 +172,42 @@ public class ExperienceSearch {
                 if (match == 0) continue;
                 score += need.field().weight() * match * Math.log(1 + (double) n / df.get(need.key()));
                 requirementWhy.computeIfAbsent(candidate, c -> new ArrayList<>()).add(new ExperienceSearchResult.Why(
-                        "REQUIREMENT", null, List.of(need.key()), need.field(), need.quote()));
+                        "REQUIREMENT", null, List.of(need.key()), need.field(), need.quote(), null));
             }
             if (score > 0) requirementScores.put(candidate, score);
         }
 
         // LEXICAL: 다섯 칸 본문은 요구 태그 유무와 관계없이 항상 질의에 넣는다(4.2).
-        String queryText = Stream.concat(Stream.of(target.label()), Stream.concat(target.texts().values().stream(),
-                target.techStack().stream())).filter(Objects::nonNull).collect(Collectors.joining(" "));
         List<String> terms = Bm25.terms(queryText);
         Map<Candidate, List<String>> documents = new HashMap<>();
         candidates.forEach(candidate -> documents.put(candidate, candidate.words()));
         Map<Candidate, Double> lexicalScores = Bm25.scores(documents, terms);
         if (lexicalScores == null) lexicalScores = Map.of();
 
+        // DENSE(5단계): 같은 질의 텍스트의 벡터와 경험 조각들의 max-sim. RESUME_ROW 는 대상이 아니다(4.2). 상위 DENSE_TOP 만 순위에 넣는다 —
+        // cosine 은 모든 후보에 값이 있어서 다 넣으면 관계없는 경험까지 결과를 채운다.
+        UUID owner = currentUser.id();
+        Map<Candidate, Double> denseScores = new HashMap<>();
+        Map<Candidate, String> denseField = new HashMap<>();
+        if (query != null) {
+            Map<UUID, DenseIndex.Hit> hits = dense.experiences(owner, query);
+            for (Candidate candidate : candidates) {
+                DenseIndex.Hit hit = candidate.experience() == null ? null : hits.get(candidate.experience().getId());
+                if (hit == null) continue;
+                denseScores.put(candidate, hit.score());
+                denseField.put(candidate, hit.field());
+            }
+        }
+
         // 가중 RRF. 3단계 후보(이력서 행)는 모두 사용자가 쓴 원문이라 출처 가중이 1이다. 동점은 묶음 키로 정렬한다.
         Map<Candidate, Integer> requirementRank = ranks(requirementScores);
         Map<Candidate, Integer> lexicalRank = ranks(lexicalScores);
+        Map<Candidate, Integer> denseRank = new HashMap<>(ranks(denseScores));
+        denseRank.values().removeIf(rank -> rank > DENSE_TOP);
         Map<Candidate, Double> fused = new HashMap<>();
         requirementRank.forEach((c, rank) -> fused.merge(c, 1.0 / (RRF_K + rank), Double::sum));
         lexicalRank.forEach((c, rank) -> fused.merge(c, 1.0 / (RRF_K + rank), Double::sum));
+        denseRank.forEach((c, rank) -> fused.merge(c, 1.0 / (RRF_K + rank), Double::sum));
         int limit = Math.min(Math.max(request.limit() == null ? DEFAULT_LIMIT : request.limit(), 1), MAX_LIMIT);
         List<Candidate> ordered = fused.entrySet().stream()
                 .sorted(Map.Entry.<Candidate, Double>comparingByValue().reversed()
@@ -180,7 +218,11 @@ public class ExperienceSearch {
             List<ExperienceSearchResult.Why> why = new ArrayList<>(requirementWhy.getOrDefault(candidate, List.of()));
             if (lexicalRank.containsKey(candidate)) {
                 why.add(new ExperienceSearchResult.Why("LEXICAL", lexicalRank.get(candidate),
-                        matchedTerms(candidate.words(), terms), null, null));
+                        matchedTerms(candidate.words(), terms), null, null, null));
+            }
+            if (denseRank.containsKey(candidate)) {
+                why.add(new ExperienceSearchResult.Why("DENSE", denseRank.get(candidate), List.of(), null, null,
+                        denseField.get(candidate)));
             }
             Experience experience = candidate.experience();
             if (experience != null) {
@@ -206,15 +248,17 @@ public class ExperienceSearch {
                     visible ? "TAG_MISMATCH_POSSIBLE" : "NO_MATCH"));
         }
 
-        ExperienceSearchResult.Query query = new ExperienceSearchResult.Query(target.label(), target.saved(),
+        ExperienceSearchResult.Query echo = new ExperienceSearchResult.Query(target.label(), target.saved(),
                 fromClient ? "CLIENT" : "SERVER_DICTIONARY",
                 needs.values().stream().map(need -> new ExperienceSearchResult.RequirementKey(need.key(), need.field()))
                         .toList());
         // 미등록 행이 남아 있거나 경험 원본이 없으면 커버리지가 불완전하다 — 결핍을 단정하지 않게 한다(5.5).
         boolean coverageIncomplete = !unlinked.isEmpty() || bank.isEmpty();
-        return new ExperienceSearchResult(query, new ExperienceSearchResult.Context(dataVersion(docs, bank), SEARCH_CONFIG),
-                coverageIncomplete, fromClient ? List.of() : List.of("REQUIREMENTS_PARTIAL"), List.of(),
-                List.copyOf(uncovered.values()), qualifications, results);
+        DenseIndex.Status index = dense.experienceStatus(owner);
+        return new ExperienceSearchResult(echo, new ExperienceSearchResult.Context(dataVersion(docs, bank), SEARCH_CONFIG,
+                query == null ? null : query.model(), index.indexGeneration(), index.indexBehind()),
+                coverageIncomplete, fromClient ? List.of() : List.of("REQUIREMENTS_PARTIAL"),
+                query == null ? List.of("dense") : List.of(), List.copyOf(uncovered.values()), qualifications, results);
     }
 
     /** 등록 직무의 다섯 칸. 직무·공고·기업 모두 소유자 조건으로 읽는다. 남의 직무는 404. */

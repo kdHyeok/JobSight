@@ -32,6 +32,7 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 - 비밀값: `.secrets/postgres_password`, `.secrets/google_client_secret` → compose secret → 컨테이너 `/run/secrets/<프로퍼티키>` → Spring `configtree`. 파일 이름이 프로퍼티 키다.
 - 설정: `.env` 의 `PUBLIC_BASE_URL`, `APP_ADMIN_EMAIL`, `GOOGLE_CLIENT_ID`, `SESSION_COOKIE_SECURE`(HTTPS 뒤에서만 true).
 - 새 키를 추가하면 `.env.example`·`compose.yaml`·`docs/local-dev.md` 세 곳.
+- **embedder(5단계)**: 4번째 컨테이너. 내부 `app` 네트워크에만 붙고 nginx 경로·호스트 포트가 없다(nginx.conf 표에 행이 없는 것이 맞다). 기본 CPU 이고 GPU 는 `compose.gpu.yaml` 오버라이드다. 서버의 첫 `up` 은 이미지(약 2GB) 빌드와 모델(약 470MB) 내려받기가 붙는다 — backend 는 기다리지 않고 검색만 그동안 `degraded:["dense"]` 다. 설정 키 `EMBEDDER_URL`·`EMBEDDER_MODEL`(docs/local-dev.md).
 
 ## 공개 진입점 — 호스트의 리버스 프록시
 

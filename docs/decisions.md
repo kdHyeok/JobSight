@@ -293,3 +293,19 @@ FK 를 `SET NULL` 류로 바꾸거나 직무를 소프트 삭제하는 안은 �
 ## 웹 경험 저장의 검토 확정은 facts 를 보낸 저장으로 좁힌다 (4a 리뷰 반영, 2026-11-02)
 
 4a 는 "웹(USER) 경험 저장은 검토 확정을 겸한다"로 정해 메모·skills 만 고친 웹 저장도 `reviewed_revision = revision` 으로 올렸다. 그러면 사람이 보지 않은 AI 개정이 조용히 '확정'이 되고, 목차의 `aiRecords` 와 신뢰 표시가 사라진다. 이제 웹 생성과 `facts` 를 보낸 웹 수정만 확정을 겸하고, 그 밖의 확정은 개정 일치를 확인하는 `POST /api/experiences/{id}/review` 로만 한다. — 설계 7절 "4a 구현 메모", docs/experiences.md 불변 조건 6
+
+## 임베딩은 JVM 안 ONNX 가 아니라 Python embedder 컨테이너로, 기본 CPU (5단계, 2026-11-02, 설계 D6)
+
+위 「임베딩은 GPU 가 아니라 CPU 로 돌린다」의 **CPU 판단은 유지**하고, 실행 위치(JVM 안 ONNX)만 되돌린다. 사용자 결정(2026-11-02): 리랭커는 6단계로 미루고 embedder 는 Python 컨테이너(sentence-transformers)로 둔다.
+리랭커를 미루면 D6 의 첫 이유(크로스 인코더)는 약해지지만, ① 모델 저장소에 ONNX 파일이 없어 직접 내보내고 유지해야 하고 ② 같은 서비스가 오버라이드 하나(`compose.gpu.yaml`, torch `2.14.1+cu126` 고정)로 GPU 로 옮겨 갈 길이 남으며 ③ 측정(`scripts/embedding-bench.py`)과 같은 런타임이라 실측이 그대로 옮겨진다. 값은 상시 컨테이너 하나(이미지 약 2GB, 모델 볼륨)다.
+멈춰도 저장은 성공하고 검색은 `degraded:["dense"]` 다 — backend 가 embedder 를 기다리지 않는다. 다시 볼 조건: 컨테이너 운영 비용이 문제가 되거나 JVM ONNX 가 같은 모델로 더 빠르다는 측정이 나올 때. — docs/experience-graph-search.md 「5단계 의미 검색」
+
+## 벡터 저장은 pgvector 가 아니라 `REAL[]` + Java 정확 cosine (5단계, 2026-11-02, 설계 D11)
+
+설계는 5단계에서 비교해 정하기로 했고, 사용자가 `REAL[]` 로 닫았다. 실측은 docs/experience-graph-search.md 「D11 실측」에 둔다(계정 조각 1000개를 읽고 cosine 까지 약 150ms, 조각당 저장 1,560B·텍스트 표현 약 3,970B).
+pgvector 는 상위 k 만 돌려줘 전송이 작지만, 공식 이미지가 Debian 이라 지금의 alpine 에서 바꾸면 콜레이션 차이로 REINDEX 가 필요할 수 있고 백업·복원이 확장에 묶인다(일방향). 다시 볼 조건: 계정당 조각이 수천 개를 넘어 검색 한 번의 읽기가 체감 지연(수백 ms)이 될 때. 그 전에 계정별 JVM 캐시(`indexGeneration` 키)를 먼저 본다. — 설계 4.4, 9.2 #13
+
+## 임베딩 스위퍼만 `@Scheduled` 와 소유자 조건 없는 조회를 쓴다 (5단계, 2026-11-02, 설계 D13·D14)
+
+「마감된 관심 공고 자동 보관은 조회 시점에 (스케줄러 없음)」의 이유(꺼진 기간을 건너뜀)는 dirty 플래그가 남는 구조에는 해당하지 않는다 — 재기동 뒤 따라잡는다. 그래서 `EmbeddingSweeper` 하나만 3초 `fixedDelay` 로 돈다.
+스위퍼는 계정과 무관하게 dirty 행을 훑으므로 `owner_id` 없이 id 로 읽는다. 이 예외는 `embedding` 패키지의 패키지 전용 `SystemEmbeddingSweepRepository` 하나에 가두고, 다루는 것은 dirty·`source_revision` 열과 조각 테이블뿐이며, 읽은 원문은 embedder 외로 보내지 않는다. 쓰기는 행마다 짧은 트랜잭션의 CAS 한 문장(`... WHERE id = ? AND source_revision = ?`)으로 시작한다. — 설계 4.4

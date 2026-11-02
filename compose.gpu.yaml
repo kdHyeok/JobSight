@@ -1,0 +1,18 @@
+# embedder 를 NVIDIA GPU 로 돌리는 선택 오버라이드. 기본(compose.yaml)은 CPU 다 — up 하는 순간 공개 배포라서.
+# docker compose -f compose.yaml -f compose.gpu.yaml up -d --build embedder
+# torch 2.14.1+cu126 고정: cu126 이 Pascal(sm_61, GTX 10xx)을 지원하는 마지막 줄기다. 버전을 올리기 전에 sm_61 지원을 확인한다.
+services:
+  embedder:
+    build:
+      args:
+        TORCH_VERSION: "2.14.1"
+        TORCH_INDEX: cu126
+    environment:
+      EMBEDDER_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

@@ -43,6 +43,8 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       # TLS 종단(리버스 프록시) 뒤에 둘 때만 true 로 바꾼다.
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      # 의미 검색 임베딩 서버(내부 네트워크). 비우면 의미 검색을 끄고 검색은 degraded:["dense"] 로 동작한다.
+      EMBEDDER_URL: ${EMBEDDER_URL-http://embedder:8000}
     secrets:
       # 파일 이름이 그대로 Spring 프로퍼티 키가 된다(configtree:/run/secrets/).
       - source: db_password
@@ -60,6 +62,35 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - app
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 의미 검색 임베딩 서버(설계 4.4). 내부 네트워크에만 붙고 호스트 포트·nginx 경로가 없다.
+  # 기본 CPU. GPU 는 compose.gpu.yaml 오버라이드. 멈춰 있어도 저장은 성공하고 검색은 degraded 로 동작한다 —
+  # 그래서 backend 가 이 컨테이너를 기다리지 않는다(첫 기동은 모델을 내려받느라 몇 분 걸린다).
+  embedder:
+    build:
+      context: ./embedder
+    restart: unless-stopped
+    environment:
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-dragonkue/multilingual-e5-small-ko-v2}
+    volumes:
+      - embedder-models:/models
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
     read_only: true
     tmpfs:
       - /tmp
@@ -97,6 +128,8 @@ services:
 
 volumes:
   postgres-data:
+  # embedder 모델 캐시(HF_HOME). 지워도 다음 기동에 다시 내려받는다.
+  embedder-models:
 
 secrets:
   db_password:

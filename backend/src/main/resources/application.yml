@@ -52,6 +52,11 @@ app:
   # 이 이메일의 Google 계정은 로그인할 때마다 ADMIN/ACTIVE 로 보장된다(상시 규칙).
   # 새 배포에서는 이 계정의 첫 로그인이 시드 데이터 소유 행을 넘겨받는다.
   admin-email: ${APP_ADMIN_EMAIL:}
+  embedder:
+    # 의미 검색 임베딩 서버(compose 의 embedder, 내부 네트워크). 비우면 의미 검색을 끈다 — 저장은 그대로, 검색은 degraded:["dense"].
+    url: ${EMBEDDER_URL:}
+    # DENSE 관련도 하한(cosine). 기본 모델 실측값 — 모델을 바꾸면 다시 잰다(docs/experience-graph-search.md).
+    min-score: 0.45
   google:
     # client-id 는 비밀이 아니므로 .env 로, client-secret 은 compose secret 파일로 주입한다.
     # 둘 중 하나라도 비어 있으면 Google 로그인은 비활성 상태로 기동한다.

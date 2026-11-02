@@ -1,6 +1,6 @@
 # JobSight 경험-지원 관계 구조 최종 설계
 
-작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b. 1.4 의 공고 쪽 T3 와 5.3 `posting_update` 적용 — 1단계 1c. 1.3 의 P1 적용 — 1단계 1d. 7절 2단계 적용: V23 자소서 직접 출처·문항 유형, `self_intro_list`·`get` 래퍼, 생성·수정 DTO 분리, 웹 확정 — 2단계, 구현 차이는 5.3 표. 7절 3단계 적용: `KeyNormalizer`·묶음 함수, `experience_search` 첫 판, `experience_index` 최소판, `resume_get(view=outline)`·`missing`, MCP 호출 로그 — 3단계, 구현에서 정한 것은 7절 "3단계 구현 메모". 7절 4a 적용: 앵커 확장(`ResumeContent` 앵커 키·`fillRow` 통과·P8) 뒤 `V25__experiences`, `OwnerLock`, `ResumeWriter`·링커, 경험 서비스·가져오기, 자소서 작성 근거 쌍, MCP `experience_save`·`experience_index` 전체판·`resume_add_experiences`, 검색 자료원 교체, 공용 오류 변환 23503·23505 — 4a, 구현에서 정한 것과 설계와 달라진 것은 7절 "4a 구현 메모". 7절 4b 적용: 경험 화면(/experiences)·가져오기·이력서 편집기 경험 연결·자소서 쓴 경험 — 4b, 구현에서 정한 것은 7절 "4b 구현 메모") · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절). 아키텍처·DB 리뷰 반영(10.7절).
+작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b. 1.4 의 공고 쪽 T3 와 5.3 `posting_update` 적용 — 1단계 1c. 1.3 의 P1 적용 — 1단계 1d. 7절 2단계 적용: V23 자소서 직접 출처·문항 유형, `self_intro_list`·`get` 래퍼, 생성·수정 DTO 분리, 웹 확정 — 2단계, 구현 차이는 5.3 표. 7절 3단계 적용: `KeyNormalizer`·묶음 함수, `experience_search` 첫 판, `experience_index` 최소판, `resume_get(view=outline)`·`missing`, MCP 호출 로그 — 3단계, 구현에서 정한 것은 7절 "3단계 구현 메모". 7절 4a 적용: 앵커 확장(`ResumeContent` 앵커 키·`fillRow` 통과·P8) 뒤 `V25__experiences`, `OwnerLock`, `ResumeWriter`·링커, 경험 서비스·가져오기, 자소서 작성 근거 쌍, MCP `experience_save`·`experience_index` 전체판·`resume_add_experiences`, 검색 자료원 교체, 공용 오류 변환 23503·23505 — 4a, 구현에서 정한 것과 설계와 달라진 것은 7절 "4a 구현 메모". 7절 4b 적용: 경험 화면(/experiences)·가져오기·이력서 편집기 경험 연결·자소서 쓴 경험 — 4b, 구현에서 정한 것은 7절 "4b 구현 메모". 7절 5단계 적용(리랭커 제외): embedder 컨테이너, V26·V27 조각 테이블, 스위퍼, `experience_search`·`self_intro_list(q)` 의 DENSE, D6·D11 결정 — 5, 구현에서 정한 것과 실측은 7절 "5단계 구현 메모") · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절). 아키텍처·DB 리뷰 반영(10.7절).
 
 아래에서 `B/` 는 `backend/src/main/java/com/jobsight/company/`, `M/` 은 `backend/src/main/resources/db/migration/`, `F/` 는 `frontend/src/components/` 를 줄여 쓴 것이다.
 
@@ -8,7 +8,7 @@
 - **반박을 받아 크게 바뀐 점**
   1. ~~경험 테이블에는 정체성만 둔다. 서술은 이력서 행에 남긴다.~~ → **10.4에서 되돌렸다.** 경험 원본이 정본이고 이력서 행은 기업별 표현이다.
   2. 간선의 status·confidence와 제안 저장을 없앴다. 출처(`source`) 열 하나만 둔다.
-  3. 벡터 저장은 `real[]` + Java cosine을 기본으로 두되, 5단계에서 pgvector와 비교해 정한다(D11, 10.3).
+  3. 벡터 저장은 `real[]` + Java cosine 이다. 5단계에서 실측하고 pgvector 를 들이지 않기로 닫았다(D11, 10.3, 2026-11-02 사용자 결정).
   4. MCP 신규 도구를 12개에서 4개로 줄였다(10.4에서 작성 기준 조회를 더해 5개).
   5. "자소서를 어느 지원용으로 썼나"와 "공고를 저장하지 않는 경험 찾기"를 경험 은행보다 앞 단계에 둔다.
   6. MCP 전용 동작은 컨트롤러가 아니라 `McpActions` 에 둔다.
@@ -68,7 +68,7 @@
 | 그래프 DB (Neo4j, Apache AGE) | 쓰지 않는다 | (1) 질의가 늘 계정 하나(노드 수백 개) 안이다. (2) 탐색이 최대 4조인의 고정 깊이라 SQL 조인으로 그대로 표현된다. (3) 운영 비용이 든다: 커스텀 DB 이미지, 확장 종속 백업·복원, 두 번째 질의 언어, Neo4j는 소유자 격리를 저장소 두 곳에서 지켜야 함 | 노드 + 타입 간선 모델링, 결과마다 경로 근거 `why[]` |
 | NoSQL (MongoDB 등) | 쓰지 않는다 | 요구가 N:M 관계 중심이라 문서 모델과 반대 방향이다. 문서로 둘 곳(이력서 본문)은 이미 `resumes.content` JSONB다 | 이력서 본문 JSONB를 그대로 둔다 |
 | LLM wiki | 저장소로는 쓰지 않는다. **정리 방식은 4단계에 들인다**(10.3 R16) | 파일 기반이라 계정 1000개의 소유자 격리와 트랜잭션이 없고, 웹 화면과 정본이 둘로 갈린다. 그러나 "원문을 읽어 출처와 함께 정리하고 계속 갱신한다"는 방식은 경험 추출에 필요하다 | 경험별 소재집 `experiences.dossier`(JSONB, 원문 인용·해시가 붙은 근거, 미확인 사항과 충돌, 6.5). 추출은 MCP 클라이언트가, 검토와 확정은 사용자가 웹에서 한다. 빠짐없는 목차는 `experience_index` 가 맡는다 |
-| pgvector | **5단계에서 `REAL[]` 과 비교해 정한다**(10.3 R17) | 인덱스 없이도 "소유자로 거른 뒤 상위 k개만 반환"을 SQL 안에서 정확히 계산한다. `REAL[]` 은 검색마다 계정 벡터 전부(수백~천 개, 약 1MB)를 JVM으로 가져온다. 대신 공식 `pgvector/pgvector:pg17` 이미지는 Debian 기반이라, 지금의 alpine 이미지에서 바꾸면 콜레이션이 달라져 텍스트 인덱스를 REINDEX해야 할 수 있고 백업·복원이 확장에 묶인다. "인덱스가 필요 없으니 확장도 필요 없다"는 처음 근거는 약했다 | 비교 항목: 계정당 조각 수, 동시 조회 비용, Java 거리 계산과 매핑 유지비, 이미지 교체와 REINDEX 절차 |
+| pgvector | **쓰지 않는다 — 5단계에서 `REAL[]` 로 닫았다**(10.3 R17, D11, 2026-11-02). 실측은 7절 "5단계 구현 메모" | 인덱스 없이도 "소유자로 거른 뒤 상위 k개만 반환"을 SQL 안에서 정확히 계산한다. `REAL[]` 은 검색마다 계정 벡터 전부(수백~천 개, 약 1MB)를 JVM으로 가져온다. 대신 공식 `pgvector/pgvector:pg17` 이미지는 Debian 기반이라, 지금의 alpine 이미지에서 바꾸면 콜레이션이 달라져 텍스트 인덱스를 REINDEX해야 할 수 있고 백업·복원이 확장에 묶인다. "인덱스가 필요 없으니 확장도 필요 없다"는 처음 근거는 약했다 | 비교 항목: 계정당 조각 수, 동시 조회 비용, Java 거리 계산과 매핑 유지비, 이미지 교체와 REINDEX 절차 |
 
 그래프 엔진을 다시 볼 조건: 4홉을 넘는 가변 길이 탐색이나, 계정 전체를 가로지르는 그래프 분석이 필요해질 때.
 
@@ -668,12 +668,12 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 ### 4.4 임베딩과 리랭커
 
 **embedder**: 4번째 컨테이너다(Python, sentence-transformers).
-- 엔드포인트: `POST /embed {mode: query|passage, texts[]}` → `{vectors, truncated[]}`, `POST /rerank {query, docs[]}`, `GET /health`.
+- 엔드포인트: `POST /embed {mode: query|passage, texts[]}` → `{model, dim, vectors, truncated[]}`, `GET /health`. ~~`POST /rerank {query, docs[]}`~~ 는 6단계로 미뤘다(2026-11-02 사용자 결정, 9.2 #11).
 - 내부 네트워크에만 붙이고 nginx 경로는 없다. 모델 파일은 볼륨으로 마운트한다(`docs/experience-graph-search.md:157`).
 - **기본은 CPU다.** `compose.yaml` 하나로 로컬과 서버를 모두 빌드하고, `up` 하는 순간 공개 도메인에 반영되기 때문이다(`docs/nginx-deploy.md:30,53`).
 - GPU 예약은 `compose.mcp.yaml` 과 같은 방식의 선택 오버라이드 `compose.gpu.yaml` 에 둔다. GPU를 쓸 때는 Pascal(sm_61)을 지원하는 torch 정확 버전(cu126 계열)을 고정한다. 앞으로 나올 빌드의 Pascal 지원은 불확실하다.
-- 실측 CPU 지연은 질의 19ms, 문서 142ms다. 적재는 백그라운드라 CPU로 시작하고, GPU는 5단계 측정 뒤에 판단한다.
-- 리랭커 CPU 지연은 재지 않았다. 5단계에서 재고, 목표를 넘으면 그때 GPU 오버라이드를 켠다.
+- 실측 CPU 지연은 질의 19ms, 문서 142ms다(2026-09). 5단계 실 컨테이너 재측정(2026-11-02): 질의 p50 19ms·p95 24ms, 600자 조각 p50 98ms·p95 128ms. 적재는 백그라운드라 CPU로 충분하고 GPU 오버라이드는 켜지 않았다.
+- 리랭커 CPU 지연은 재지 않았다. 리랭커와 함께 6단계로 옮겼다.
 
 **리랭커**: `dragonkue/bge-reranker-v2-m3-ko` 를 문항↔문항 단계에만 쓴다(K=10).
 - 쓰이는 곳: `self_intro_list(q)` 와 PAST_QUESTION. PAST_QUESTION 은 6단계 신호라, 리랭커를 6단계로 미룰지는 열린 질문이다(9.2).
@@ -1279,7 +1279,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | **4a. 경험 원본 백엔드 (최소판)** | **적용함**(`feat/experience-bank-backend`, 아래 "4a 구현 메모"). **먼저 내는 배포(확장)**: ① P8 `Resume.replacePositions` 를 `clear()+addAll()` 로(1.3) ② 앵커 확장: `ResumeContent` 4개 행 record 에 `experienceId`·`experienceRevision`, `ResumeRowRequest` 에 `experienceId` 만, 프런트 `fillRow` 앵커 통과와 그 테스트(이 항목만 프런트를 함께 낸다, 6.1). 링커는 아직 없다. **그다음 배포(사용)**: ③ `V{n}__experiences`(2.5 최소판: `experiences`·`experience_revisions`(`seq`)·`resume_experiences`·`self_introduction_experiences`, 개정 참조 FK·CHECK, 지연 FK 셋) ④ `OwnerLock` 과 호출자 전부(T9 잠금 규약) ⑤ `ResumeWriter`(T6 섹션 상한, 링커, 차이 반영, `SET CONSTRAINTS ALL IMMEDIATE`), 우회 저장 금지 아키텍처 테스트, `rebuildResumeExperiences`·JSON↔표 대조 질의(6.2) ⑥ 링커: 앵커 이어받기·개정 검사·`refreshExperienceIds`(6.2) ⑦ 경험 서비스: 생성·수정(개정 판정, `facts_hash`, `expectedVersion`, 6.5), 검토 확정, 삭제(409·`detach`, 6.4), 가져오기 계획·적용(`Persistable`, 6.3) ⑧ 자소서 `experiences` 쌍(REST·MCP, 6.8) ⑨ MCP `experience_save`·`experience_index` 전체판·`resume_add_experiences`(`FACTS`), 행 도구의 `experienceId` 지목(5.2·5.3) ⑩ `missing[]` 에 은행 경험을 더하고, `resume_update` 래퍼에 `LINKED_ROWS_MISSING` ⑪ `experience_search` 자료원을 경험 원본으로 교체(응답 형식 유지, REQUIREMENT 는 `experiences.skills`) ⑫ 공용 오류 변환에 23503(제약 이름·테이블 필드)·23505 와 원인 체인 탐색(2.3) ⑬ 경험 REST 경로를 `ApiPaths`·`routes.ts`·`nginx.conf` 표에 함께 | 확장 배포: `experienceId`·`experienceRevision` PUT→GET 왕복, 프런트 "로드 → 다른 칸 수정 → 저장 payload 에 두 키 그대로". 사용 배포: `now at version vN`. 실제 스키마에서 계정 삭제 cascade 통과(지연 FK 가 필요한지 재확인). `TEXT[]` 매핑 validate 통과. 링커 멱등. 제목 키가 2건 맞으면 미연결로 남는지. 개정 없는 행이 저장된 개정을 이어받는지, 키가 빠진 행이 저장된 앵커를 이어받는지, 클라이언트가 바꾼 개정 → 400, 없는 개정 → 404, `refreshExperienceIds` 만 개정을 올리는지. 대조 질의 0건, 우회 저장을 아키텍처 테스트가 잡는지. 경험 원본을 고쳐도 과거 이력서 행의 문구와 개정 번호가 그대로인지. 정정(`CORRECT`) 뒤 그 경험을 쓴 이력서·자소서에 "재검토 필요"가 붙고, 추가(`ADD`)·근거만 바뀐 개정·표현 차이에는 붙지 않는지. 같은 `facts` 재저장은 개정을 만들지 않는지. `facts` 를 보내며 `expectedVersion` 이 없으면 400. 복합 FK가 다른 소유자 연결을 거부(404). 사용 중 확인 직후 다른 트랜잭션이 연결한 경험의 삭제가 거부되는지. 경험 삭제의 409 가 REST 와 MCP 도구 오류 코드로 같게 나오는지, 커밋 시점 지연 FK 위반도 409 인지(Testcontainers). 같은 계정의 동시 저장이 줄을 서고 `lock_timeout` 을 넘기면 409 `BUSY`, 다른 계정은 기다리지 않는지. 로컬 경로만 있는 근거 → 400. 운영 사본은 집계 비교 SQL만. 골드셋 재측정. 로그인 왕복 | 중간. **확장 배포보다 앞선 코드로는 되돌리지 않는다.** 그 코드는 앵커 키를 모르는 record 로 읽어 저장할 때마다 키를 버린다. 사용 배포만 되돌리면 JSON 앵커는 남고, 다시 올린 뒤 `rebuildResumeExperiences` 를 돈다. 테이블은 남아도 무해하고 MCP 등록을 빼면 멈춘다 |
 | **4b. 경험 웹 화면** | **적용함**(`feat/experience-bank-web`, 아래 "4b 구현 메모"). ① 경험 목록·원본 편집(사실 항목 `id` 유지, `expectedVersion`)·검토 확정(`reviewed_revision`)·"AI 기록"·"소재집 갱신 필요" 표시 ② 가져오기 화면(계획 → 묶음별 CREATE/SKIP/LINK_TO, `mergeCandidates` 표시, 409 면 계획 다시) ③ 이력서 편집기: "경험에서 불러오기"·"경험으로 등록"·"다른 경험에 연결", "재검토 필요" 표시와 "원본으로 갱신"(`refreshExperienceIds`), `unlinkedWarnings` 토스트 ④ 경험 삭제(409 목록 표시, `detach` 확인)로 끝나는 중복 처리 흐름(6.4) ⑤ 자소서 편집기의 "쓴 경험" 선택(`experiences` 쌍) | `npm run type-check && npm test`. 편집기 저장 payload 에 앵커가 그대로인지. "원본으로 갱신" 뒤 재검토 표시가 사라지는지. 다른 경험에 연결 → 쓰지 않는 경험 삭제 흐름이 끝까지 되는지. 로그인 왕복 | 낮음. 화면을 빼면 된다. 백엔드는 그대로다 |
 | **4c. (보류)** | 사건(STAR)·병합 계보·키워드 테이블·`ROW` 복사·"원본 반영 검토". 설계와 다시 열 때의 조건은 6.10 | 6.10 의 4c 회귀 사례 | — |
-| **5. 의미 검색과 필요시 리랭커** | `embedder` 컨테이너(기본 CPU), `compose.gpu.yaml`, `V{n}__self_intro_embeddings`, `V{n}__experience_embeddings`(`experience_chunks`, 2.5), 스위퍼(원문 버전 조건, 행마다 CAS 한 문장, D13·D14, 4.4), `self_intro_list(q)` 에 DENSE + 리랭커 K=10(6단계로 미룰지는 9.2), `experience_search` 에 DENSE와 재현 정보 `context`(6.7). **벡터 저장은 `REAL[]` 과 pgvector를 비교해 정한다**(D11, 9.2). 컨테이너 3 → 4. `.env.example`·`compose.yaml`·`docs/local-dev.md` 동기화. **문항 의미 검색은 `self_introductions` 만 쓰므로 경험 은행과 무관하다.** 골드셋에서 BM25 부족이 확인되면 이 단계의 자소서 부분만 2단계 바로 뒤로 당긴다(R11) | 골드셋에서 앞 단계보다 회수율이 오르는지. CPU 리랭커 지연 실측. embedder를 멈춘 상태에서 저장 성공과 `degraded`, 재기동 후 dirty 0으로 수렴. 스위퍼가 읽은 뒤 원문이 바뀌면 그 회차는 쓰지 않는지. 해시가 같은 조각은 재계산하지 않는지. 벡터 열 매핑 validate 통과 | 낮음. 컨테이너를 내리면 이전 검색으로 돌아간다. **단 pgvector 를 고르면 일방향이다**: DB 이미지 교체(alpine → Debian)와 REINDEX 가 따라온다(D11) |
+| **5. 의미 검색과 필요시 리랭커** | **적용함(리랭커 제외 — 6단계, `feat/semantic-search`, 아래 "5단계 구현 메모").** `embedder` 컨테이너(기본 CPU), `compose.gpu.yaml`, `V{n}__self_intro_embeddings`, `V{n}__experience_embeddings`(`experience_chunks`, 2.5), 스위퍼(원문 버전 조건, 행마다 CAS 한 문장, D13·D14, 4.4), `self_intro_list(q)` 에 DENSE + 리랭커 K=10(6단계로 미룰지는 9.2), `experience_search` 에 DENSE와 재현 정보 `context`(6.7). **벡터 저장은 `REAL[]` 과 pgvector를 비교해 정한다**(D11, 9.2). 컨테이너 3 → 4. `.env.example`·`compose.yaml`·`docs/local-dev.md` 동기화. **문항 의미 검색은 `self_introductions` 만 쓰므로 경험 은행과 무관하다.** 골드셋에서 BM25 부족이 확인되면 이 단계의 자소서 부분만 2단계 바로 뒤로 당긴다(R11) | 골드셋에서 앞 단계보다 회수율이 오르는지. CPU 리랭커 지연 실측. embedder를 멈춘 상태에서 저장 성공과 `degraded`, 재기동 후 dirty 0으로 수렴. 스위퍼가 읽은 뒤 원문이 바뀌면 그 회차는 쓰지 않는지. 해시가 같은 조각은 재계산하지 않는지. 벡터 열 매핑 validate 통과 | 낮음. 컨테이너를 내리면 이전 검색으로 돌아간다. **단 pgvector 를 고르면 일방향이다**: DB 이미지 교체(alpine → Debian)와 REINDEX 가 따라온다(D11) |
 | **6. 추가 신호와 정리** | DOMAIN·PAST_USE·COMPETENCY(4c 뒤)·PAST_QUESTION 중 골드셋에서 이득이 확인된 것만, `experience_index` 점검 플래그(사실이 빈 경험, AI 기록 수, 미등록 행, 출처 미상 자소서, truncated. 사건 플래그는 4c 뒤), 별칭 편집 UI(4c `keywords` 뒤), 사용률 로그를 근거로 쓰이지 않는 CRUD 도구 정리 검토 | 신호마다 켜기 전후 골드셋 기여 기록. 계정 단위 플래그 수 추적 | 낮음 |
 | **성능 트랙** (단계와 별개) | `V{n}__indexes`(1.5), P3·P4·P6~P11. P8 의 `Resume` 은 4a 앞에 한다. T6 은 4단계로 옮겼다. 측정하면서 진행한다 | 토큰 조회 `EXPLAIN` Index Scan. SQL 상한 테스트. 1.0 방식으로 다시 잰 지연. nginx를 건드리면 로그인 왕복 | 코드 revert. 인덱스는 남아도 무해 |
 | **제출·작성 기준 트랙** (2단계 이후 언제든) | `V{n}__submissions_and_guides`: 제출 기록(6.6: `SUBMITTED` 전환 때 `JobPostingService` 한 곳에서 LINKED 기록, T9 아래 스냅샷, `submission_attachments` 와 `attachments` 의 `UNIQUE (id, owner_id)`, 웹에서 사용자 확인·접수 근거 첨부), 작성 기준 문서(6.7)와 MCP `writing_guide_get`, 자소서 `writing_context` | 같은 상태 변경을 두 번 보내도 기록이 하나인지. 웹 드래그·공고 수정·공고 생성 세 경로 모두 LINKED 가 남는지. 뒤늦게 등록한 지원 건이 LINKED로만 남고 제출본이라 부르지 않는지. 기록이 가리키는 첨부의 삭제를 DB 가 막는지. 계정 삭제 cascade 통과. 작성 기준 버전이 자소서 `writing_context` 에 남는지 | 낮음. 기록 테이블은 무시해도 된다 |
@@ -1330,6 +1330,20 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 - 검증 "다른 경험에 연결 → 쓰지 않는 경험 삭제 흐름이 끝까지"는 `ExperienceRelinkFlow.spec` 이 가짜 서버 하나(링커 개정 규칙·사용처 판정)로 두 화면을 이어 고정한다.
 - 가져오기의 `mergeCandidates` 는 안내만 한다. 같은 적용 안에서 새로 만들 경험에 LINK_TO 할 수 없으므로(아직 id 가 없다) "하나만 만들고 나머지는 건너뛴 뒤 다시 가져오기에서 연결"로 안내한다.
 
+**5단계 구현 메모** (구현에서 정한 것과 실측. 리랭커는 6단계 — 사용자 결정 2026-11-02. 문서: `docs/experience-graph-search.md` 「5단계 의미 검색」)
+- 마이그레이션 `V26__self_intro_embeddings`(2.5 블록 + `embedding_model`·`embedded_at`·`CHECK (cardinality(embedding) = 384)`), `V27__experience_embeddings`(같은 열). 벡터 열은 엔티티에 매핑하지 않고 JDBC 로만 다룬다 — 2.5 "엔티티 규칙"의 `@JdbcTypeCode` 확인은 해당 없게 됐다.
+- embedder: `embedder/server.py`(표준 라이브러리 HTTP 서버 + sentence-transformers 6.2.0, torch 2.14.1 CPU), 접두는 embedder 가 mode 로 붙인다, `truncated[]` 는 같은 토크나이저로 센 길이 > 512. 동시 추론은 세마포어 2. 모델은 `HF_HOME=/models` 볼륨에 첫 기동 때 받는다. backend 는 `depends_on` 하지 않는다(설계 4.4 "멈춰도 저장은 성공").
+- `indexGeneration` 은 계정 경험 조각의 `max(embedded_at)`(ISO 시각), `indexBehind` 는 그 계정에 dirty 경험이 있는지. 설계 5.4 예시와 같은 모양이다. 계정별 JVM 캐시(9.2 #13)는 두지 않았다 — 실측상 필요 없다.
+- DENSE 는 후보 전부에 값이 있어서 상위 20개(자소서 30개)만 순위에 넣는다. RESUME_ROW 는 DENSE 대상이 아니다(4.2). `why` 의 DENSE 항목은 `{signal, rank, sourceField}` 다(5.4 예시의 `source.field` 를 평평하게 — 5.1 의 평평한 record 원칙). `searchConfig` 는 `search-v2-2026-11-dense`.
+- `self_intro_list(q)`: BM25 와 DENSE 를 RRF(k=60)로 합친다. 리랭커 K=10 은 6단계. 응답에 `degraded` 를 더했다(직접 출처 객체 모양은 그대로).
+- 트랜잭션(4.3 ⑥): `ExperienceSearch.search`·`SelfIntroductionAgentService.list` 에서 `@Transactional` 을 걷고, 대상 읽기 readOnly → 트랜잭션 밖 질의 벡터(2초) → readOnly 한 번으로 나눴다.
+- 조각 상한 800자: 이 모델 토크나이저로 한국어 서술 글자당 0.50토큰(1200자 = 596토큰, 잘림), 기술 이름이 섞인 문장 0.41토큰. 800자 ≈ 400토큰(480 목표에 20% 여유).
+- 스위퍼: `@Scheduled(fixedDelay = 3s)`, 테이블마다 dirty 32행, 행마다 짧은 트랜잭션의 CAS 한 문장. `/health` 의 모델 이름이 바뀌면 다른 모델 조각을 가진 행을 dirty 로 되돌린다(모델 교체 런북 대신). 자소서는 질문·답변이 바뀔 때만 dirty 를 세운다(연결만 바뀐 저장은 아니다). 예약 실행은 `app.embedder.sweep=false` 로 끈다(테스트).
+- **D11 실측** (`SemanticSearchIntegrationTest.realArrayReadCostForThousandChunks`, Testcontainers PostgreSQL 17, 계정 하나에 조각 1000개): 저장 1,560,000B(조각당 1,560B), 텍스트 표현 3,973,000B(조각당 약 3,970B — 드라이버가 텍스트로 받으면 검색당 이만큼 온다), 읽기 + `Float[]` 변환 + cosine 134~150ms, 같은 행을 `embedding::text` 문자열로만 받기 155ms(파싱·cosine 을 빼도 줄지 않는다 — 비용은 전송·서버 직렬화이고 Java 텍스트 파싱은 작다). 계정당 조각 수는 경험 하나에 필드 수만큼(보통 2~6)이라 경험 수십~백 개면 수백 개다 — 검색당 읽기는 수십 ms 다. 실 스택(jobsite-wt-graph) 왕복: 1,800자 답변 하나가 질문 1·답변 2 조각, 모델 `dragonkue/multilingual-e5-small-ko-v2`, 384차원으로 3초 회차 안에 적재됐고, embedder 를 멈춘 동안 dirty 가 남았다가 재기동 15초 안에 0 으로 수렴했다(임시 행은 지웠다). 이 스택 DB 에는 실제 경험·자소서가 없어 실계정의 조각 수는 재지 못했다.
+- embedder CPU 지연(실 컨테이너, 이 개발 PC): 질의 p50 19.4ms·p95 24.0ms, 600자 문서 p50 98ms·p95 128ms, 600자 32개 한 번 2.2초. 2026-09 PyTorch 측정(19ms·142ms)과 같다.
+- **5단계 리뷰 반영(2026-11-02)**: ① 스위퍼 실패는 행 단위로 가둔다 — embedder 장애(`Unavailable`: 연결·타임아웃·회차 중 모델 변경)만 회차를 멈추고, 그 행만의 실패(`Rejected`: HTTP 비 200·개수 불일치, 원문 JSON 파싱, 제약 위반)는 그 행을 6초~1시간 지수 간격으로 미룬다(메모리 기록, 새 열 없음). 4.4 의 "embedder 가 죽어 있으면 아무것도 쓰지 않는다"는 그대로다. ② DENSE 관련도 하한 `app.embedder.min-score = 0.45`(실 모델 실측: 관련 질의 1위 0.46~0.58, 무관 질의 1위 0.39~0.45). 상위 20/30 만으로는 엉뚱한 질의에도 결과가 찼다. ③ embedder 는 추론 예외를 500 으로 돌려준다(연결을 끊으면 백엔드가 장애로 읽어 회차가 멈춘다).
+- 골드셋 회수율 비교(7절 검증 칸 "앞 단계보다 회수율이 오르는지")는 실제 지원 건 골드셋(0단계)이 없어 재지 않았다. 동의어 사례 하나를 가짜 embedder 로 고정한 테스트(`denseFindsSynonymsInExperienceSearchAndSelfIntroList`)만 있다.
+
 ### 함께 갱신할 문서
 
 4단계의 추가 회귀 사례는 6.8을 따른다. REST와 MCP 모두 작성 근거의 경험 id·개정이 빠진 요청, 없는 개정, 타인 소유 경험을 거절하고, 저장·조회 왕복에서 받은 `(경험 id, 개정)` 쌍을 그대로 유지해야 한다. MCP 수정이 기존 연결을 지우지 않는지도 본다. 병합 경로 사례([계약 PoC](../../../poc/experience-lineage/README.md))는 4c 에서 옮긴다(6.10).
@@ -1359,12 +1373,12 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | D3 | 다형 `links` + `stories` + `tags text[]` 구상 (`docs/experience-graph-search.md`) | 폐기한다. 관계 종류별 FK 조인 테이블과 복합 FK를 쓴다 | 다형 간선에는 FK를 걸 수 없어 고아 간선이 남는다 |
 | D4 | 자소서는 이력서와만 N:M, `resumeIds` 1개 이상 (`docs/self-introductions.md:22`, `SelfIntroductionRequest.java:12`) | 직무·사건·문항 유형으로 연결을 넓힌다. 생성 시 "이력서 또는 직무 1개 이상", 수정 시 0개 허용. DTO를 분리한다 | "어느 회사용 답변인가"를 판별할 수 없는 구조가 증상 (b)의 원인 후보다 |
 | D5 | `resume_update` 통째 교체 (`docs/resumes.md:44`), 섹션 null → `[]` (`docs/resumes.md:45`), SKILL "수정은 전체 교체" (`SKILL.md:23-25`) | `resume_*`·`posting_update` 만 null=유지, `[]`=비움. 저장되는 모양은 그대로 정규화한다. 그 밖의 update 도구는 전체 교체를 유지한다 | AI의 섹션 누락이 조용한 삭제로 이어진다 |
-| D6 | 임베딩은 CPU·JVM ONNX (`docs/decisions.md` "임베딩은 GPU 가 아니라 CPU 로" 절) | Python embedder 컨테이너로 바꾼다. 기본은 CPU이고, GPU는 선택 오버라이드다 | 리랭커(크로스 인코더)가 생겼고, 같은 서비스가 GPU로 옮겨 갈 길이 필요하다. 검색 경로는 CPU로도 충분하다는 원 판단은 유지한다. 리랭커를 6단계로 미루면 이 이유가 약해지므로 5단계 전에 다시 정한다(9.2) |
+| D6 | 임베딩은 CPU·JVM ONNX (`docs/decisions.md` "임베딩은 GPU 가 아니라 CPU 로" 절) | **결정됨(2026-11-02, 5단계 적용)**: Python embedder 컨테이너로 바꾼다. 기본은 CPU이고, GPU는 선택 오버라이드다. 리랭커는 6단계로 미뤘지만 컨테이너는 유지한다(ONNX 파일 유지 부담, GPU 로 옮길 길, 측정과 같은 런타임 — `docs/decisions.md`) | 리랭커(크로스 인코더)가 생겼고, 같은 서비스가 GPU로 옮겨 갈 길이 필요하다. 검색 경로는 CPU로도 충분하다는 원 판단은 유지한다. 리랭커를 6단계로 미루면 이 이유가 약해지므로 5단계 전에 다시 정한다(9.2) |
 | D7 | 태그 선택지는 계정 기존 값에서 모은다 (`docs/job-postings.md:140`) | 역량·문항 유형은 시스템 고정 코드 18개로 둔다 | 문항과 사건이 같은 어휘를 써야 매칭된다 |
 | D8 | 메모리 BM25 (`:50`) | LEXICAL 신호로 유지하고 df 계산만 고친다. 존치는 실데이터 측정으로 정한다 | 합성 PoC는 제거 근거로 부족하다 |
 | D9 | `job_postings.target_position_id` | 쓰지도 지우지도 않는다 | 데이터 삭제 금지 원칙 |
 | D10 | 첨부 교체 시 즉시 삭제 (`docs/attachments.md:71`, `AttachmentField.vue:51`) | 즉시 삭제를 없앤다. 정리 작업은 두지 않는다. **적용함(2026-11-02)** — `docs/decisions.md` 「첨부 교체·제거 때 이전 파일을 지우지 않는다」 | 복제 이력서가 id를 공유해 원본의 파일이 사라진다 |
-| D11 | 임베딩 저장은 pgvector `vector(384)` (`docs/experience-graph-search.md:149`) | **5단계에서 정한다.** 후보는 `REAL[]` + Java 정확 cosine, 또는 pgvector(공식 `pgvector/pgvector:pg17` 이미지)의 SQL 정확 검색 | pgvector는 인덱스 없이도 소유자로 거른 뒤 상위 k개만 돌려준다. `REAL[]` 은 검색마다 계정 벡터 전부를 JVM으로 가져온다. 반대로 pgvector 이미지는 Debian 기반이라 alpine에서 바꾸면 콜레이션이 달라져 REINDEX가 필요할 수 있고, 백업·복원이 확장에 묶인다. "인덱스가 필요 없으니 확장도 필요 없다"는 처음 근거는 약했다(10.3 R17) |
+| D11 | 임베딩 저장은 pgvector `vector(384)` (`docs/experience-graph-search.md:149`) | **결정됨(2026-11-02, 5단계 적용)**: `REAL[]` + Java 정확 cosine. pgvector 는 들이지 않는다. 조각 테이블에 `embedding_model` 열과 `CHECK (cardinality(embedding) = 384)`. 실측은 7절 "5단계 구현 메모" | pgvector는 인덱스 없이도 소유자로 거른 뒤 상위 k개만 돌려준다. `REAL[]` 은 검색마다 계정 벡터 전부를 JVM으로 가져온다. 반대로 pgvector 이미지는 Debian 기반이라 alpine에서 바꾸면 콜레이션이 달라져 REINDEX가 필요할 수 있고, 백업·복원이 확장에 묶인다. "인덱스가 필요 없으니 확장도 필요 없다"는 처음 근거는 약했다(10.3 R17) |
 | D12 | e5 접두 "질의 `query:`, 문서 `passage:`" (`:158`) | 문항↔문항은 양쪽 `query:` (4.4 표) | 확정된 맥락에 맞춘다 |
 | D13 | `owner_id` 없이 id만 보는 조회 메서드 금지 (`docs/experience-graph-search.md:161`) | 시스템 배치 예외: 임베딩 스위퍼만 허용한다. 별도 패키지·리포지토리이고, 대상은 dirty·임베딩 컬럼뿐, 내용은 embedder 외로 내보내지 않는다 | 계정과 무관한 백그라운드 적재가 필요하다 |
 | D14 | 스케줄러 없음 (`docs/decisions.md:85-86`) | 임베딩 dirty 스위퍼에 한해 `@Scheduled` 를 쓴다. 해시 비교(`:203`)는 유지한다 | 원 결정의 반대 이유(꺼진 기간을 건너뜀)는 dirty 플래그가 남는 구조에서는 해당하지 않는다 |
@@ -1412,9 +1426,9 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 8. ~~4단계 범위~~ → **결정됨(2026-11-02)**: 최소판 먼저. 사건·병합 계보·키워드 테이블·`ROW` 복사·"원본 반영 검토"는 4c(6.10).
 9. ~~첨부를 지우는 길~~ → **결정됨(2026-11-02)**: 저장 뒤 매번 묻기와 첨부 서랍(미사용·7일). 구현은 파이프라인 뒤(6.9).
 10. **4c 를 언제 여나.** 6.10 표의 "다시 열 신호"가 실제로 보이면 연다. 신호를 무엇으로 잴지(골드셋 사례, 중복 경험 수)는 4단계 사용 뒤에 정한다.
-11. **리랭커를 6단계로 미룰지** (10.7 R51). 쓰는 곳이 `self_intro_list(q)` 와 PAST_QUESTION 뿐이고 PAST_QUESTION 은 6단계 신호다. 미루면 5단계는 embedder 만 남는다.
-12. **embedder 를 어디서 돌릴지.** 원 결정(`docs/decisions.md` "임베딩은 GPU 가 아니라 CPU 로", JVM 안 ONNX)과 D6(Python 컨테이너)이 갈린다. 11번에서 리랭커를 미루면 D6 의 이유가 약해진다.
-13. **D11 을 `REAL[]` 로 닫을지.** 5단계 비교 때 잴 것: `REAL[]` 텍스트 파싱 비용, `bytea` 패킹, 계정별 JVM 캐시(`indexGeneration` 을 키로), 조각 테이블의 `embedding_model` 열, `CHECK (cardinality(embedding) = 384)`.
+11. ~~리랭커를 6단계로 미룰지~~ → **결정됨(2026-11-02)**: 6단계로 미룬다. 5단계는 embedder(`/embed`·`/health`)만 둔다. (10.7 R51) 쓰는 곳이 `self_intro_list(q)` 와 PAST_QUESTION 뿐이고 PAST_QUESTION 은 6단계 신호다. 미루면 5단계는 embedder 만 남는다.
+12. ~~embedder 를 어디서 돌릴지~~ → **결정됨(2026-11-02)**: Python 컨테이너, 기본 CPU(D6). 원 결정(`docs/decisions.md` "임베딩은 GPU 가 아니라 CPU 로", JVM 안 ONNX)과 D6(Python 컨테이너)이 갈린다. 11번에서 리랭커를 미루면 D6 의 이유가 약해진다.
+13. ~~D11 을 `REAL[]` 로 닫을지~~ → **결정됨(2026-11-02)**: `REAL[]` 로 닫았다. 아래 항목은 5단계에서 쟀다(7절 "5단계 구현 메모"). 5단계 비교 때 잴 것: `REAL[]` 텍스트 파싱 비용, `bytea` 패킹, 계정별 JVM 캐시(`indexGeneration` 을 키로), 조각 테이블의 `embedding_model` 열, `CHECK (cardinality(embedding) = 384)`.
 14. **제출 확인 수준을 둘(`LINKED`·`USER_CONFIRMED`)로 줄일지** (6.6). 접수 근거 자동 대조를 하지 않으므로 셋째 수준의 쓸모가 작다.
 
 ### 9.3 검증하지 못한 것
@@ -1423,7 +1437,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 - 직접 확인한 코드 사실: `ResumeBoard.vue:62` 의 Promise.all, `application.yml` 에 배치 페치 없음, `mutateRows` 의 잠금 없는 조회, `replacePositions` 의 새 Set 대입, `AttachmentField` 의 즉시 삭제, `frontend/nginx.conf` 에 gzip 없음, `postgres:17-alpine`, 최신 마이그레이션 V21, MCP의 컨트롤러 리플렉션 호출, `RuntimeException` → `INTERNAL_ERROR`, 행 도구의 `int index`(`McpActions.java:70,77`), 직무 칸 라벨(`PositionDetail.vue:97-103`, `experience` 는 "취득 경험")과 공고의 지원자격(`JobPosting.java:57`).
 - 동시 `resume_row_add` 의 lost update, `resume_update` 의 섹션 소거, 생성 시 선택 누락 중 무엇이 "프로젝트 누락"의 실제 원인인지. 재현하지 않았다.
 - Spring Authorization Server JDBC의 타입 없는 토큰 조회 쿼리 모양, 만료 행 자동 정리 여부.
-- `REAL[]` ↔ `float[]` Hibernate 7 매핑, 리랭커 CPU 지연, `experience_search` p95, 실데이터 검색 품질, 사건 900자 상한의 토큰 수.
+- ~~`REAL[]` ↔ `float[]` Hibernate 7 매핑~~(5단계: 엔티티에 매핑하지 않고 JDBC 로만 다뤄 해당 없음), 리랭커 CPU 지연(6단계), `experience_search` p95, 실데이터 검색 품질, 사건 900자 상한의 토큰 수.
 - 각 MCP 클라이언트(Claude, ChatGPT, Codex)의 도구 출력 상한과 잘림 방식.
 - 실제 스키마에서 계정 삭제 cascade가 통과하는지. 지연 FK 구조가 통과함은 임시 테이블로 확인했다(2.3). 4단계 최소판의 개정 참조 FK 까지 포함한 실제 스키마로는 확인하지 않았다. 4단계 첫 마이그레이션의 테스트에 넣는다.
 - `lock_timeout` 이 `pg_advisory_xact_lock` 대기에도 걸린다는 것(T9 잠금 규약 1)은 PostgreSQL 문서 기준이고 이 프로젝트에서 재지 않았다. 4단계 통합 테스트에서 두 트랜잭션으로 확인한다.

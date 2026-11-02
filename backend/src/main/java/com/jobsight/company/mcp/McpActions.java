@@ -161,7 +161,10 @@ public class McpActions {
                     + "results[] 는 이력서 행 묶음(type RESUME_ROW)이고 source{resumeId, resumeName, section, index, resumeVersion, "
                     + "textHash, excerpt} 가 원문 위치, alsoIn 은 같은 묶음의 다른 이력서 행, why 는 맞은 신호(REQUIREMENT 의 키·칸·인용, "
                     + "LEXICAL 의 순위·단어)다. uncovered 는 지원자격·요구 역량 칸의 요구 중 받쳐 줄 행이 없는 것(우대·기술 환경 나열은 "
-                    + "결핍으로 보지 않는다). coverageIncomplete:true 면 결핍을 단정하지 않는다. limit 기본 8, 최대 20.")
+                    + "결핍으로 보지 않는다). coverageIncomplete:true 면 결핍을 단정하지 않는다. "
+                    + "DENSE 는 의미 검색(경험 원본만)이다 — why 에 DENSE 만 있으면 \"의미상 비슷할 뿐\"이라고 밝힌다. degraded:[\"dense\"] 면 "
+                    + "embedder 장애로 의미 검색 없이 찾은 것이고, context.indexBehind:true 면 방금 저장한 경험이 의미 검색에 아직 없다. "
+                    + "limit 기본 8, 최대 20.")
     public ExperienceSearchResult searchExperiences(@Valid @RequestBody ExperienceSearchRequest request) {
         return experienceSearch.search(request);
     }
@@ -239,7 +242,7 @@ public class McpActions {
                     + "직접 출처가 0건이면 fallback:\"indirect\" 로 연결 이력서가 그 직무를 지원하는 '출처 미상' 답변을 준다. "
                     + "questionType 은 문항 유형(사용자 확정 태그, 없으면 정규식 추정. AI 기록 태그는 추정을 지우지 않고 덧붙는다), "
                     + "unlinked:true 는 직접 출처가 없는 답변만. "
-                    + "q 는 100자 이하, 질문·답변의 같은 단어를 BM25 점수순으로. limit 기본 10(최대 50), complete:false 면 잘린 것이다. "
+                    + "q 는 100자 이하, 같은 단어(BM25)와 뜻이 가까운 문항·답변(의미 검색)을 합친 순위로. matchedTerms 가 빈 항목은 뜻으로만 찾은 것이고, 관련도가 낮은 답변은 빠진다. degraded:[\"dense\"] 면 단어 검색만 한 것이다. limit 기본 10(최대 50), complete:false 면 잘린 것이다. "
                     + "답변은 300자 미리보기(answerPreview)다. 원문은 self_intro_get. "
                     + "trust 는 '확정'(사용자가 웹에서 연결)·'AI 기록'(확정 전)·'추정'이며 관계 확인 여부일 뿐 성과 검증이 아니다. "
                     + "alreadyUsedFor 의 otherCompanySpecific:true 는 다른 회사용 지원동기·포부·직무 이해 답변이라 본문을 재사용하지 않는다. "

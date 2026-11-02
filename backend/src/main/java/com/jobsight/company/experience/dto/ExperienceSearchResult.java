@@ -8,7 +8,7 @@ import java.util.UUID;
 
 /**
  * experience_search 응답 — 설계 5.4. 결과는 EXPERIENCE(경험 원본)와 RESUME_ROW(미연결 행 묶음)이고 형식은 3단계와 같다.
- * 3단계에 없는 신호·필드(DENSE, episodes, alreadyUsedFor, embeddingModel 등)는 싣지 않는다.
+ * 신호는 REQUIREMENT·LEXICAL·DENSE(5단계)다. episodes·alreadyUsedFor 같은 4c·6단계 필드는 싣지 않는다.
  */
 public record ExperienceSearchResult(
         Query query,
@@ -27,8 +27,13 @@ public record ExperienceSearchResult(
     public record RequirementKey(String key, Field field) {
     }
 
-    /** 재현 정보(설계 6.7). dataVersion 은 후보로 쓴 이력서 (id, version) 목록의 해시, searchConfig 는 신호·가중 구성 상수. */
-    public record Context(String dataVersion, String searchConfig) {
+    /**
+     * 재현 정보(설계 6.7). dataVersion 은 후보로 쓴 이력서·경험 (id, version) 목록의 해시, searchConfig 는 신호·가중 구성 상수.
+     * embeddingModel 은 DENSE 에 쓴 모델(degraded 면 null), indexGeneration 은 이 계정 경험 조각의 마지막 적재 시각,
+     * indexBehind 는 아직 적재되지 않은(dirty) 경험이 있다는 뜻이다 — 방금 저장한 경험은 DENSE 에 아직 없을 수 있다.
+     */
+    public record Context(String dataVersion, String searchConfig, String embeddingModel, String indexGeneration,
+                          boolean indexBehind) {
     }
 
     /** 받쳐 줄 후보가 없는 요구. reason TAG_MISMATCH_POSSIBLE 은 후보 본문에 그 문자열이 보인다는 뜻이다. */
@@ -44,8 +49,11 @@ public record ExperienceSearchResult(
                          String textHash, String excerpt) {
     }
 
-    /** REQUIREMENT 는 맞은 키·칸·공고 인용, LEXICAL 은 그 신호 안 순위와 맞은 단어(최대 5개). */
-    public record Why(String signal, Integer rank, List<String> matched, Field field, String quote) {
+    /**
+     * REQUIREMENT 는 맞은 키·칸·공고 인용, LEXICAL 은 그 신호 안 순위와 맞은 단어(최대 5개),
+     * DENSE 는 그 신호 안 순위와 가장 가까운 조각의 출처 필드(sourceField, 예: facts.results). DENSE 만 있으면 "의미상 비슷할 뿐"이다.
+     */
+    public record Why(String signal, Integer rank, List<String> matched, Field field, String quote, String sourceField) {
     }
 
     /**
