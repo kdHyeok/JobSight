@@ -3,9 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { createSelfIntroduction, listSelfIntroductions, updateSelfIntroduction } from '../api/self-introductions'
 import type { SelfIntroduction } from '../types/self-introduction'
 
-const props = defineProps<{ resumeId: string }>()
+/**
+ * questions 는 부모가 이력서와 함께 받아 둔 첫 목록이다. 있으면 다시 부르지 않는다.
+ * 없으면(생략·null) 지금처럼 직접 부른다. 추가·연결·수정 뒤 다시 부르는 것은 언제나 여기서 한다.
+ */
+const props = defineProps<{ resumeId: string; questions?: SelfIntroduction[] | null }>()
 const emit = defineEmits<{ openIntroductions: [] }>()
-const items = ref<SelfIntroduction[]>([])
+const items = ref<SelfIntroduction[]>(props.questions ?? [])
 const matches = ref<SelfIntroduction[]>([])
 const question = ref('')
 const answer = ref('')
@@ -17,9 +21,17 @@ const saving = ref(false)
 const errorMessage = ref('')
 const linkedIds = computed(() => new Set(items.value.map((item) => item.id)))
 
+/** 마지막으로 보낸 목록 조회의 순번. 이력서가 바뀐 뒤 도착한 예전 응답은 버린다. */
+let loadSeq = 0
+
 async function load() {
-  try { items.value = await listSelfIntroductions('', props.resumeId) }
-  catch (error) { errorMessage.value = error instanceof Error ? error.message : '문항을 불러오지 못했습니다.' }
+  const seq = ++loadSeq
+  try {
+    const result = await listSelfIntroductions('', props.resumeId)
+    if (seq === loadSeq) items.value = result
+  } catch (error) {
+    if (seq === loadSeq) errorMessage.value = error instanceof Error ? error.message : '문항을 불러오지 못했습니다.'
+  }
 }
 
 async function add() {
@@ -67,8 +79,26 @@ async function saveEdit(item: SelfIntroduction) {
   } finally { saving.value = false }
 }
 
-watch(() => props.resumeId, load)
-onMounted(load)
+/** 부모가 목록을 넘겼으면 그 왕복은 이미 끝났다. 같은 요청을 한 번 더 보내지 않는다. */
+function loadIfMissing() {
+  if (!props.questions) load()
+}
+
+// 부모가 새 목록을 넘기면 그것이 최신이다. 진행 중인 자체 조회 결과는 버린다.
+watch(() => props.questions, (value) => {
+  if (!value) return
+  loadSeq++
+  items.value = value
+})
+// 다른 이력서로 바뀌면 이전 이력서의 목록·수정 상태·오류를 남기지 않는다. 목록을 못 받았으면 직접 부른다.
+watch(() => props.resumeId, () => {
+  loadSeq++
+  items.value = props.questions ?? []
+  editingId.value = ''
+  errorMessage.value = ''
+  loadIfMissing()
+})
+onMounted(loadIfMissing)
 </script>
 
 <template>

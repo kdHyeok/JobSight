@@ -10,10 +10,12 @@ import {
   updateResume,
 } from '../api/resumes'
 import { listPositions } from '../api/positions'
+import { listSelfIntroductions } from '../api/self-introductions'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ResumeEditor from './ResumeEditor.vue'
 import type { Resume, ResumePayload, ResumeSummary } from '../types/resume'
 import type { Position } from '../types/position'
+import type { SelfIntroduction } from '../types/self-introduction'
 
 /**
  * /resumes 는 카드 목록, /resumes?focus=<id> 는 그 버전의 편집기.
@@ -25,6 +27,8 @@ const emit = defineEmits<{ openResume: [id: string]; closeResume: []; openIntrod
 const resumes = ref<ResumeSummary[]>([])
 const current = ref<Resume | null>(null)
 const positions = ref<Position[]>([])
+/** 편집기를 열 때 이력서와 함께 받은 연결 문항. null 이면 문항 칸이 직접 불러온다. */
+const questions = ref<SelfIntroduction[] | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const notice = ref('')
@@ -43,7 +47,11 @@ function fail(error: unknown, fallback: string) {
   }
 }
 
+/** 마지막으로 보낸 조회의 순번. 이보다 앞선 조회의 응답은 늦게 와도 화면에 반영하지 않는다. */
+let loadSeq = 0
+
 async function loadList() {
+  loadSeq++
   loading.value = true
   loadError.value = ''
   try {
@@ -56,17 +64,29 @@ async function loadList() {
 }
 
 async function loadCurrent(id: string) {
+  const seq = ++loadSeq
   loading.value = true
   loadError.value = ''
   try {
-    const [resume, availablePositions] = await Promise.all([getResume(id), listPositions()])
+    // 문항은 이력서 id 만 있으면 부를 수 있다. 편집기가 그려진 뒤에 부르면 왕복 하나(공개 도메인에서 약 0.3초)를
+    // 더 기다리므로 여기서 함께 보낸다. 문항 실패가 이력서 열기를 막지 않게 null 로 넘기고, 그때는 문항 칸이
+    // 스스로 다시 불러 오류를 보여 준다.
+    const [resume, availablePositions, linkedQuestions] = await Promise.all([
+      getResume(id),
+      listPositions(),
+      listSelfIntroductions('', id).catch(() => null),
+    ])
+    // A 를 연 뒤 B 를 열면 A 응답이 B 보다 늦게 올 수 있다. 그때 A 로 덮지 않는다.
+    if (seq !== loadSeq) return
     current.value = resume
     positions.value = availablePositions
+    questions.value = linkedQuestions
   } catch (error) {
+    if (seq !== loadSeq) return
     current.value = null
     fail(error, '이력서를 불러오지 못했습니다.')
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -87,13 +107,18 @@ async function create() {
 
 async function save(payload: ResumePayload) {
   if (!current.value) return
+  const seq = loadSeq
   saving.value = true
   formErrors.value = {}
   notice.value = ''
   try {
-    current.value = await updateResume(current.value.id, payload)
+    const saved = await updateResume(current.value.id, payload)
+    // 저장 중에 다른 이력서로 옮겼으면 그 화면을 덮지 않는다. 저장은 서버에서 끝났고, 돌아오면 다시 불러온다.
+    if (seq !== loadSeq) return
+    current.value = saved
     notice.value = '저장했습니다.'
   } catch (error) {
+    if (seq !== loadSeq) return
     fail(error, '저장 중 오류가 발생했습니다.')
   } finally {
     saving.value = false
@@ -153,7 +178,7 @@ onMounted(reload)
 </script>
 
 <template>
-  <template v-if="props.focus && current">
+  <template v-if="props.focus === current?.id && current && !loading">
     <div v-if="notice || loadError" class="page page-notice">
       <div v-if="notice" class="notice success" role="status">{{ notice }}</div>
       <div v-if="loadError" class="notice error" role="alert">{{ loadError }}</div>
@@ -163,6 +188,7 @@ onMounted(reload)
       :saving="saving"
       :api-field-errors="formErrors"
       :positions="positions"
+      :questions="questions"
       @save="save"
       @copy="copy"
       @remove="deleteTarget = current"

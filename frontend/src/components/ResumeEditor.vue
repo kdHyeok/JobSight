@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 import type { Position } from '../types/position'
+import type { SelfIntroduction } from '../types/self-introduction'
 import AttachmentField from './AttachmentField.vue'
 import ResumeSection from './ResumeSection.vue'
 import ResumeQuestions from './ResumeQuestions.vue'
@@ -17,6 +18,8 @@ const props = defineProps<{
   saving: boolean
   apiFieldErrors: Record<string, string>
   positions: Position[]
+  /** 이력서와 함께 받아 둔 연결 문항. 없으면 문항 칸이 직접 불러온다. */
+  questions?: SelfIntroduction[] | null
 }>()
 
 const emit = defineEmits<{
@@ -271,6 +274,6 @@ async function exportPdf() {
       :rows="content[section.key]"
       @update:rows="setRows(section.key, $event)"
     />
-    <ResumeQuestions :resume-id="resume.id" @open-introductions="emit('openIntroductions')" />
+    <ResumeQuestions :resume-id="resume.id" :questions="questions" @open-introductions="emit('openIntroductions')" />
   </main>
 </template>
