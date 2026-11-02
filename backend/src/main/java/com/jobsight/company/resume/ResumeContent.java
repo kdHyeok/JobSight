@@ -39,6 +39,20 @@ public record ResumeContent(
                 orEmpty(awards), orEmpty(certificates), orEmpty(skills), orEmpty(projects));
     }
 
+    /** 수정 요청에서 빠진(null) 블록은 저장된 값을 쓴다. [] 는 비움이다 — docs/resumes.md 불변 조건 9. */
+    public ResumeContent withMissingFrom(ResumeContent stored) {
+        return new ResumeContent(
+                basic != null ? basic : stored.basic,
+                educations != null ? educations : stored.educations,
+                trainings != null ? trainings : stored.trainings,
+                activities != null ? activities : stored.activities,
+                experiences != null ? experiences : stored.experiences,
+                awards != null ? awards : stored.awards,
+                certificates != null ? certificates : stored.certificates,
+                skills != null ? skills : stored.skills,
+                projects != null ? projects : stored.projects);
+    }
+
     private static <T> List<T> orEmpty(List<T> list) {
         return list == null ? List.of() : list;
     }

@@ -33,14 +33,16 @@ describe('저장 중인 이력서 재조회', () => {
     firstSave = deferred()
     writes = 0
     stored = Object.fromEntries(['a', 'b'].map((id) => [id, {
-      id, ...payload(id.toUpperCase()), createdAt: '', updatedAt: '',
+      id, ...payload(id.toUpperCase()), version: 0, createdAt: '', updatedAt: '',
     }]))
     vi.mocked(request).mockReset().mockImplementation(async (path, init) => {
       const id = path === API.resume('a') ? 'a' : 'b'
       if (init?.method === 'PUT') {
-        const body = JSON.parse(init.body as string) as ResumePayload
+        const { expectedVersion, ...body } = JSON.parse(init.body as string) as ResumePayload
         if (++writes === 1) await firstSave.promise
-        stored[id] = { ...stored[id]!, ...body }
+        // 서버처럼 예전 버전으로 온 저장은 거절하고, 받은 저장마다 버전을 올린다(docs/resumes.md 불변 조건 8).
+        if (expectedVersion !== undefined && expectedVersion !== stored[id]!.version) throw new Error('RESUME_STALE')
+        stored[id] = { ...stored[id]!, ...body, version: stored[id]!.version + 1 }
       }
       return copy(stored[id])
     })
@@ -97,8 +99,9 @@ describe('저장 중인 이력서 재조회', () => {
   })
 
   it('같은 id의 연속 저장과 그 뒤 조회는 요청 순서를 유지한다', async () => {
-    const first = updateResume('a', payload('첫 저장'))
-    const second = updateResume('a', payload('둘째 저장'))
+    // 두 저장 모두 같은 읽기(version 0)에서 출발해도, 둘째 저장은 첫 저장이 올린 버전을 이어받아 거절되지 않는다.
+    const first = updateResume('a', { ...payload('첫 저장'), expectedVersion: 0 })
+    const second = updateResume('a', { ...payload('둘째 저장'), expectedVersion: 0 })
     const reading = getResume('a')
     await flushPromises()
     expect(writes).toBe(1)
@@ -106,5 +109,13 @@ describe('저장 중인 이력서 재조회', () => {
     await Promise.all([first, second])
     expect((await reading).name).toBe('둘째 저장')
     expect(stored.a!.name).toBe('둘째 저장')
+    expect(stored.a!.version).toBe(2)
+  })
+
+  it('다른 곳에서 먼저 저장했으면 예전 버전의 저장은 덮어쓰지 않는다', async () => {
+    firstSave.resolve()
+    stored.a = { ...stored.a!, name: 'AI 가 고친 이름', version: 3 }
+    await expect(updateResume('a', { ...payload('예전 화면의 저장'), expectedVersion: 0 })).rejects.toThrow('RESUME_STALE')
+    expect(stored.a!.name).toBe('AI 가 고친 이름')
   })
 })

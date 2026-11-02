@@ -8,9 +8,11 @@ import com.jobsight.company.resume.dto.ResumeCopyRequest;
 import com.jobsight.company.resume.dto.ResumeRequest;
 import com.jobsight.company.resume.dto.ResumeResponse;
 import com.jobsight.company.resume.dto.ResumeRowRequest;
+import com.jobsight.company.resume.dto.ResumeRowResult;
 import com.jobsight.company.resume.dto.ResumeSummary;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,9 +29,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Consumer;
+import java.util.function.Function;
 
-/** 이력서는 문서 통째로 읽고 쓴다. 행 단위 API 는 없다 — docs/resumes.md. 모든 조회는 소유자로 한정. */
+/**
+ * 이력서는 문서 하나로 읽고 쓴다. REST 에 행 단위 API 는 없다 — docs/resumes.md. 모든 조회는 소유자로 한정.
+ * 쓰기는 이력서 행을 잠그고 version 을 확인한다(불변 조건 8·10). 수정 요청의 null 은 유지다(불변 조건 9).
+ */
 @Service
 @Transactional(readOnly = true)
 public class ResumeService {
@@ -66,12 +71,18 @@ public class ResumeService {
         return toResponse(repository.save(resume));
     }
 
+    /** content·positionIds·빠진 섹션이 null 이면 유지, [] 면 비움. expectedVersion 필수. */
     @Transactional
     public ResumeResponse update(UUID id, ResumeRequest request) {
-        Resume resume = findOwned(id);
-        resume.update(request.name().trim(), write(request.content()));
-        resume.replacePositions(ownedPositionIds(request.positionIds()));
-        return toResponse(repository.save(resume));
+        Resume resume = lockOwned(id);
+        checkVersion(resume, request.expectedVersion(), true);
+        ResumeContent stored = read(resume.getContent());
+        ResumeContent next = request.content() == null ? stored : request.content().withMissingFrom(stored);
+        resume.update(request.name().trim(), objectMapper.writeValueAsString(next.normalized()));
+        if (request.positionIds() != null) {
+            resume.replacePositions(ownedPositionIds(request.positionIds()));
+        }
+        return toResponse(repository.saveAndFlush(resume));
     }
 
     /** 같은 내용의 새 버전. 원본은 건드리지 않는다. */
@@ -92,78 +103,79 @@ public class ResumeService {
     // REST 에는 행 API 가 없다 — 화면은 문서 통째 PUT 이다. MCP 는 문서 전체를 되돌려 보내기 어려우니
     // 서버가 조회 → 한 군데 수정 → 저장을 한 트랜잭션으로 묶어 준다. 나머지 섹션은 건드리지 않는다.
 
+    /** basic 블록만 교체한다. 행 번호에 기대지 않으므로 expectedVersion 은 선택이다. */
     @Transactional
-    public ResumeResponse updateBasic(UUID id, ResumeContent.BasicInfo basic) {
-        Resume resume = findOwned(id);
+    public ResumeResponse updateBasic(UUID id, ResumeContent.BasicInfo basic, Long expectedVersion) {
+        Resume resume = lockOwned(id);
+        checkVersion(resume, expectedVersion, false);
         ResumeContent current = read(resume.getContent());
         ResumeContent next = new ResumeContent(basic == null ? ResumeContent.BasicInfo.empty() : basic,
                 current.educations(), current.trainings(), current.activities(), current.experiences(),
                 current.awards(), current.certificates(), current.skills(), current.projects());
         resume.update(resume.getName(), objectMapper.writeValueAsString(next.normalized()));
-        return toResponse(repository.save(resume));
+        return toResponse(repository.saveAndFlush(resume));
     }
 
-    /** 섹션 맨 뒤에 붙인다. */
+    /** 섹션 맨 뒤에 붙인다. 행 번호에 기대지 않으므로 expectedVersion 은 선택이다. */
     @Transactional
-    public ResumeResponse addRow(UUID id, ResumeSection section, ResumeRowRequest row) {
-        return mutateRows(id, section, rows -> rows.add(toNode(section, row)));
-    }
-
-    /** index(0-based) 행을 통째로 바꾼다. 다른 행은 그대로. */
-    @Transactional
-    public ResumeResponse updateRow(UUID id, ResumeSection section, int index, ResumeRowRequest row) {
-        return mutateRows(id, section, rows -> {
-            requireIndex(rows, index);
-            rows.set(index, carryArrays(rows.get(index), toNode(section, row)));
+    public ResumeRowResult addRow(UUID id, ResumeSection section, ResumeRowRequest row, Long expectedVersion) {
+        return mutateRows(id, section, expectedVersion, false, rows -> {
+            rows.add(toNode(section, row, null));
+            return rows.size() - 1;
         });
     }
 
-    /** index(0-based) 행을 지운다. 뒤 행이 앞으로 당겨진다. */
+    /** index(0-based) 행에 보낸 필드만 덮는다. 빠진 필드는 유지, "" 는 비움. expectedVersion 필수. */
     @Transactional
-    public ResumeResponse deleteRow(UUID id, ResumeSection section, int index) {
-        return mutateRows(id, section, rows -> {
+    public ResumeRowResult updateRow(UUID id, ResumeSection section, int index, ResumeRowRequest row,
+                                     Long expectedVersion) {
+        return mutateRows(id, section, expectedVersion, true, rows -> {
+            requireIndex(rows, index);
+            rows.set(index, toNode(section, row, rows.get(index)));
+            return index;
+        });
+    }
+
+    /** index(0-based) 행을 지운다. 뒤 행이 앞으로 당겨진다. expectedVersion 필수. */
+    @Transactional
+    public ResumeRowResult deleteRow(UUID id, ResumeSection section, int index, Long expectedVersion) {
+        return mutateRows(id, section, expectedVersion, true, rows -> {
             requireIndex(rows, index);
             rows.remove(index);
+            return null;
         });
     }
 
-    /**
-     * 행 요청이 표현하지 못하는 중첩 배열(학년별·학기별 이수 내역)은 기존 값을 지킨다.
-     * ResumeRowRequest 는 평평한 문자열 합집합이라 그 표를 실을 수 없다 —
-     * 그대로 두면 학력 행 하나를 고칠 때마다 성적표가 조용히 사라진다.
-     */
-    private static JsonNode carryArrays(JsonNode previous, JsonNode replacement) {
-        if (!(previous instanceof ObjectNode before) || !(replacement instanceof ObjectNode next)) {
-            return replacement;
-        }
-        before.properties().forEach(entry -> {
-            JsonNode carried = next.get(entry.getKey());
-            if (entry.getValue().isArray() && (carried == null || carried.isNull())) {
-                next.set(entry.getKey(), entry.getValue());
-            }
-        });
-        return next;
-    }
-
-    private ResumeResponse mutateRows(UUID id, ResumeSection section, Consumer<ArrayNode> change) {
-        Resume resume = findOwned(id);
+    /** change 는 바꾼 행의 index 를 돌려준다(삭제면 null). 응답은 이력서 전체가 아니라 그 행의 개요다. */
+    private ResumeRowResult mutateRows(UUID id, ResumeSection section, Long expectedVersion, boolean versionRequired,
+                                       Function<ArrayNode, Integer> change) {
+        Resume resume = lockOwned(id);
+        checkVersion(resume, expectedVersion, versionRequired);
         ObjectNode root = (ObjectNode) objectMapper.readTree(resume.getContent());
         JsonNode existing = root.get(section.key());
         ArrayNode rows = existing instanceof ArrayNode array ? array : root.putArray(section.key());
-        change.accept(rows);
+        Integer index = change.apply(rows);
         ResumeContent next = objectMapper.treeToValue(root, ResumeContent.class).normalized();
         resume.update(resume.getName(), objectMapper.writeValueAsString(next));
-        return toResponse(repository.save(resume));
+        Resume saved = repository.saveAndFlush(resume);
+        JsonNode savedRows = objectMapper.readTree(saved.getContent()).get(section.key());
+        Map<String, Object> savedRow = index == null ? null : asMap(savedRows.get(index));
+        return new ResumeRowResult(saved.getId(), saved.getVersion(), section.key(), savedRows.size(), index, savedRow);
     }
 
     /**
      * 합집합 record 를 이 섹션의 record 로 엄격 변환한다. 다른 섹션 필드가 섞이면 거부한다 —
      * Jackson 이 조용히 버리면 값이 사라진 채 저장되고, 도구 사용자는 성공으로 알기 때문이다.
+     * previous 가 있으면 그 위에 보낸 필드만 덮는다. 그래서 행 요청이 표현하지 못하는 중첩 배열
+     * (학년별·학기별 이수 내역)도 남는다 — 이 병합이 없으면 학력 행을 고칠 때마다 성적표가 사라진다.
      */
-    private JsonNode toNode(ResumeSection section, ResumeRowRequest row) {
+    private JsonNode toNode(ResumeSection section, ResumeRowRequest row, JsonNode previous) {
         Map<String, Object> present = new LinkedHashMap<>();
-        Map<?, ?> all = objectMapper.convertValue(row, Map.class);
-        all.forEach((key, value) -> {
+        if (previous instanceof ObjectNode before) {
+            present.putAll(asMap(before));
+        }
+        Map<?, ?> requested = objectMapper.convertValue(row, Map.class);
+        requested.forEach((key, value) -> {
             if (value != null) present.put(String.valueOf(key), value);
         });
         Object typed;
@@ -184,10 +196,43 @@ public class ResumeService {
         return objectMapper.valueToTree(typed);
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(JsonNode node) {
+        return objectMapper.convertValue(node, Map.class);
+    }
+
     private static void requireIndex(ArrayNode rows, int index) {
         if (index < 0 || index >= rows.size()) {
             throw new ApiRuleException(HttpStatus.NOT_FOUND, "ROW_NOT_FOUND",
                     "행 번호가 범위를 벗어났습니다: " + index + " (0부터, 현재 " + rows.size() + "개)");
+        }
+    }
+
+    /**
+     * 예전에 읽은 문서로 덮어쓰지 않게 한다 — docs/resumes.md 불변 조건 8.
+     * 오류에는 지금 버전을 싣지 않는다. 실어 주면 클라이언트가 대상을 확인하지 않고 그 값으로 다시 보낼 수 있다.
+     */
+    private static void checkVersion(Resume resume, Long expected, boolean required) {
+        if (expected == null) {
+            if (!required) return;
+            throw new ApiRuleException(HttpStatus.BAD_REQUEST, "VERSION_REQUIRED",
+                    "expectedVersion 이 필요합니다. 이력서를 다시 읽고 고칠 대상을 확인한 뒤 그 version 을 보내세요.");
+        }
+        if (expected != resume.getVersion()) {
+            throw new ApiRuleException(HttpStatus.CONFLICT, "RESUME_STALE",
+                    "다른 곳에서 먼저 저장했습니다. 이력서를 다시 읽고 고칠 대상을 다시 확인한 뒤 보내세요. 같은 행 번호로 그대로 재시도하지 마세요.");
+        }
+    }
+
+    /** 쓰기 경로의 조회. 행을 잠가 동시에 들어온 쓰기가 서로를 덮지 않게 한다 — 불변 조건 10. */
+    private Resume lockOwned(UUID id) {
+        try {
+            repository.setLocalLockTimeout();
+            return repository.findOwnedForUpdate(id, currentUser.id())
+                    .orElseThrow(() -> new ResourceNotFoundException(id));
+        } catch (PessimisticLockingFailureException exception) {
+            throw new ApiRuleException(HttpStatus.CONFLICT, "RESUME_BUSY",
+                    "같은 이력서의 다른 저장을 처리 중입니다. 잠시 후 다시 읽고 시도해 주세요.");
         }
     }
 
@@ -212,7 +257,7 @@ public class ResumeService {
         return ids;
     }
 
-    /** null 은 빈 문서로. 저장되는 JSON 이 항상 같은 모양이어야 읽는 쪽이 편하다. */
+    /** 생성 때 null 은 빈 문서로. 저장되는 JSON 이 항상 같은 모양이어야 읽는 쪽이 편하다. */
     private String write(ResumeContent content) {
         ResumeContent normalized = (content == null ? ResumeContent.empty() : content).normalized();
         return objectMapper.writeValueAsString(normalized);

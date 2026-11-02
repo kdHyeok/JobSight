@@ -23,6 +23,7 @@ OAuth가 필요하면 클라이언트의 연결 흐름을 사용한다. access t
 - **수정은 전체 교체다.** 먼저 상세를 조회하고 요청 스키마에 있는 기존 필드를 유지한 뒤 요청받은 값만 바꾼다.
   `id`, `createdAt`, `updatedAt`, 계산된 요약 등 응답 전용 필드는 `request`에 복사하지 않는다.
   필드를 지우려는 요청이면 해당 선택 필드에 null, 목록이면 []를 명시한다.
+  **단, 이력서(`resume_*`)는 예외다** — null 은 유지, `[]`·`""` 는 비움이고 버전 규칙이 있다(아래 이력서 절).
 - 명시적으로 요청된 저장·변경만 실행한다. 삭제 전에 대상과 연결 삭제 범위를 알리고, 사용자의 삭제 요청이
   그 범위를 포함하는지 판단한다. 목록 조회·제안은 변경 권한을 뜻하지 않는다.
 - 도구 결과는 `structuredContent.data` 또는 JSON 텍스트다. `isError=true`면 성공으로 보고하지 않는다.
@@ -128,21 +129,29 @@ preview는 기사 본문 미리보기/영상 설명, source는 신문사/채널�
 이력서는 **이름 + id 로 구분되는 여러 버전**이다. 같은 이름의 v1·v2 가 있을 수 있으니 목록에서 id 를 확인한다.
 `resume_list` 에는 content 가 없고 이름·수정일만 있다. 내용은 `resume_get` 으로 읽는다.
 `resume_copy` 는 같은 내용의 새 버전을 만든다(원본 그대로). 공고에 맞춘 변형은 복제 후 편집한다.
-`positionIds`는 이력서에 연결할 내 모집 직무 ID 전체이며 여러 개를 넣을 수 있다. 수정은 기존 연결까지 포함한 전체 배열을 보낸다.
+`positionIds`는 이력서에 연결할 내 모집 직무 ID 전체이며 여러 개를 넣을 수 있다. `resume_update` 에서 `positionIds` 를 빼면(null) 기존 연결을 유지한다. 바꿀 때는 남길 연결까지 포함한 전체 배열을 보낸다.
 
 `content` 는 `basic` 과 8개 섹션 배열이다: educations(학력) · trainings(교육이수) · activities(대내외활동) ·
 experiences(경력) · awards(수상) · certificates(자격증) · skills(SW 역량) · projects(프로젝트).
 필드 이름은 `tools/list` 의 inputSchema 가 정본이다.
 연월(`startYm` `endYm` `awardedYm` `acquiredYm`)은 **사용자가 쓴 그대로의 문자열**이다("2024.03", "현재 교육 중"). 날짜로 바꾸지 않는다.
 
+**버전 규칙** (예전에 읽은 내용으로 덮어쓰지 않게):
+- `resume_get` 과 행 도구 응답에는 `version` 이 있다. 다음 쓰기에 `expectedVersion` 으로 그대로 보낸다.
+- `resume_update`·`resume_row_update`·`resume_row_delete` 는 `expectedVersion` 이 **필수**다. `resume_row_add`·`resume_basic_update` 는 선택이다.
+- `RESUME_STALE`(409)을 받으면 **같은 index 로 다시 보내지 않는다.** `resume_get` 으로 다시 읽고, 고칠 행을 제목·기간으로 다시 찾은 뒤
+  새 `version` 으로 보낸다. 찾지 못하면 사용자에게 묻는다. 그사이 웹에서 행이 지워져 번호가 당겨졌을 수 있다.
+- 행 도구는 **병렬로 부르지 않는다.** 직전 응답의 `version` 을 다음 호출에 넘긴다.
+
 **내용 편집은 행 도구를 쓴다** — 문서 전체를 되돌려 보내지 않아도 된다. 나머지 섹션은 서버가 그대로 둔다.
-- `resume_basic_update({id,request:{name,phone,birthDate,email,address,portfolioUrl,portfolioFileId,githubUrl}})`: 기본정보 블록 교체.
-- `resume_row_add({id,section,request})`: 섹션 맨 뒤에 행 추가. `request` 에는 **그 섹션의 필드만** 넣는다 —
+- `resume_basic_update({id,request:{name,phone,birthDate,email,address,portfolioUrl,portfolioFileId,githubUrl},expectedVersion?})`: 기본정보 블록 교체.
+- `resume_row_add({id,section,request,expectedVersion?})`: 섹션 맨 뒤에 행 추가. `request` 에는 **그 섹션의 필드만** 넣는다 —
   다른 섹션 필드가 섞이면 UNKNOWN_ROW_FIELD 로 거부된다(조용히 버려져 값이 사라지는 일을 막기 위해).
-- `resume_row_update({id,section,index,request})`: `index` 는 **0부터**. 그 행 전체를 교체하므로 먼저 `resume_get` 으로 읽고
-  유지할 필드를 함께 보낸다.
-- `resume_row_delete({id,section,index})`: 뒤 행이 앞으로 당겨진다. 여러 행을 지울 때는 큰 index 부터, 또는 지운 뒤 재조회.
-`resume_update` 는 문서 **전체** 교체다. 섹션 하나만 바꿀 때는 행 도구가 안전하다.
+  응답은 이력서 전체가 아니라 `{id, version, section, count, index, row}` 개요다.
+- `resume_row_update({id,section,index,request,expectedVersion})`: `index` 는 **0부터**. **보낸 필드만 덮고 빠진 필드는 유지**한다.
+  필드를 비우려면 `""` 를 보낸다. 성적표처럼 행 도구가 표현하지 못하는 표는 그대로 남는다.
+- `resume_row_delete({id,section,index,expectedVersion})`: 뒤 행이 앞으로 당겨진다. 여러 행을 지울 때는 큰 index 부터, 응답의 version 을 이어서 쓴다.
+`resume_update` 는 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic` 을 **null 이면 유지, `[]` 면 비움**으로 다룬다. 섹션 하나만 바꿀 때는 행 도구가 더 안전하다.
 사용자가 이력서 항목을 읽어 달라고 하면 `resume_get` 결과의 섹션 순서(학력→…→프로젝트)대로 보여준다.
 
 ## 자기소개 문항

@@ -74,6 +74,9 @@ public class McpController {
                     return toolError(id, "INVALID_ARGUMENT", e.getMessage());
                 } catch (tools.jackson.core.JacksonException e) {
                     return toolError(id, "INVALID_ARGUMENT", "입력 형식이나 enum 값이 올바르지 않습니다.");
+                } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+                    // REST 와 같은 코드. RuntimeException 아래로 떨어지면 INTERNAL_ERROR 로 뭉개진다.
+                    return toolError(id, "STALE_WRITE", "다른 곳에서 먼저 저장했습니다. 다시 읽고 고칠 대상을 확인한 뒤 보내세요.");
                 } catch (RuntimeException e) {
                     return toolError(id, "INTERNAL_ERROR", "작업에 실패했습니다. 재시도 전에 조회하여 반영 여부를 확인하세요.");
                 }

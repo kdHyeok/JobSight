@@ -22,10 +22,12 @@ export const createResume = (name: string) =>
 
 /** 문서 통째 교체. 행 단위 API 는 없다. */
 export async function updateResume(id: string, payload: ResumePayload): Promise<Resume> {
-  const body = JSON.stringify(payload)
-  const send = () => request<Resume>(API.resume(id), { method: 'PUT', body })
+  const send = (expectedVersion = payload.expectedVersion) =>
+    request<Resume>(API.resume(id), { method: 'PUT', body: JSON.stringify({ ...payload, expectedVersion }) })
   const previous = pendingUpdates.get(id)
-  const pending = previous ? previous.catch(() => undefined).then(send) : send()
+  // 같은 화면의 연속 저장은 앞 저장이 올린 version 을 이어받는다. 편집기 상태가 누적이라 뒤 저장이 앞 저장을 포함한다.
+  // 앞 저장이 실패했으면 처음 값을 그대로 보내 서버가 판단하게 한다(바뀌었으면 409).
+  const pending = previous ? previous.then((saved) => send(saved.version), () => send()) : send()
   pendingUpdates.set(id, pending)
   try {
     return await pending

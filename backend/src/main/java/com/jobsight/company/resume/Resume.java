@@ -10,6 +10,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -43,6 +44,11 @@ public class Resume {
     @CollectionTable(name = "resume_positions", joinColumns = @JoinColumn(name = "resume_id"))
     @Column(name = "position_id", nullable = false)
     private Set<UUID> positionIds = new LinkedHashSet<>();
+
+    /** 저장할 때마다 오른다. 예전에 읽은 문서로 덮어쓰지 않게 서비스가 비교한다 — docs/resumes.md 불변 조건 8. */
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -95,6 +101,7 @@ public class Resume {
     public String getName() { return name; }
     public String getContent() { return content; }
     public Set<UUID> getPositionIds() { return positionIds; }
+    public long getVersion() { return version; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

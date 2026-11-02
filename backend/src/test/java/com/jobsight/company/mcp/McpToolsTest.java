@@ -106,19 +106,33 @@ class McpToolsTest {
         tools.call("company_content_delete", Map.of("companyId", id.toString(), "id", reference.toString()), principal);
         verify(contents).delete(id, reference);
     }
-    /** 행 도구는 섹션 enum 과 0-based index 를 그대로 서비스에 넘긴다. */
+    /** 행 도구는 섹션 enum·0-based index·expectedVersion 을 그대로 서비스에 넘긴다. 추가는 버전이 선택이다. */
     @Test void resumeRowToolsPassSectionAndIndex() {
         UUID id = UUID.randomUUID();
         tools.call("resume_row_add", Map.of("id", id.toString(), "section", "certificates",
                 "request", Map.of("name", "SQLD", "acquiredYm", "2026.03")), principal);
-        verify(resumes).addRow(eq(id), eq(ResumeSection.certificates), argThat(r -> r.name().equals("SQLD") && r.school() == null));
-        tools.call("resume_row_delete", Map.of("id", id.toString(), "section", "projects", "index", 2), principal);
-        verify(resumes).deleteRow(id, ResumeSection.projects, 2);
+        verify(resumes).addRow(eq(id), eq(ResumeSection.certificates), argThat(r -> r.name().equals("SQLD") && r.school() == null), isNull());
+        tools.call("resume_row_delete", Map.of("id", id.toString(), "section", "projects", "index", 2, "expectedVersion", 7), principal);
+        verify(resumes).deleteRow(id, ResumeSection.projects, 2, 7L);
         assertThatThrownBy(() -> tools.call("resume_row_delete", Map.of("id", id.toString(), "section", "nope", "index", 0), principal))
                 .isInstanceOf(RuntimeException.class);
         var schema = JsonMapper.builder().build().writeValueAsString(tools.list(principal).stream()
                 .filter(t -> t.get("name").equals("resume_row_add")).findFirst().orElseThrow().get("inputSchema"));
         for (var section : ResumeSection.values()) assertThat(schema).contains("\"" + section.name() + "\"");
+    }
+
+    /** 행 번호로 고치거나 지울 때는 버전이 필수다 — 예전에 읽은 번호가 다른 행을 가리킬 수 있다(docs/resumes.md 불변 조건 8). */
+    @Test void resumeIndexToolsRequireExpectedVersion() {
+        UUID id = UUID.randomUUID();
+        assertThatThrownBy(() -> tools.call("resume_row_delete", Map.of("id", id.toString(), "section", "projects", "index", 0), principal))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("expectedVersion");
+        var update = tools.list(principal).stream().filter(t -> t.get("name").equals("resume_row_update")).findFirst().orElseThrow();
+        assertThat(((Map<?, ?>) update.get("inputSchema")).get("required").toString()).contains("expectedVersion");
+        var add = tools.list(principal).stream().filter(t -> t.get("name").equals("resume_row_add")).findFirst().orElseThrow();
+        assertThat(((Map<?, ?>) add.get("inputSchema")).get("required").toString()).doesNotContain("expectedVersion");
+        // 이력서 저장은 null=유지라 다른 update 도구에 붙는 "전체 교체" 안내가 붙으면 안 된다.
+        var resumeUpdate = tools.list(principal).stream().filter(t -> t.get("name").equals("resume_update")).findFirst().orElseThrow();
+        assertThat(resumeUpdate.get("description").toString()).doesNotContain("전체 교체").contains("expectedVersion");
     }
 
     @Test void schemaContainsWholeCompanyDtoAndStatusEnums() {

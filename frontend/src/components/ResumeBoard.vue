@@ -112,7 +112,8 @@ async function save(payload: ResumePayload) {
   formErrors.value = {}
   notice.value = ''
   try {
-    const saved = await updateResume(current.value.id, payload)
+    // 읽어 온 version 을 함께 보낸다. 그사이 다른 곳(AI 등)이 저장했으면 덮어쓰지 않고 409 를 받는다.
+    const saved = await updateResume(current.value.id, { ...payload, expectedVersion: current.value.version })
     // 저장 중에 다른 이력서로 옮겼으면 그 화면을 덮지 않는다. 저장은 서버에서 끝났고, 돌아오면 다시 불러온다.
     if (seq !== loadSeq) return
     current.value = saved
