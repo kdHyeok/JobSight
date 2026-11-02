@@ -83,9 +83,15 @@ public class JobPostingService {
         return toResponses(List.of(saved)).get(0);
     }
 
+    /**
+     * 공고 행을 잠근 뒤 직무를 맞춘다. 잠금 없이 읽고-고치고-쓰면 병렬 수정 두 건이 같은 새 직무를
+     * 두 행으로 만든다(docs/job-postings.md 불변 조건 10). 3초 안에 못 잠그면 공통 변환이 409 BUSY 로 바꾼다.
+     */
     @Transactional
     public JobPostingResponse update(UUID id, JobPostingRequest request) {
-        JobPosting posting = findOwned(id);
+        repository.setLocalLockTimeout();
+        JobPosting posting = repository.findOwnedForUpdate(id, currentUser.id())
+                .orElseThrow(() -> new ResourceNotFoundException(id));
         posting.update(toAttributes(request));
         JobPosting saved = repository.save(posting);
         syncPositions(saved, request.positions());

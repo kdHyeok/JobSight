@@ -271,7 +271,7 @@ submissions (공고별 제출 기록, 확인 수준) · writing_guides (계정�
 - 그래서 `resume_experiences_experience_fk` 와 `self_introduction_episodes_episode_fk` 를 지연 FK로 둔다.
 - 위반이 커밋 때 나므로, 경험·사건 단독 삭제 서비스는 먼저 영향받는 지연 제약을 모두 `SET CONSTRAINTS … IMMEDIATE` 로 당기고 삭제 뒤 flush한다. 경험 삭제는 사건을 연쇄로 지우므로 `resume_experiences_experience_fk` 와 `self_introduction_episodes_episode_fk` 둘 다다(10.3 R15). 그러면 위반이 그 문장에서 나서 409로 바꾸기 쉽다.
 - 경험이 지워진 뒤에 커밋하는 링커 저장도 커밋에서 실패한다. 커밋 예외(`DataIntegrityViolationException`)는 409로 바꾼다.
-- **오류 코드는 REST와 MCP가 같아야 한다.** `McpController` 는 지금 일반 실행 예외를 `INTERNAL_ERROR` 로 뭉갠다(`B/mcp/McpController.java:77-78`). 업무 예외(`EXPERIENCE_IN_USE`, `EPISODE_IN_USE`, `MERGE_CONFLICT`, `RESUME_STALE`, `VERSION_REQUIRED`)와 커밋 시점 FK 위반을 **변환 함수 하나**로 REST 409와 MCP 도구 오류 코드에 함께 쓴다. `GlobalExceptionHandler` 만 고치면 MCP 경로가 남는다. 경험·사건 삭제의 409, 계정 삭제 성공, MCP 도구 오류 코드를 실제 JPA 트랜잭션 경로(Testcontainers)로 통합 테스트한다(4단계).
+- **오류 코드는 REST와 MCP가 같아야 한다.** `McpController` 는 지금 일반 실행 예외를 `INTERNAL_ERROR` 로 뭉갠다(`B/mcp/McpController.java:77-78`). 업무 예외(`EXPERIENCE_IN_USE`, `EPISODE_IN_USE`, `MERGE_CONFLICT`, `RESUME_STALE`, `VERSION_REQUIRED`)와 커밋 시점 FK 위반을 **변환 함수 하나**로 REST 409와 MCP 도구 오류 코드에 함께 쓴다. `GlobalExceptionHandler` 만 고치면 MCP 경로가 남는다. 경험·사건 삭제의 409, 계정 삭제 성공, MCP 도구 오류 코드를 실제 JPA 트랜잭션 경로(Testcontainers)로 통합 테스트한다(4단계). 변환 함수는 1단계 리뷰 보정에서 `common/ApiErrors.translate` 로 먼저 만들었다(404 `NOT_FOUND`, 잠금 경합 409 `BUSY`, 원인 체인의 SQLState 검사). 4단계는 커밋 시점 FK 위반 분기와 그 통합 테스트를 더한다.
 
 ### 2.4 소유자 격리
 

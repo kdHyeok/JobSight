@@ -7,7 +7,7 @@ import jakarta.validation.constraints.Size;
  * 섹션마다 도구를 만들면 24개가 된다. 어느 필드가 어느 섹션 것인지는 서비스가 섹션 record 로
  * 엄격 변환하며 검사한다(다른 섹션 필드 → UNKNOWN_ROW_FIELD). 값이 null 인 필드는 보내지 않은 것으로 본다.
  * 중첩 표(collegeTerms·schoolTerms)는 여기 없다 — 행 도구로는 못 고치고 문서 통째 PUT 으로만 바꾼다.
- * updateRow 는 표현하지 못하는 그 배열들을 지우지 않고 그대로 남긴다(ResumeService.carryArrays).
+ * updateRow 는 기존 행 위에 보낸 필드만 덮으므로 표현하지 못하는 그 배열들도 그대로 남는다(ResumeService.toNode).
  */
 public record ResumeRowRequest(
         @Size(max = 200) String name,

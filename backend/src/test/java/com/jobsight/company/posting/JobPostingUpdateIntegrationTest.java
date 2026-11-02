@@ -21,8 +21,14 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
@@ -110,5 +116,40 @@ class JobPostingUpdateIntegrationTest {
         assertThat(updated.positions()).extracting(PositionSummary::id).doesNotContain(backendId);
         assertThat(updated.targetPositionId()).isNull();
         assertThat(resumes.findById(resumeId).positionIds()).containsExactly(frontendId);
+    }
+
+    /**
+     * 같은 새 직무를 담은 수정 두 건이 동시에 와도 그 직무는 한 행이다(불변 조건 10).
+     * 공고 행을 잠그지 않으면 둘 다 기존 직무 목록을 읽은 뒤 각자 새 행을 만든다. 경쟁이라 여러 번 돌린다.
+     */
+    @Test
+    void parallelUpdatesDoNotDuplicateNewPosition() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int round = 0; round < 5; round++) {
+                JobPostingResponse created = postings.create(request(
+                        List.of(new PositionNameRequest(null, "백엔드")), List.of()));
+                UUID backendId = idOf(created, "백엔드");
+                JobPostingRequest addData = request(List.of(
+                        new PositionNameRequest(backendId, "백엔드"), new PositionNameRequest(null, "데이터")), null);
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<JobPostingResponse>> results = new ArrayList<>();
+                for (int i = 0; i < 2; i++) {
+                    results.add(pool.submit(() -> {
+                        start.await();
+                        return postings.update(created.id(), addData);
+                    }));
+                }
+                start.countDown();
+                for (Future<JobPostingResponse> result : results) {
+                    result.get(15, TimeUnit.SECONDS);
+                }
+
+                assertThat(jdbc.queryForObject("select count(*) from positions where posting_id = ?",
+                        Integer.class, created.id())).as("round %d", round).isEqualTo(2);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

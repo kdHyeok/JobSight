@@ -90,6 +90,19 @@ public record ResumeContent(
         public static BasicInfo empty() {
             return new BasicInfo(null, null, null, null, null, null, null, null);
         }
+
+        /** resume_basic_update 에서 빠진(null) 필드는 저장된 값을 쓴다. "" 는 비움 — 행 갱신과 같은 규칙(불변 조건 9). */
+        BasicInfo withMissingFrom(BasicInfo stored) {
+            return new BasicInfo(
+                    name != null ? name : stored.name,
+                    phone != null ? phone : stored.phone,
+                    birthDate != null ? birthDate : stored.birthDate,
+                    email != null ? email : stored.email,
+                    address != null ? address : stored.address,
+                    portfolioUrl != null ? portfolioUrl : stored.portfolioUrl,
+                    portfolioFileId != null ? portfolioFileId : stored.portfolioFileId,
+                    githubUrl != null ? githubUrl : stored.githubUrl);
+        }
     }
 
     /**
