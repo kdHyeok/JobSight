@@ -1,3 +1,5 @@
+import type { AttachmentMeta } from './attachment'
+
 /**
  * 이력서 문서의 모양. 백엔드 ResumeContent 와 키가 1:1 이어야 한다 —
  * Jackson 은 모르는 키를 조용히 버리므로 오타가 나면 저장은 되는데 값이 사라진다.
@@ -54,6 +56,8 @@ export interface Resume extends ResumeSummary {
   positionIds: string[]
   /** 저장할 때마다 오른다. 저장 요청의 expectedVersion 으로 돌려보낸다 — docs/resumes.md 불변 조건 8. */
   version: number
+  /** content 가 가리키는 내 첨부의 메타(응답 전용). 빠진 id 는 첨부 칸이 직접 부른다 — docs/attachments.md. */
+  attachments?: Record<string, AttachmentMeta>
 }
 
 export interface ResumePayload {

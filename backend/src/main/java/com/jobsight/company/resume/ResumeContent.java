@@ -3,6 +3,7 @@ package com.jobsight.company.resume;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -51,6 +52,18 @@ public record ResumeContent(
                 certificates != null ? certificates : stored.certificates,
                 skills != null ? skills : stored.skills,
                 projects != null ? projects : stored.projects);
+    }
+
+    /** 첨부 id 가 들어가는 칸 전부. 프런트 SECTIONS 의 kind 'file' 필드와 같은 목록이다 — docs/attachments.md. */
+    List<String> attachmentIds() {
+        List<String> ids = new ArrayList<>();
+        if (basic != null) ids.add(basic.portfolioFileId());
+        orEmpty(educations).forEach(row -> { ids.add(row.diplomaId()); ids.add(row.transcriptId()); });
+        orEmpty(trainings).forEach(row -> ids.add(row.fileId()));
+        orEmpty(activities).forEach(row -> ids.add(row.fileId()));
+        orEmpty(awards).forEach(row -> ids.add(row.fileId()));
+        orEmpty(certificates).forEach(row -> ids.add(row.fileId()));
+        return ids;
     }
 
     private static <T> List<T> orEmpty(List<T> list) {

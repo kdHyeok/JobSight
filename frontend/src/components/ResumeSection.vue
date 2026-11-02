@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AttachmentField from './AttachmentField.vue'
 import TermTable from './TermTable.vue'
+import type { AttachmentMeta } from '../types/attachment'
 import type { Row, RowValue, SectionConfig, TermRow } from '../types/resume'
 import { MAX_LENGTH, emptyRow, text, terms, visible } from '../types/resume'
 
@@ -8,7 +9,12 @@ import { MAX_LENGTH, emptyRow, text, terms, visible } from '../types/resume'
  * 섹션 하나 = 행 카드들 + 행 추가. 행은 불변으로 갈아끼운다(부모의 변경 감지가 깊은 비교라서).
  * 행의 :key 는 index 다. 값은 :value + @input 이라 ↑↓ 뒤에도 입력값이 따라간다 — v-model 로 바꾸지 말 것.
  */
-const props = defineProps<{ section: SectionConfig; rows: Row[] }>()
+const props = defineProps<{
+  section: SectionConfig
+  rows: Row[]
+  /** 이력서 응답에 함께 온 첨부 메타(id → 메타). 첨부 칸이 다시 부르지 않게 내려 준다. */
+  attachments?: Record<string, AttachmentMeta>
+}>()
 const emit = defineEmits<{ 'update:rows': [Row[]] }>()
 
 function add() {
@@ -65,6 +71,7 @@ const setTerms = (index: number, key: string, rows: TermRow[]) => set(index, key
               v-else-if="field.kind === 'file'"
               :id="text(row, field.key)"
               :label="field.label"
+              :preloaded="attachments?.[text(row, field.key)]"
               @update:id="set(index, field.key, $event)"
             />
             <label v-else class="field" :class="{ full: field.kind === 'textarea' || field.kind === 'url' }">

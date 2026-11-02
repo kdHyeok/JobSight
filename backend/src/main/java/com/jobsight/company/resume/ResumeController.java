@@ -39,7 +39,8 @@ public class ResumeController {
         return service.findAll();
     }
 
-    @Operation(summary = "이력서 상세", description = "content 전체. 타인 소유이거나 없으면 404.")
+    @Operation(summary = "이력서 상세", description = "content 전체. attachments 는 content 가 가리키는 내 첨부의 메타"
+            + "(id → 파일명·형식·크기, 응답 전용)이고 남의 것·지워진 id 는 빠진다. 타인 소유이거나 없으면 404.")
     @GetMapping("/{id}")
     public ResumeResponse findById(@PathVariable UUID id) {
         return service.findById(id);

@@ -254,7 +254,7 @@ async function exportPdf() {
     <section class="resume-section">
       <div class="resume-section__head"><h2>기본정보</h2></div>
       <div class="form-grid">
-        <AttachmentField v-for="field in BASIC_FIELDS.filter((item) => item.kind === 'file')" :key="field.key" :id="basicValue(field.key)" :label="field.label" @update:id="setBasic(field.key, $event)" />
+        <AttachmentField v-for="field in BASIC_FIELDS.filter((item) => item.kind === 'file')" :key="field.key" :id="basicValue(field.key)" :label="field.label" :preloaded="resume.attachments?.[basicValue(field.key)]" @update:id="setBasic(field.key, $event)" />
         <label v-for="field in BASIC_FIELDS.filter((item) => item.kind !== 'file')" :key="field.key" class="field" :class="{ full: field.kind === 'url' }">
           <span>{{ field.label }}</span>
           <input
@@ -272,6 +272,7 @@ async function exportPdf() {
       :key="section.key"
       :section="section"
       :rows="content[section.key]"
+      :attachments="resume.attachments"
       @update:rows="setRows(section.key, $event)"
     />
     <ResumeQuestions :resume-id="resume.id" :questions="questions" @open-introductions="emit('openIntroductions')" />

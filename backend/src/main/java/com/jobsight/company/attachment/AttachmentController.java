@@ -56,7 +56,8 @@ public class AttachmentController {
         return attachments.findMeta(id);
     }
 
-    @Operation(summary = "파일 삭제", description = "교체할 때 화면이 이전 파일을 지운다. 되돌릴 수 없다.")
+    @Operation(summary = "파일 삭제", description = "되돌릴 수 없다. 화면은 교체·제거 때 부르지 않는다 — "
+            + "복제한 이력서가 같은 id 를 가리킬 수 있어서다(docs/attachments.md).")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         attachments.delete(id);
