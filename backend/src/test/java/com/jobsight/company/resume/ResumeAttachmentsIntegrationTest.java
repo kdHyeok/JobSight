@@ -73,8 +73,11 @@ class ResumeAttachmentsIntegrationTest {
         UUID mine = attachment(OWNER_ID, "졸업증.pdf");
         UUID theirs = attachment(OTHER_ID, "남의 성적표.pdf");
         ResumeContent content = mapper.convertValue(Map.of("educations", List.of(Map.of(
-                "school", "대학", "diplomaId", mine.toString(), "transcriptId", theirs.toString()))), ResumeContent.class);
+                "school", "대학", "diplomaId", mine.toString()))), ResumeContent.class);
         UUID id = service.create(new ResumeRequest("첨부", content, List.of(), null)).id();
+        // 남의 id 는 새로 적으면 규칙 B 가 400 으로 막는다(AttachmentDeleteIntegrationTest). 예전에 저장된 문서에 있을 수 있어 직접 넣는다.
+        jdbc.update("update resumes set content = jsonb_set(content, '{educations,0,transcriptId}', to_jsonb(?::text)) where id = ?",
+                theirs.toString(), id);
 
         ResumeResponse detail = service.findById(id);
 

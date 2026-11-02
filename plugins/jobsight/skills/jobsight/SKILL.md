@@ -150,6 +150,8 @@ preview는 기사 본문 미리보기/영상 설명, source는 신문사/채널�
 experiences(경력) · awards(수상) · certificates(자격증) · skills(SW 역량) · projects(프로젝트).
 필드 이름은 `tools/list` 의 inputSchema 가 정본이다.
 연월(`startYm` `endYm` `awardedYm` `acquiredYm`)은 **사용자가 쓴 그대로의 문자열**이다("2024.03", "현재 교육 중"). 날짜로 바꾸지 않는다.
+첨부 칸(`portfolioFileId` `diplomaId` `transcriptId` `fileId`)은 웹에서 올린 **내 첨부의 id** 다. 파일은 MCP 로 올리거나 지울 수 없다. 이미 저장된 값은 그대로 두고,
+새 값을 적을 때는 `resume_get` 응답 `attachments` 에 있는 id 를 그대로(소문자 36자) 옮긴다. 내 파일이 아니거나 없는 id 를 새로 적으면 400 `ATTACHMENT_NOT_FOUND` 다 — 지어내지 않는다.
 
 **버전 규칙** (예전에 읽은 내용으로 덮어쓰지 않게):
 - `resume_get` 과 행 도구 응답에는 `version` 이 있다. 다음 쓰기에 `expectedVersion` 으로 그대로 보낸다.
@@ -210,6 +212,8 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 1. 사용자가 준 설명·자료를 읽고 `experience_index` 로 겹치는 경험이 있는지 먼저 찾는다. 자소서 답변은 "어느 경험을 썼나"를 찾는 데만 쓰고 사실 근거로 쓰지 않는다.
 2. 역할·행동·결과·측정 범위를 근거(인용 `quote`·주변 문맥·위치)와 함께 정리하고, 확인하지 못한 것(`unverified`)과 자료끼리 어긋나는 것(`conflicts`)을 따로 적는다.
    로컬 파일은 경로가 아니라 필요한 발췌를 근거로 넣는다(로컬 경로만 있으면 400 `EVIDENCE_LOCAL_PATH`).
+   `ATTACHMENT` 근거의 `ref.attachmentId` 는 이력서 응답 `attachments` 에 있는 내 첨부 id 여야 한다. 아니면 400 `ATTACHMENT_NOT_FOUND`.
+   근거로 적은 첨부는 개정 이력에 남아 웹에서 지울 수 없게 된다.
 3. 사용자가 요청하고 검토한 범위만 `experience_save` 로 저장한다. 겹치는 경험이 있으면 새로 만들지 말고 그 경험에 저장한다:
    `experience_index({ids:[id]})` 상세의 `version` 을 `request.expectedVersion` 으로 넘기고, `facts` 배열 항목의 기존 `id` 는 그대로 둔다. 고친 항목은 같은 `id`, 새 항목은 `id` 없이 보낸다.
    개정 종류(ADD·CORRECT)는 서버가 판정해 `changeKind` 로 준다. `CORRECT` 면 응답 `needsReview[]` 의 이력서·자소서를 사용자에게 알린다.

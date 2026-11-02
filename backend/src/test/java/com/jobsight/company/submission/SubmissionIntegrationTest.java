@@ -1,6 +1,7 @@
 package com.jobsight.company.submission;
 
 import com.jobsight.company.attachment.AttachmentService;
+import com.jobsight.company.attachment.dto.AttachmentListItem;
 import com.jobsight.company.auth.AppSessionUser;
 import com.jobsight.company.common.ApiErrors;
 import com.jobsight.company.common.ApiRuleException;
@@ -231,7 +232,15 @@ class SubmissionIntegrationTest {
         Throwable blocked = catchThrowable(() -> new TransactionTemplate(transactions).executeWithoutResult(status ->
                 attachments.delete(receiptFile)));
         assertThat(ApiErrors.translate(blocked).code()).isEqualTo("ATTACHMENT_IN_USE");
+        assertThat(blocked).hasMessageContaining("'마사 신입 공채' 제출 기록");
         assertThat(jdbc.queryForObject("select count(*) from attachments where id = ?", Integer.class, receiptFile)).isOne();
+        // 서랍 목록도 같은 판정을 쓴다. 접수 근거 파일은 이력서에 없고 제출 기록만 가리킨다.
+        assertThat(attachments.list()).filteredOn(item -> item.id().equals(receiptFile)).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.usedBy()).extracting(AttachmentListItem.UsedBy::type).containsOnly("SUBMISSION");
+                    assertThat(item.usedBy()).extracting(AttachmentListItem.UsedBy::name).containsOnly("마사 신입 공채");
+                    assertThat(item.deletable()).isFalse();
+                });
 
         jdbc.update("delete from app_users where id = ?", owner);
         for (String table : List.of("submissions", "submission_attachments", "attachments", "job_postings")) {

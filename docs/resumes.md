@@ -46,6 +46,7 @@ content = {
 5. **복제는 새 id.** `POST /resumes/{id}/copy` 는 content 를 그대로 든 새 행을 만든다. 원본은 건드리지 않는다.
 6. **연결 직무는 관계로 저장한다.** `positionIds`는 같은 소유자의 직무만 허용하고 이력서 복제에도 복사한다. 편집 화면은 검색창과 선택 칩만 보여 주고, 검색창 클릭·포커스 시 미선택 직무를 드롭다운으로 펼친다. 검색어가 없으면 최근 수정순 전체 목록, 검색 시 이름·기업·공고를 좁힌다. 목록은 최대 320px(작은 화면은 화면 높이의 45%) 안에서 휠·스크롤바로 스크롤하며 페이지 본문을 밀어내지 않는다.
 7. **내보내기는 저장된 문서 기준이다.** Word는 브라우저가 `.doc`을 만들고 PDF는 인쇄 대화상자의 PDF 저장을 사용한다. 선택한 첨부는 원본 바이트를 별도 ZIP으로 묶는다.
+   첨부 체크 목록에는 저장된 문서에 있지만 응답 `attachments` 에 메타가 없는 id(지워졌거나 남의 것)를 싣지 않는다 — 고르면 ZIP 만들기가 실패한다.
 8. **예전에 읽은 문서로 덮어쓰지 않는다** (`version`). 이력서는 저장할 때마다 `version` 이 오른다. 문서 전체 저장(`PUT`, `resume_update`)과 행 번호로 고치는 `resume_row_update`·`resume_row_delete` 는 `expectedVersion` 이 **필수**이고, 행 추가·기본정보 수정은 선택이다. 없으면 400 `VERSION_REQUIRED`, 지금 버전과 다르면 409 `RESUME_STALE`. 오류에는 지금 버전을 싣지 않는다 — 클라이언트가 다시 읽고 대상을 확인하게 하려는 것이다. 잠금만으로는 부족하다: AI가 `projects[0]` 을 읽은 뒤 웹에서 0번을 지우면, 잠금이 정상이어도 AI의 0번 수정이 엉뚱한 행에 들어간다.
    `RESUME_STALE` 과 `STALE_WRITE` 는 감지 지점이 달라 둘 다 둔다. `RESUME_STALE` 은 서비스가 저장 전에 요청의 `expectedVersion` 을 잠근 행과 비교해 낸다. `STALE_WRITE` 는 저장 flush 때 JPA `@Version` 이 어긋나면 공통 변환(`common/ApiErrors`)이 낸다 — 잠금 덕에 보통은 오지 않는다. 둘 다 409 이고 다시 읽은 뒤 고친다.
 9. **수정 요청의 `null` 은 유지, `[]` 는 비움이다.** `PUT`·`resume_update` 의 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic`, `resume_row_update` 의 빠진 행 필드, `resume_basic_update` 의 빠진 기본정보 필드가 모두 그렇다. 행 갱신과 기본정보 수정은 기존 값 위에 보낸 필드만 덮는다(`""` 는 그 필드를 비운다). AI가 섹션이나 필드를 빠뜨려 보낸 저장이 조용한 삭제가 되던 것을 막는다. 기본정보는 `ResumeServiceTest.updateBasicKeepsFieldsTheRequestLeavesOut`·`updateBasicEmptyStringClearsOnlyThatField` 가 본다.
@@ -55,6 +56,10 @@ content = {
     400 `INVALID_CONTENT`) → 링커(앵커 이어받기·개정 검사·자동 연결) → 저장과 `resume_experiences` 반영을 한다. 웹 PUT 의 `refreshExperienceIds` 는 그 경험 행을
     지금 개정으로 올리고("원본으로 갱신"), 저장으로 끊긴 앵커는 응답 `unlinkedWarnings` 로 알린다. MCP `resume_update` 는 연결 행이 빠지면 409 `LINKED_ROWS_MISSING`
     (`removedExperienceIds` 로 허용), 행 도구는 `experienceId` 로도 행을 지목한다 — docs/experiences.md.
+    관문은 저장 flush 뒤 **첨부 규칙 B** 도 건다: 저장 전 문서에 없던 첨부 id 를 `for key share` 로 잡고, 내 파일이 아니거나 정규형 UUID 가 아니면 400 `ATTACHMENT_NOT_FOUND`.
+    이미 저장된 값은 통과한다. 복제는 원본을 잠그고 읽어 규칙 B 없이 안전하다 — docs/attachments.md 불변 조건 7·8.
+13. **저장·삭제가 성공한 뒤 빠진 첨부를 묻는다**(설계 6.9). `ResumeBoard` 가 저장 전후 응답의 `attachments` 맵 키를 비교해 빠진 파일을 매번 묻고(답을 기억하지 않는다), 이력서를 지웠으면 그 이력서의 첨부 전부를 묻는다.
+    다른 곳(복제본·경험·제출 기록)에서 쓰면 서버 409 를 받아 "남겨 두었습니다"로 알린다. 저장이 실패하면 묻지 않는다. 목록 화면의 [첨부 파일] 서랍은 docs/attachments.md.
 
 ## 진입점
 

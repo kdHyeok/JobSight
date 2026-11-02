@@ -1,6 +1,7 @@
 package com.jobsight.company.resume;
 
 import com.jobsight.company.attachment.AttachmentRepository;
+import com.jobsight.company.attachment.AttachmentService;
 import com.jobsight.company.attachment.dto.AttachmentResponse;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
@@ -64,7 +65,7 @@ class ResumeServiceTest {
     void setUp() {
         var validator = Validation.buildDefaultValidatorFactory().getValidator();
         ResumeWriter writer = new ResumeWriter(repository, new ResumeExperienceLinker(experienceRepository, mapper), validator,
-                mapper, jdbc);
+                mapper, jdbc, new AttachmentService(attachmentRepository, currentUser, jdbc));
         service = new ResumeService(repository, currentUser, mapper, validator, positionRepository, attachmentRepository,
                 writer, ownerLock, experienceRepository);
         given(currentUser.id()).willReturn(OWNER_ID);
@@ -440,6 +441,7 @@ class ResumeServiceTest {
 
         assertThat(service.findById(resume.getId()).attachments()).containsExactly(Map.entry(fileId, meta));
 
+        given(attachmentRepository.lockForReference(Set.of(fileId), OWNER_ID)).willReturn(List.of(fileId));
         ResumeContent withNullRows = new ResumeContent(null, null,
                 Arrays.asList(null, new ResumeContent.Training("교육", null, null, null, null, fileId.toString(), null, null)),
                 Collections.singletonList(null), null, Collections.singletonList(null),

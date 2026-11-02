@@ -1,5 +1,6 @@
 package com.jobsight.company.attachment;
 
+import com.jobsight.company.attachment.dto.AttachmentListItem;
 import com.jobsight.company.attachment.dto.AttachmentResponse;
 import com.jobsight.company.common.ApiPaths;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 @Tag(name = "attachments", description = "이력서 증빙 파일(jpg·png·pdf). 타인의 파일은 404.")
@@ -35,6 +37,14 @@ public class AttachmentController {
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public AttachmentResponse upload(@RequestPart("file") MultipartFile file) {
         return attachments.upload(file);
+    }
+
+    @Operation(summary = "내 첨부 목록(첨부 서랍)",
+            description = "올린 파일 전부와 사용처 usedBy[{type RESUME|EXPERIENCE|EXPERIENCE_REVISION|SUBMISSION, id, name}]. "
+                    + "deletable 은 서버가 계산한다: 어디서도 쓰지 않고 올린 지 7일이 지났다. 바이트는 싣지 않는다.")
+    @GetMapping
+    public List<AttachmentListItem> list() {
+        return attachments.list();
     }
 
     @Operation(summary = "파일 내려받기", description = "미리보기도 이 경로를 쓴다. inline + nosniff 로 내려간다.")
@@ -56,8 +66,9 @@ public class AttachmentController {
         return attachments.findMeta(id);
     }
 
-    @Operation(summary = "파일 삭제", description = "되돌릴 수 없다. 화면은 교체·제거 때 부르지 않는다 — "
-            + "복제한 이력서가 같은 id 를 가리킬 수 있어서다(docs/attachments.md).")
+    @Operation(summary = "파일 삭제", description = "되돌릴 수 없다. 이력서·경험 근거(지난 개정 포함)·제출 기록 중 한 곳이라도 "
+            + "가리키면 409 ATTACHMENT_IN_USE(쓰는 곳 이름이 메시지에 있다). 화면은 저장·이력서 삭제 뒤 빠진 첨부를 물을 때와 "
+            + "첨부 서랍에서만 부른다. 교체·제거 때는 부르지 않는다(docs/attachments.md).")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         attachments.delete(id);

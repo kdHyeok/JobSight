@@ -30,4 +30,11 @@ public interface AttachmentRepository extends JpaRepository<Attachment, UUID> {
              where a.id in :ids and a.ownerId = :ownerId
             """)
     List<AttachmentResponse> findMetas(@Param("ids") Collection<UUID> ids, @Param("ownerId") UUID ownerId);
+
+    /**
+     * 규칙 B(설계 6.9): 새로 적는 첨부 행을 for key share 로 잡는다. 삭제의 네이티브 for update 와 충돌해 둘의 순서가 정해진다.
+     * JPA 잠금 모드로는 이 수준을 고를 수 없어 네이티브다. 찾은 id 만 돌려준다 — 개수가 모자라면 내 파일이 아니거나 지워졌다.
+     */
+    @Query(value = "select id from attachments where id in (:ids) and owner_id = :ownerId for key share", nativeQuery = true)
+    List<UUID> lockForReference(@Param("ids") Collection<UUID> ids, @Param("ownerId") UUID ownerId);
 }
