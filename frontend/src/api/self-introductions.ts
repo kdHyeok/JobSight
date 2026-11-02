@@ -1,6 +1,6 @@
 import { request } from './http'
 import { API } from '../routes'
-import type { SelfIntroduction, SelfIntroductionPayload } from '../types/self-introduction'
+import type { SelfIntroduction, SelfIntroductionConfirmPayload, SelfIntroductionPayload } from '../types/self-introduction'
 
 export { ApiClientError } from './http'
 
@@ -20,3 +20,7 @@ export const updateSelfIntroduction = (id: string, payload: SelfIntroductionPayl
 
 export const deleteSelfIntroduction = (id: string) =>
   request<void>(API.selfIntroduction(id), { method: 'DELETE' })
+
+/** 웹 전용 확정(✓). MCP 가 남긴 AI 기록을 사용자 확정으로 바꾼다. */
+export const confirmSelfIntroduction = (id: string, payload: SelfIntroductionConfirmPayload) =>
+  request<SelfIntroduction>(API.selfIntroductionConfirm(id), { method: 'POST', body: JSON.stringify(payload) })

@@ -49,6 +49,8 @@ export interface ResumeSummary {
   name: string
   createdAt: string
   updatedAt: string
+  /** 연결 직무. 자소서 편집기의 "어느 지원용?" 후보 칩에 쓴다. */
+  positionIds?: string[]
 }
 
 export interface Resume extends ResumeSummary {

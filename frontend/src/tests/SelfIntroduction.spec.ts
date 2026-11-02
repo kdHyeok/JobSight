@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SelfIntroductionBoard from '../components/SelfIntroductionBoard.vue'
 import * as api from '../api/self-introductions'
 import { listResumes } from '../api/resumes'
+import { listPositions } from '../api/positions'
 import { highlightMatches } from '../utils/highlight'
+import type { Position } from '../types/position'
+import type { SelfIntroduction } from '../types/self-introduction'
 
 enableAutoUnmount(afterEach)
 
@@ -12,9 +15,17 @@ vi.mock('../api/self-introductions', () => ({
   createSelfIntroduction: vi.fn(),
   updateSelfIntroduction: vi.fn(),
   deleteSelfIntroduction: vi.fn(),
+  confirmSelfIntroduction: vi.fn(),
 }))
 
 vi.mock('../api/resumes', () => ({ listResumes: vi.fn() }))
+vi.mock('../api/positions', () => ({ listPositions: vi.fn() }))
+
+const positions = [
+  { id: 'p-backend', name: '백엔드', companyName: '에이회사', postingTitle: '공채' },
+  { id: 'p-data', name: '데이터', companyName: '에이회사', postingTitle: '공채' },
+  { id: 'p-front', name: '프론트', companyName: '비회사', postingTitle: '수시' },
+] as unknown as Position[]
 
 const item = {
   id: '70000000-0000-0000-0000-000000000001',
@@ -39,6 +50,8 @@ describe('자기소개 문항과 연결 이력서', () => {
   beforeEach(() => {
     vi.mocked(api.listSelfIntroductions).mockReset().mockResolvedValue([item])
     vi.mocked(listResumes).mockReset().mockResolvedValue(resumes)
+    vi.mocked(listPositions).mockReset().mockResolvedValue(positions)
+    vi.mocked(api.confirmSelfIntroduction).mockReset()
     vi.mocked(api.createSelfIntroduction).mockReset().mockResolvedValue(item)
     vi.mocked(api.updateSelfIntroduction).mockReset().mockResolvedValue(item)
   })
@@ -108,22 +121,91 @@ describe('자기소개 문항과 연결 이력서', () => {
     await fields[1].setValue('작성한 답변')
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
-    expect(api.createSelfIntroduction).toHaveBeenCalledWith({ resumeIds: ['data'], question: '지원 동기', answer: '작성한 답변' })
+    expect(api.createSelfIntroduction).toHaveBeenCalledWith({
+      resumeIds: ['data'], question: '지원 동기', answer: '작성한 답변', positionIds: [], questionTypes: [],
+    })
     expect(wrapper.find('.intro-editor').exists()).toBe(false)
   })
 
-  it('수정 저장도 기존 연결·질문·답변을 보존하며 마지막 연결을 해제하면 저장을 막는다', async () => {
+  it('수정 저장도 기존 연결·질문·답변을 보존하고, 수정은 연결 0개도 저장할 수 있다', async () => {
     const wrapper = await mountBoard()
     await wrapper.get('.intro-card .button').trigger('click')
     await wrapper.get('[aria-label="백엔드 이력서 연결 해제"]').trigger('click')
-    expect(wrapper.get('.intro-editor button[type="submit"]').attributes('disabled')).toBeDefined()
+    // 생성은 이력서 또는 직무 1개 이상이지만 수정은 0개도 된다(직무가 지워져 연결이 없어진 문항도 고칠 수 있게).
+    expect(wrapper.get('.intro-editor button[type="submit"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[role="combobox"]').setValue('데이터')
     await wrapper.get('[role="option"]').trigger('click')
-    expect(wrapper.get('.intro-editor button[type="submit"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
-    expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, { resumeIds: ['data'], question: item.question, answer: item.answer })
+    expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, {
+      resumeIds: ['data'], question: item.question, answer: item.answer, positionIds: [], questionTypes: [],
+    })
     expect(item.resumeIds).toEqual([resumes[0].id])
+  })
+
+  it('직무만 골라도 새 문항을 만들고, 이력서도 직무도 없으면 생성을 막는다', async () => {
+    const wrapper = await mountBoard()
+    await wrapper.get('.page-head > button').trigger('click')
+    await wrapper.get('[aria-label="백엔드 이력서 연결 해제"]').trigger('click')
+    await wrapper.get('.intro-editor textarea').setValue('지원 동기')
+    expect(wrapper.get('.intro-editor button[type="submit"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('select[aria-label="지원 직무 추가"]').setValue('p-front')
+    expect(wrapper.get('.intro-editor button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('select[aria-label="문항 유형 추가"]').setValue('MOTIVATION')
+    expect(wrapper.get('.intro-links').text()).toContain('비회사 · 프론트')
+    await wrapper.get('.intro-editor form').trigger('submit')
+    await flushPromises()
+    expect(api.createSelfIntroduction).toHaveBeenCalledWith({
+      resumeIds: [], question: '지원 동기', answer: '', positionIds: ['p-front'], questionTypes: ['MOTIVATION'],
+    })
+  })
+
+  it('출처 없는 답변에는 연결 이력서들의 직무 전부를 "어느 지원용?" 후보로 보여 주고 한 번에 고른다', async () => {
+    vi.mocked(listResumes).mockResolvedValue([
+      { ...resumes[0], positionIds: ['p-backend', 'p-data'] },
+      { ...resumes[1], positionIds: ['p-front'] },
+      resumes[2],
+    ])
+    const wrapper = await mountBoard()
+    await wrapper.get('.intro-card .button').trigger('click')
+    const candidates = () => wrapper.findAll('.link-candidates button').map((button) => button.text())
+    expect(wrapper.get('.link-candidates').text()).toContain('어느 지원용?')
+    expect(candidates()).toEqual(['+ 에이회사 · 백엔드', '+ 에이회사 · 데이터'])
+    await wrapper.get('[role="combobox"]').setValue('프런트')
+    await wrapper.get('[role="option"]').trigger('click')
+    expect(candidates()).toEqual(['+ 에이회사 · 백엔드', '+ 에이회사 · 데이터', '+ 비회사 · 프론트'])
+    await wrapper.findAll('.link-candidates button')[1].trigger('click')
+    expect(wrapper.find('.link-candidates').exists()).toBe(false)
+    await wrapper.get('.intro-editor form').trigger('submit')
+    await flushPromises()
+    expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, expect.objectContaining({ positionIds: ['p-data'] }))
+  })
+
+  it('AI 기록 칩은 ✓로 바로 확정하고 ✗로 연결에서 뺀다', async () => {
+    const aiRecorded: SelfIntroduction = {
+      ...item,
+      positionLinks: [{ positionId: 'p-backend', source: 'AI' }],
+      questionTypes: [{ code: 'MOTIVATION', source: 'AI' }],
+    }
+    vi.mocked(api.listSelfIntroductions).mockResolvedValue([aiRecorded])
+    vi.mocked(api.confirmSelfIntroduction).mockResolvedValue({
+      ...aiRecorded, positionLinks: [{ positionId: 'p-backend', source: 'USER' }],
+    })
+    const wrapper = await mountBoard()
+    expect(wrapper.get('.intro-card').text()).toContain('에이회사 · 백엔드 · AI 기록')
+    await wrapper.get('.intro-card .button').trigger('click')
+    expect(wrapper.find('.link-candidates').exists()).toBe(false)
+    await wrapper.get('[aria-label="에이회사 · 백엔드 확정"]').trigger('click')
+    await flushPromises()
+    expect(api.confirmSelfIntroduction).toHaveBeenCalledWith(item.id, { positionIds: ['p-backend'] })
+    expect(wrapper.find('[aria-label="에이회사 · 백엔드 확정"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="지원동기 확정"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="지원동기 연결 해제"]').trigger('click')
+    await wrapper.get('.intro-editor form').trigger('submit')
+    await flushPromises()
+    expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, expect.objectContaining({
+      positionIds: ['p-backend'], questionTypes: [],
+    }))
   })
 
   it('바깥 클릭·포커스·Esc·Tab으로 닫고 다시 입력해 연다', async () => {
@@ -173,6 +255,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('추가할 이력서가 없습니다.')
     await wrapper.get('.intro-editor .button.secondary').trigger('click')
     vi.mocked(listResumes).mockResolvedValue([])
+    vi.mocked(listPositions).mockResolvedValue([])
     const missing = await mountBoard()
     expect(missing.get('.page-head > button').attributes('disabled')).toBeDefined()
     await missing.get('.intro-card .button').trigger('click')

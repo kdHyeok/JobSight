@@ -65,7 +65,7 @@ content = {
 ## API 요약 (상세는 Swagger)
 
 ```
-GET    /api/resumes            → [ {id, name, updatedAt} ]      목록엔 content 없음
+GET    /api/resumes            → [ {id, name, createdAt, updatedAt, positionIds} ]   목록엔 content 없음. positionIds 는 자소서 "어느 지원용?" 후보용
 POST   /api/resumes            {name, content?, positionIds?}    content 없으면 빈 문서
 GET    /api/resumes/{id}       → {id, name, content, positionIds, version, attachments, createdAt, updatedAt}
                                  attachments = {첨부 id → {id, filename, contentType, size}}  응답 전용, 내 첨부만

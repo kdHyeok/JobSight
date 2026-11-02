@@ -31,6 +31,7 @@ class McpToolsTest {
     CompanyContentService contents = mock(CompanyContentService.class);
     ResumeService resumes = mock(ResumeService.class);
     SelfIntroductionService selfIntroductions = mock(SelfIntroductionService.class);
+    SelfIntroductionAgentService selfIntroAgent = mock(SelfIntroductionAgentService.class);
     AppUserService users = mock(AppUserService.class);
     AppSettingService settings = mock(AppSettingService.class);
     AdminStatsService stats = mock(AdminStatsService.class);
@@ -44,7 +45,7 @@ class McpToolsTest {
                 new PositionController(positions), new ReferenceController(references), new CompanyContentController(contents),
                 new ResumeController(resumes), new SelfIntroductionController(selfIntroductions),
                 new AdminController(users, settings, stats, current), new AuthController(users, settings, current, null, null),
-                new McpActions(current, users, positions, references, contents, resumes), JsonMapper.builder().findAndAddModules().build(), validator);
+                new McpActions(current, users, positions, references, contents, resumes, selfIntroAgent),JsonMapper.builder().findAndAddModules().build(), validator);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
                 List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
@@ -86,14 +87,47 @@ class McpToolsTest {
                 && request.content().basic().name().equals("테스트 사용자")));
 
         when(selfIntroductions.create(any())).thenReturn(new com.jobsight.company.selfintro.dto.SelfIntroductionResponse(
-                UUID.randomUUID(), List.of(resumeId), "지원 동기", "협업 경험", java.time.Instant.EPOCH, java.time.Instant.EPOCH));
+                UUID.randomUUID(), List.of(resumeId), "지원 동기", "협업 경험", java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of()));
         tools.call("self_intro_create", Map.of("request", Map.of(
                 "resumeIds", List.of(resumeId.toString()), "question", "지원 동기", "answer", "협업 경험")), principal);
         tools.call("self_intro_list", Map.of("q", "협업", "resumeId", resumeId.toString()), principal);
 
         verify(selfIntroductions).create(argThat(request -> request.resumeIds().equals(List.of(resumeId))
                 && request.question().equals("지원 동기") && request.answer().equals("협업 경험")));
-        verify(selfIntroductions).findAll("협업", resumeId);
+        verify(selfIntroAgent).list("협업", resumeId, null, null, null, null, null, null);
+        verify(selfIntroductions, never()).findAll(any(), any());
+    }
+
+    /**
+     * self_intro_list·get 은 웹 REST 목록을 바꾸지 않도록 McpActions 래퍼로 간다(설계 5.1·5.3).
+     * 필터와 문항 유형 enum, q 의 100자 제한이 스키마에 드러나고, 직무·문항 유형 연결은 생성 요청 그대로 서비스에 닿는다.
+     */
+    @Test void selfIntroToolsUseAgentViewAndCarryLinks() {
+        UUID positionId = UUID.randomUUID(), companyId = UUID.randomUUID(), id = UUID.randomUUID();
+        tools.call("self_intro_list", Map.of("positionId", positionId.toString(), "companyId", companyId.toString(),
+                "questionType", "MOTIVATION", "unlinked", false, "limit", 5), principal);
+        verify(selfIntroAgent).list(null, null, positionId, null, companyId, Competency.MOTIVATION, false, 5);
+        tools.call("self_intro_get", Map.of("id", id.toString()), principal);
+        verify(selfIntroAgent).get(id);
+        verifyNoInteractions(selfIntroductions);
+
+        when(selfIntroductions.create(any())).thenReturn(new com.jobsight.company.selfintro.dto.SelfIntroductionResponse(
+                id, List.of(), "지원 동기", null, java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of()));
+        tools.call("self_intro_create", Map.of("request", Map.of("positionIds", List.of(positionId.toString()),
+                "questionTypes", List.of("MOTIVATION", "ASPIRATION"), "question", "지원 동기")), principal);
+        verify(selfIntroductions).create(argThat(request -> request.resumeIds() == null
+                && request.positionIds().equals(List.of(positionId))
+                && request.questionTypes().equals(List.of(Competency.MOTIVATION, Competency.ASPIRATION))));
+        // 이력서도 직무도 없는 생성은 서비스에 닿기 전에 거부된다.
+        assertThatThrownBy(() -> tools.call("self_intro_create", Map.of("request", Map.of("question", "지원 동기")), principal))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("linked");
+
+        var list = tools.list(principal).stream().filter(t -> t.get("name").equals("self_intro_list")).findFirst().orElseThrow();
+        String schema = JsonMapper.builder().build().writeValueAsString(list.get("inputSchema"));
+        assertThat(schema).contains("\"maxLength\":100", "\"positionId\"", "\"postingId\"", "\"companyId\"",
+                "\"unlinked\"", "\"limit\"", "\"PERSONALITY\"");
+        // 확정은 웹에서만 한다 — MCP 에는 확정 도구가 없다(설계 3절 규칙 3).
+        assertThat(tools.list(principal)).extracting(t -> t.get("name").toString()).noneMatch(name -> name.contains("confirm"));
     }
     @Test void defaultsAndRelationshipArgumentsArePreserved() {
         tools.call("posting_list", Map.of(), principal);

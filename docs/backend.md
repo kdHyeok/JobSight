@@ -12,7 +12,7 @@
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
 | 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
-| 스키마 | `resources/db/migration/V1~V19` — Flyway, `ddl-auto: validate` |
+| 스키마 | `resources/db/migration/V1~V23` — Flyway, `ddl-auto: validate` |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
 
 DB 연결 획득은 3초 안에 실패시킨다. PostgreSQL 행 잠금(직무 삭제·공고 수정의 공고 행, 이력서 쓰기의 이력서 행)은 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다.
@@ -69,6 +69,8 @@ nginx → SecurityFilterChain
 
 기업별 뉴스·유튜브 자료는 `V11__company_contents.sql`과 `companycontent/*`가 담당한다. 회사·콘텐츠 조회 모두 `owner_id` 조건을 쿼리에 포함한다.
 이력서–직무 연결과 자기소개 문항은 `V19__resume_positions_and_self_introductions.sql`, `resume/*`, `selfintro/*`가 담당한다.
+자기소개의 직접 출처(직무)·문항 유형 간선은 `V23__self_intro_relations.sql` 이다. 간선은 `@ElementCollection` 의 `@Embeddable` record
+(`owner_id` 포함)로 매핑해 `(id, owner_id)` 복합 FK 를 Hibernate 가 그대로 채운다. 시스템 어휘 표 `competencies` 는 enum 과 기동 시 대조한다.
 
 ## 컴파일·테스트
 

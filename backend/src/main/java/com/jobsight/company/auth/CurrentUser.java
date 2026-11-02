@@ -41,4 +41,11 @@ public class CurrentUser {
         }
         return require().appUserId();
     }
+
+    /** MCP 토큰 요청이면 true. 관계의 출처는 요청 주체가 정한다: 웹 USER, MCP 항상 AI — 설계 3절 규칙 2. */
+    public boolean viaMcp() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof com.jobsight.company.mcp.McpPrincipal;
+    }
 }

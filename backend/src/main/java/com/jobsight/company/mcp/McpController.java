@@ -51,7 +51,7 @@ public class McpController {
                         "instructions", PluginGuideController.skillText()));
             case "ping": return result(id, Map.of());
             case "resources/list": return result(id, Map.of("resources", List.of(Map.of("uri", PluginGuideController.SKILL_URI,
-                    "name", "JobSight 사용 지침", "description", "기업·공고·직무·참고·뉴스/유튜브 도구와 안전한 수정 규칙", "mimeType", "text/markdown"))));
+                    "name", "JobSight 사용 지침", "description", "기업·공고·직무·참고·뉴스/유튜브·이력서·자기소개 도구와 안전한 수정 규칙", "mimeType", "text/markdown"))));
             case "resources/read":
                 if (!PluginGuideController.SKILL_URI.equals(params.get("uri"))) return error(id, -32002, "Resource not found");
                 return result(id, Map.of("contents", List.of(Map.of("uri", PluginGuideController.SKILL_URI,
