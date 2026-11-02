@@ -17,6 +17,18 @@
 
 DB 연결 획득은 3초 안에 실패시킨다. 마지막 직무 삭제의 PostgreSQL 행 잠금만 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다. `/actuator/health`의 DB 지표와 로그인 옵션 조회가 장애 감지 경로다.
 
+## 배치 페치와 SQL 수 상한
+
+`spring.jpa.properties.hibernate.default_batch_fetch_size: 100` 은 컬렉션이나 지연 프록시를 처음 읽을 때, 같은 영속성 컨텍스트에서 아직 읽지 않은 같은 종류의 소유 엔티티를 **최대 100개까지 묶어 SQL 한 번**으로 읽는다.
+100은 컬렉션 안의 원소 수가 아니라 SQL 하나에 묶는 소유 엔티티(직무·공고·기업 등) 수다.
+EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, `Company` 의 `industries`·`businesses`, `Resume.positionIds`)만이 아니라 LAZY 컬렉션(`SelfIntroduction.resumeIds`)도 이 설정을 탄다.
+
+- 실측(`PositionListQueryCountIntegrationTest`, 기업 5·공고 5·직무 10): 직무 목록(`GET /api/positions`) 1회 SQL **39 → 9**.
+  9회 = 직무·공고·기업·참고 정보 조회 4회 + EAGER 컬렉션 5종 각 1회.
+- 이 테스트가 상한 9를 단언한다. 목록 경로에 SQL 을 더하면 여기서 깨진다. 늘어난 이유가 정당하면 실측해서 상한과 이 줄을 함께 고친다.
+- `hibernate.generate_statistics` 는 그 테스트의 `@SpringBootTest(properties=…)` 에서만 켠다. `application.yml` 에 넣지 않는다.
+- 함정: 같은 종류의 소유 엔티티가 100개를 넘으면(예: 직무 101개) 그 컬렉션의 SQL 이 묶음 수만큼 는다(101개면 2회). 컬렉션 하나에 원소가 많은 것과는 무관하다. 새 컬렉션은 EAGER 든 LAZY 든 이 설정을 자동으로 탄다.
+
 ## 요청 한 번의 흐름
 
 ```
