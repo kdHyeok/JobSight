@@ -157,6 +157,8 @@ cd frontend && npm run type-check && npm test
 - 공고 PUT의 절차 목록은 배열이면 값 기준 통째 교체(null 이면 유지)지만, 영속화할 때는 같은 순번의 엔티티를 갱신하고 끝에서만 추가·삭제한다. 전부 지운 뒤 다시 넣으면 Hibernate flush 순서에 따라 `(posting_id, seq)` 고유키가 충돌한다.
 - 절차 `seq` 는 재정렬하면 바뀐다. step 을 밖에서 id 로 참조하지 않는다.
 - **이미 SUBMITTED 인 공고에 SUBMITTED 를 다시 보내면 새 기록을 만들지 않고 최신 LINKED 를 돌려준다.** 제출 뒤 고친 이력서가 "기록 당시"로 섞이지 않게 하려는 것이다. 이 기능 전부터 SUBMITTED 였던 공고는 LINKED 가 없으므로 그때 한 번 남는다. SUBMITTED → 다른 상태 → SUBMITTED 는 전이라 다시 찍지만, 내용이 같으면 `content_hash` 로 같은 기록이다.
+- **`submissions.recorded_at` 은 `clock_timestamp()` 다(`now()` 금지).** `now()` 는 트랜잭션 시작 시각이라 `OwnerLock` 을 기다린 트랜잭션의 기록이 먼저 커밋된 기록보다 이르게 찍혀, 최신 LINKED·최신 확인 제출본(alreadyUsedFor)·목록 최신순이 직렬 순서와 뒤집힌다. 잠금 아래에서 쓴 시각이면 순서가 맞다. `SubmissionIntegrationTest.recordedAtIsWriteTimeNotTransactionStart` 가 지킨다.
+- `SubmissionRecords.vue` 는 공고 서랍에서 다른 공고로 바뀌어도 같은 인스턴스다. 목록 요청은 번호로 늦게 온 이전 응답을 버리고, `postingId` 가 바뀌면 "실제로 낸 것 확인" 편집을 닫는다(이전 공고용 선택이 새 공고의 확인 기록으로 저장되지 않게).
 - 공고를 지우면 제출 기록도 CASCADE 로 사라진다(`submissions` → `job_postings (id, owner_id)`). 기록은 공고에 딸린 자료다.
 - **`?focus=` 는 먼저 이미 불러온 목록에서 찾는다.** 기업·직무는 전체 목록을 받으므로 항상 찾힌다. 공고만 진행 중/보관함으로 나뉘어 있어, 목록에 없으면 `getPosting(id)` 로 한 번 더 읽는다 — 보관된 공고로도 건너뛸 수 있다. 지워졌거나 남의 것이면 조용히 넘어간다.
 - `reference_items.related_position_id` 는 직무를 지우면 NULL 이 된다(ON DELETE SET NULL). 카드는 제목으로 남는다.

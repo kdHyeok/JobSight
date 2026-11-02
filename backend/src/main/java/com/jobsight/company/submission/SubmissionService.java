@@ -227,8 +227,10 @@ public class SubmissionService {
                 UUID.class, postingId, hash, level.name());
         if (!existing.isEmpty()) return new Ref(existing.get(0), level);
         UUID id = UUID.randomUUID();
+        // now() 는 트랜잭션 시작 시각이라 계정 잠금을 기다린 기록이 먼저 커밋된 기록보다 이르게 찍힌다.
+        // 잠금 아래에서 쓰는 시각(clock_timestamp)이어야 recorded_at 순서가 직렬 순서와 같다.
         jdbc.update("insert into submissions (id, owner_id, posting_id, level, content_hash, resumes, self_intros, receipt, recorded_at) "
-                + "values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, now())", id, owner, postingId, level.name(), hash,
+                + "values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, clock_timestamp())", id, owner, postingId, level.name(), hash,
                 resumes, selfIntros, receipt);
         for (UUID attachment : attachments) {
             jdbc.update("insert into submission_attachments (owner_id, submission_id, attachment_id) values (?, ?, ?)",

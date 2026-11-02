@@ -33,18 +33,29 @@ const draft = reactive({
 
 const message = (e: unknown, fallback: string) => (e instanceof ApiClientError ? e.message : fallback)
 
+/** 요청마다 번호를 올려, 늦게 도착한 이전 공고·이전 revision 의 응답은 버린다. */
+let seq = 0
+
 async function load() {
+  const mine = ++seq
   error.value = ''
   try {
-    records.value = await listSubmissions(props.postingId)
+    const value = await listSubmissions(props.postingId)
+    if (mine === seq) records.value = value
   } catch (e) {
-    error.value = message(e, '제출 기록을 불러오지 못했습니다.')
+    if (mine === seq) error.value = message(e, '제출 기록을 불러오지 못했습니다.')
   }
 }
 watch(() => [props.postingId, props.revision], load, { immediate: true })
+// 다른 공고로 바뀌면 이전 공고용으로 고르던 선택을 닫는다 — 그대로 두면 새 공고에 확인 기록으로 저장된다.
+watch(() => props.postingId, () => {
+  editing.value = false
+  records.value = []
+})
 
 /** 가장 최근 기록의 문서를 처음 선택으로 둔다 — 보통 LINKED 의 연결 자료가 실제로 낸 것과 같다. */
 async function startConfirm() {
+  const postingId = props.postingId
   error.value = ''
   try {
     ;[resumes.value, intros.value] = await Promise.all([listResumes(), listSelfIntroductions()])
@@ -52,6 +63,7 @@ async function startConfirm() {
     error.value = message(e, '이력서·자기소개 목록을 불러오지 못했습니다.')
     return
   }
+  if (postingId !== props.postingId) return
   const latest = records.value[0]
   Object.assign(draft, {
     level: 'USER_CONFIRMED',

@@ -240,6 +240,30 @@ class SubmissionIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from writing_guides where owner_id = ?", Integer.class, owner)).isZero();
     }
 
+    /**
+     * recorded_at 은 트랜잭션 시작(now())이 아니라 계정 잠금을 얻은 뒤 쓴 시각이다. 잠금을 기다린 트랜잭션의 기록이
+     * 먼저 커밋된 기록보다 "오래된" 것으로 정렬되면 최신 확인 제출본(alreadyUsedFor)·최신 LINKED 가 뒤집힌다.
+     */
+    @Test
+    void recordedAtIsWriteTimeNotTransactionStart() {
+        signIn();
+        JobPostingResponse created = postings.create(posting("시사", ApplicationStatus.INTERESTED,
+                List.of(new PositionNameRequest(null, "백엔드"))));
+        UUID resumeId = resume("시사용", created.positions().get(0).id(), null);
+
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            java.time.Instant started = jdbc.queryForObject("select now()", java.sql.Timestamp.class).toInstant();
+            try {
+                Thread.sleep(50); // 잠금 대기를 흉내 낸다
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+            SubmissionResponse confirmed = submissions.confirm(created.id(), new SubmissionRequest(
+                    SubmissionService.Level.USER_CONFIRMED, List.of(resumeId), List.of(), null, null, null));
+            assertThat(confirmed.recordedAt()).isAfterOrEqualTo(started.plusMillis(50));
+        });
+    }
+
     /** 남의 공고 기록은 404, 남의 이력서·자소서·근거 파일로 확인할 수 없다. */
     @Test
     void otherOwnersDataIsInvisible() {

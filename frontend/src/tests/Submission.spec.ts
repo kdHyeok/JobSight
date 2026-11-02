@@ -77,6 +77,30 @@ describe('제출 기록', () => {
     await flushPromises()
     expect(api.listSubmissions).toHaveBeenCalledTimes(2)
   })
+
+  it('공고를 바꾸면 늦게 온 이전 공고 응답을 버리고 편집 중 선택을 닫는다', async () => {
+    let resolveOld!: (value: Submission[]) => void
+    vi.mocked(api.listSubmissions)
+      .mockResolvedValueOnce([linked])
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+      .mockResolvedValueOnce([{ ...linked, id: 'subB', resumes: [{ resumeId: 'r2', name: '데이터', version: 1 }] }])
+    const wrapper = mount(SubmissionRecords, { props: { postingId: 'p1', revision: 'a' } })
+    await flushPromises()
+    await buttonByText(wrapper, '실제로 낸 것 확인').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(true)
+
+    await wrapper.setProps({ revision: 'b' }) // p1 재조회 — 응답이 늦는다
+    await wrapper.setProps({ postingId: 'p2', revision: 'c' })
+    await flushPromises()
+    resolveOld([{ ...linked, id: 'subOld', resumes: [{ resumeId: 'r1', name: '옛 공고 이력서', version: 1 }] }])
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('데이터')
+    expect(wrapper.text()).not.toContain('옛 공고 이력서')
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(api.confirmSubmission).not.toHaveBeenCalled()
+  })
 })
 
 describe('작성 기준', () => {
