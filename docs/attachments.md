@@ -62,7 +62,8 @@ DELETE /api/attachments/{id}          204. 쓰는 곳이 있으면 409 ATTACHMEN
 GET    /api/resumes/{id}              → {..., attachments: {id → {id, filename, contentType, size}}}
 ```
 
-`usedBy.type` 은 `RESUME`(이력서) · `EXPERIENCE`(경험의 지금 근거) · `EXPERIENCE_REVISION`(경험의 지난 개정에만 있음) · `SUBMISSION`(제출 기록, `name` 은 공고 제목).
+`usedBy.type` 은 `RESUME`(이력서) · `EXPERIENCE`(경험의 지금 근거) · `EXPERIENCE_REVISION`(경험의 개정 이력 어딘가에 있음) · `SUBMISSION`(제출 기록, `name` 은 공고 제목).
+`EXPERIENCE` 와 `EXPERIENCE_REVISION` 은 따로 나온다. 지금 근거는 늘 마지막 개정에도 있으므로 지금 근거로 쓰는 파일은 둘 다 붙는다 — 근거를 빼고 저장해도 개정이 남아 그 경험을 지워야 지울 수 있다. 409 문구도 이 안내를 한다(전에는 지금 근거만 보여 "근거를 빼고 저장"을 안내했다).
 `deletable` 은 서버가 계산한다(미사용이고 올린 지 7일이 지남). 서버 `DELETE` 는 7일을 보지 않는다 — 저장 뒤 묻기는 방금 올린 파일도 지울 수 있어야 해서다. 목록 GET 은 기존 경로에 메서드만 더했으므로 경로 표는 그대로다.
 
 이력서 응답의 `attachments` 는 새 경로가 아니라 응답 필드다. 편집기를 열 때 첨부 칸마다 `/meta` 를 부르던 직렬 단계를 없앤다 — `docs/resumes.md` 함정.
@@ -106,7 +107,7 @@ cd frontend && npm run type-check && npm test
   저장하지 않고 나간 경우에도 이력서는 이전 id 를 들고 있으니 지우면 안 된다. 전에는 화면이 이전 파일을 즉시 DELETE 했다 — `docs/decisions.md` 「첨부 교체·제거 때 이전 파일을 지우지 않는다」.
   첨부 칸은 `DELETE` 를 부르지 않는다 — `AttachmentField.spec.ts` 가 http 계층에서 DELETE 가 나가지 않는 것을 고정한다. 지우는 것은 저장이 **성공한 뒤** `ResumeBoard` 가 묻고, 서버 판정이 복제본을 지킨다.
 - **저장 뒤 묻기는 응답 `attachments` 맵의 키를 비교한다.** 저장 전 문서의 id 문자열이 아니다. 맵에는 지금 있는 내 파일만 실리므로 이미 지워진 id·남의 id 는 묻지 않는다. 저장 전에 올렸다가 저장 전에 다시 교체한 파일은 두 맵 어디에도 없어 묻지 않는다 — 서랍에서 7일 뒤 지운다.
-- **사용처 판정은 텍스트 포함 검사다**(`strpos(content::text, id::text)`). 그래서 첨부 칸에 새로 적는 값은 정규형 UUID 만 받는다(불변 조건 8). 대문자나 축약형(`1-2-3-4-5`, `UUID.fromString` 이 받아 준다)으로 저장된 값이 있으면 그 파일은 판정이 못 찾아 지워질 수 있다 — 아래 「배포 전 점검」. 경험의 `attachmentId` 는 Jackson 이 UUID 로 읽고 정규형으로 쓰므로 해당 없다.
+- **사용처 판정은 텍스트 포함 검사다**(이력서는 `strpos(lower(content::text), id::text)`). 그래서 첨부 칸에 새로 적는 값은 정규형 UUID 만 받는다(불변 조건 8). 규칙 B 이전에 대문자로 저장된 값은 `lower()` 로 잡는다(`AttachmentDeleteIntegrationTest.legacyUppercaseReferenceKeepsTheFile`). 축약형(`1-2-3-4-5`, `UUID.fromString` 이 받아 준다)으로 저장된 값은 여전히 못 찾아 그 파일이 지워질 수 있다 — 아래 「배포 전 점검」. 경험의 `attachmentId` 는 Jackson 이 UUID 로 읽고 정규형으로 쓰므로 해당 없다.
 - **경험의 지난 개정이 가리키는 파일은 지울 수 없다.** 개정 이력은 고치지 않고 쌓으므로 근거에서 빼고 저장해도 개정 1 이 계속 가리킨다. 지우려면 그 경험을 지운다(개정이 CASCADE). 409 문구가 이렇게 안내한다.
 - **복제는 규칙 B 를 타지 않는다.** `ResumeWriter` 의 before 가 원본 문서라 새 id 가 없다. 원본을 잠그고 읽어(`lockOwned`) 원본이 든 id 는 판정에 계속 보이므로 충분하다. 복제를 규칙 B 에 태우면 원본에 남은 옛 지워진 id 때문에 복제가 400 이 된다(설계 6.9 구현 메모).
 

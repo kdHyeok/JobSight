@@ -212,7 +212,9 @@ export function rowFromExperience(section: SectionKey, detail: ExperienceDetail,
   } else {
     Object.assign(row, { name: fit(detail.title, 200), description: fit(joined, 5000) })
   }
+  // 문구를 만든 개정을 함께 단다. 빼면 링커가 지금 개정으로 이어, 그사이 정정된 원본의 '재검토 필요'가 사라진다.
   row.experienceId = detail.id
+  row.experienceRevision = detail.revision
   return row
 }
 

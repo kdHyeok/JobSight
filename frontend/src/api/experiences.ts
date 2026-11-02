@@ -16,23 +16,26 @@ export { ApiClientError } from './http'
 
 /** 서버 상세 모드 상한(ExperienceService.MAX_DETAIL). 넘으면 400 이라 나눠 부른다. */
 const DETAIL_CHUNK = 10
-/** 목차 쪽수 상한. 한 쪽 60줄이라 1,200줄이면 개인 계정에 넉넉하다. */
-const MAX_PAGES = 20
-
-/** 목차 전체(경험 줄 + 미등록 묶음). 서버가 60줄씩 자르므로 complete 까지 이어 부른다. */
+/**
+ * 목차 전체(경험 줄 + 미등록 묶음). 서버가 60줄씩 자르므로 complete 까지 이어 부른다.
+ * 쪽수 상한을 두지 않는다 — 잘린 목록을 전체처럼 돌려주면 뒤쪽 경험이 선택지에서 조용히 사라진다.
+ * 커서가 앞으로 가지 않으면(서버 오류) 끝없이 돌지 않고 실패로 알린다.
+ */
 export async function listExperiences(): Promise<{ experiences: ExperienceLine[]; unlinked: UnlinkedGroup[]; index: ExperienceIndex }> {
   const experiences: ExperienceLine[] = []
   const unlinked: UnlinkedGroup[] = []
   let cursor: number | null = null
   let index: ExperienceIndex
-  let pages = 0
-  do {
+  for (;;) {
     index = await request<ExperienceIndex>(cursor === null ? API.experiences : `${API.experiences}?cursor=${cursor}`)
     experiences.push(...(index.experiences as ExperienceLine[]))
     unlinked.push(...index.unlinkedRows)
+    if (index.complete) return { experiences, unlinked, index }
+    if (index.nextCursor === null || (cursor !== null && index.nextCursor <= cursor)) {
+      throw new Error('경험 목록을 끝까지 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.')
+    }
     cursor = index.nextCursor
-  } while (!index.complete && cursor !== null && ++pages < MAX_PAGES)
-  return { experiences, unlinked, index }
+  }
 }
 
 /** 여러 경험의 상세(ids 상세 모드). 10개씩 나눠 같이 보낸다. */

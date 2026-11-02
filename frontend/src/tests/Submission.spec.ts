@@ -101,6 +101,35 @@ describe('제출 기록', () => {
     expect(wrapper.find('form').exists()).toBe(false)
     expect(api.confirmSubmission).not.toHaveBeenCalled()
   })
+
+  it('기록에 남았지만 지금은 없는 문서는 처음 선택에 넣지 않는다(보이지 않는 선택이 404 를 내지 않게)', async () => {
+    vi.mocked(api.listSubmissions).mockResolvedValue([{ ...linked, resumes: [...linked.resumes, { resumeId: 'gone', name: '지운 이력서', version: 1 }],
+      selfIntros: [...linked.selfIntros, { id: 'gone-s', question: '지운 문항' }] }])
+    const wrapper = mount(SubmissionRecords, { props: { postingId: 'p1', revision: 'a' } })
+    await flushPromises()
+    await buttonByText(wrapper, '실제로 낸 것 확인').trigger('click')
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.confirmSubmission).toHaveBeenCalledWith('p1', expect.objectContaining({ resumeIds: ['r1'], selfIntroIds: ['s1'] }))
+  })
+
+  it('저장 중에 취소하고 다시 연 폼은 이전 저장의 완료·실패가 닫거나 덮지 않는다', async () => {
+    let finish!: (value: Submission) => void
+    vi.mocked(api.confirmSubmission).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const wrapper = mount(SubmissionRecords, { props: { postingId: 'p1', revision: 'a' } })
+    await flushPromises()
+    await buttonByText(wrapper, '실제로 낸 것 확인').trigger('click')
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await buttonByText(wrapper, '취소').trigger('click')
+    await buttonByText(wrapper, '실제로 낸 것 확인').trigger('click')
+    await flushPromises()
+
+    finish(linked)
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(true)
+  })
 })
 
 describe('작성 기준', () => {
@@ -137,5 +166,33 @@ describe('작성 기준', () => {
     await flushPromises()
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('남이 고친 기준')
     expect(wrapper.text()).toContain('다른 곳에서 바뀌었습니다')
+  })
+
+  it('409 뒤 다시 읽기도 실패하면 입력을 남기고 이유를 보인다', async () => {
+    vi.mocked(api.saveWritingGuide).mockRejectedValue(new ApiClientError(409, 'WRITING_GUIDE_STALE', '다른 곳에서 먼저 저장했습니다.'))
+    const wrapper = await opened()
+    vi.mocked(api.getWritingGuide).mockRejectedValue(new ApiClientError(503, 'UNAVAILABLE', '잠시 뒤 다시 시도하세요.'))
+    await wrapper.get('textarea').setValue('내 입력')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('내 입력')
+    expect(wrapper.get('[role="status"]').text()).toContain('새 내용을 불러오지 못했습니다')
+  })
+
+  it('처음 읽는 중에 접었다 다시 펼쳐도 한 번만 부른다', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof api.getWritingGuide>>) => void
+    vi.mocked(api.getWritingGuide).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const wrapper = mount(WritingGuideEditor)
+    const details = wrapper.get('details')
+    const element = details.element as HTMLDetailsElement
+    element.open = true
+    await details.trigger('toggle')
+    element.open = false
+    await details.trigger('toggle')
+    element.open = true
+    await details.trigger('toggle')
+    finish({ version: 2, body: '- 과장하지 않는다', updatedAt: null })
+    await flushPromises()
+    expect(api.getWritingGuide).toHaveBeenCalledTimes(1)
   })
 })

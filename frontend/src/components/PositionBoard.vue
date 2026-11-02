@@ -39,7 +39,8 @@ const saving = ref(false)
 const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<Position | null>(null)
 /** 이 직무로 쓴 자소서의 직접 출처가 함께 사라진다는 안내. 목록에서 고른 직무라 상세를 한 번 불러 수를 얻는다. */
-const deleteNotice = ref('')
+/** 삭제 확인창 덧붙임 문구. null 이면 자소서 수를 받는 중이라 확정을 막는다. */
+const deleteNotice = ref<string | null>('')
 const deleting = ref(false)
 /** 참고 정보 삭제는 여러 직무에 영향을 주므로 따로 확인받는다. */
 const referenceDeleteTarget = ref<ReferenceItem | null>(null)
@@ -203,7 +204,7 @@ async function createAndAttach(payload: ReferencePayload) {
 
 async function askDelete(target: Position) {
   deleteTarget.value = target
-  deleteNotice.value = ''
+  deleteNotice.value = null
   const count = await linkedSelfIntroCount(target, () => getPosition(target.id))
   if (deleteTarget.value?.id === target.id) deleteNotice.value = writtenForNotice(count, '이 직무로')
 }
@@ -352,9 +353,10 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="직무를 삭제할까요?"
     :subject="deleteTarget.name"
-    :detail="` 직무 기록이 영구 삭제됩니다. 공고의 마지막 직무라면 채용공고와 절차도 함께 삭제됩니다.${deleteNotice}`"
+    :detail="` 직무 기록이 영구 삭제됩니다. 공고의 마지막 직무라면 채용공고와 절차도 함께 삭제됩니다.${deleteNotice ?? ''}`"
     aria-label="직무 삭제 확인"
     :busy="deleting"
+    :pending="deleteNotice === null"
     @confirm="remove"
     @cancel="deleteTarget = null"
   />

@@ -168,6 +168,10 @@ public class SelfIntroductionAgentService {
                                       Boolean unlinked, Integer limit) {
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Context context = new Context();
+        // 다른 필터처럼 남의 것·없는 이력서는 빈 목록이 아니라 404 다(소유자 격리). 본문은 읽지 않는다.
+        if (resumeId != null && resumes.findOwnedIds(List.of(resumeId), context.owner).isEmpty()) {
+            throw new ResourceNotFoundException(resumeId);
+        }
         Target target = target(context, positionId, postingId, companyId);
 
         List<SelfIntroduction> values = repository.findAllByOwnerIdOrderByUpdatedAtDesc(context.owner).stream()
@@ -260,7 +264,9 @@ public class SelfIntroductionAgentService {
 
     private SelfIntroductionList.Item item(SelfIntroduction value, Context context, Target target, Double score,
                                            List<String> terms, boolean full) {
+        // 연결을 읽은 뒤 이름을 읽기 전에 직무가 지워지면(READ COMMITTED) 이름이 없다. 그 연결은 이미 CASCADE 로 사라졌으니 건너뛴다.
         List<SelfIntroductionList.Direct> direct = value.getPositionLinks().stream()
+                .filter(link -> context.positionLabels.containsKey(link.positionId()))
                 .map(link -> {
                     PositionLabel p = context.positionLabels.get(link.positionId());
                     return new SelfIntroductionList.Direct(link.positionId(), p.name(), p.companyId(), p.companyName(),
@@ -284,20 +290,16 @@ public class SelfIntroductionAgentService {
         boolean fit = types.stream().anyMatch(type -> type.code().searchMode() == Competency.SearchMode.FIT);
         UUID targetCompany = target == null ? null : target.companyId();
         List<SelfIntroductionList.UsedFor> usedFor = new ArrayList<>();
-        // 설계 6.6: 공고에 사용자 확인 이상 제출 기록이 있으면 그 스냅샷을 쓴다 — 스냅샷에 없는 답변은 그 공고에 낸 것이 아니다.
-        Set<UUID> coveredPostings = new java.util.HashSet<>();
+        // 설계 6.6: 공고에 사용자 확인 이상 제출 기록이 있으면 그 스냅샷만 쓴다 — 스냅샷에 없는 답변은 그 공고에 낸 것이 아니고,
+        // 스냅샷에 있으면 그때의 직무가 사용처다(제출 뒤 같은 공고의 다른 직무로 연결을 바꿔도). 지금 연결은 스냅샷이 없는 공고에만 쓴다.
         for (SelfIntroductionList.Direct d : direct) {
             UUID posting = context.positionLabels.get(d.positionId()).postingId();
-            SubmissionService.Confirmed confirmed = context.confirmed.get(posting);
-            if (confirmed != null && !confirmed.selfIntros().containsKey(value.getId())) continue;
-            if (confirmed != null) coveredPostings.add(posting);
-            usedFor.add(usedFor(d.companyId(), d.company(), d.position(), targetCompany, fit,
-                    confirmed == null ? UNCONFIRMED : SubmissionService.label(confirmed.level())));
+            if (context.confirmed.containsKey(posting)) continue;
+            usedFor.add(usedFor(d.companyId(), d.company(), d.position(), targetCompany, fit, UNCONFIRMED));
         }
-        // 확인한 제출본에는 있는데 지금 그 공고로 직접 출처가 없는 답변(연결을 지웠거나 처음부터 없던 것).
         for (SubmissionService.Confirmed confirmed : context.confirmed.values()) {
             List<UUID> snapshotPositions = confirmed.selfIntros().get(value.getId());
-            if (snapshotPositions == null || coveredPostings.contains(confirmed.postingId())) continue;
+            if (snapshotPositions == null) continue;
             List<PositionLabel> labels = snapshotPositions.stream().map(context.positionLabels::get).filter(Objects::nonNull).toList();
             String level = SubmissionService.label(confirmed.level());
             if (labels.isEmpty()) {

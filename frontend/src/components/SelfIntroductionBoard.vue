@@ -130,7 +130,7 @@ async function confirmLink(payload: SelfIntroductionConfirmPayload) {
   if (!editingId.value) return
   errorMessage.value = ''
   try {
-    const updated = await confirmSelfIntroduction(editingId.value, payload)
+    const updated = await confirmSelfIntroduction(editingId.value, { ...payload, expectedVersion: editingVersion.value })
     items.value = items.value.map((item) => (item.id === updated.id ? updated : item))
     if (editingId.value === updated.id) editingVersion.value = updated.version
   } catch (error) {

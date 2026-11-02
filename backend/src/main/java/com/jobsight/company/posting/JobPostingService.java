@@ -111,10 +111,16 @@ public class JobPostingService {
         return withSubmission(saved, before);
     }
 
+    /**
+     * 수정(update)과 같은 행 잠금으로 읽는다. 계정 잠금은 SUBMITTED 로 가는 쓰기만 잡으므로, SUBMITTED 를 떠나는 수정이
+     * 커밋 전일 때 잠금 없이 읽으면 옛 SUBMITTED 를 보고 전이를 놓친다 — LINKED 를 새로 남기지 않는다.
+     */
     @Transactional
     public JobPostingResponse changeStatus(UUID id, ApplicationStatus status) {
         lockIfSubmitting(status);
-        JobPosting posting = findOwned(id);
+        repository.setLocalLockTimeout();
+        JobPosting posting = repository.findOwnedForUpdate(id, currentUser.id())
+                .orElseThrow(() -> new ResourceNotFoundException(id));
         ApplicationStatus before = posting.getStatus();
         posting.changeStatus(status);
         return withSubmission(repository.save(posting), before);

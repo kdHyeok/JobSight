@@ -28,7 +28,9 @@
 
 **함정**
 - 요구 `text` 는 기술 이름("Kafka")이다. 문장을 넣으면 키가 `kafka사용경험` 이 되어 아무것도 맞지 않는다. 문장은 `quote` 에 둔다.
-- 제목이 빈 행은 묶지 않는다 — 목차·missing·검색 어디에도 안 나온다.
+- 제목이 빈 **미연결** 행은 묶지 않는다 — 목차·missing·검색 후보 어디에도 안 나온다. 앵커가 있는 행은 제목이 비어도 그 경험의 사용처(`alsoIn`·상세 rows)다(4단계, docs/experiences.md).
+- EXPERIENCE 결과의 `period` 는 목차와 같이 `facts.period` 를 우선하고, 비었을 때만 시작 연월(`2023.01~`)이다.
+- **EXPERIENCE 후보의 REQUIREMENT 부분 일치(0.5)는 본문 언급으로만 한다.** `experiences.skills` 는 정규화 키(`"AWS EC2"` → `awsec2`)만 저장해서 토큰 경계가 사라졌다. 그래서 skills 에만 `AWS EC2` 가 있고 본문(사실·근거 인용·소재집)에 AWS 가 없으면 요구 `AWS` 는 맞지 않는다(RESUME_ROW 는 행 원문의 `techStack` 에서 언급을 뽑아 맞는다). 가져온 경험은 근거 인용에 행 원문이 있어 대개 맞는다. 고치려면 원래 이름을 따로 저장해야 해(스키마) 보류했다(OCR 리뷰 2026-11-03).
 - 한글 별칭은 본문 부분 문자열로 찾는다. 흔한 단어와 겹치는 별칭(예: "뷰", "노드")은 넣지 않았다. 사전에 넣기 전에 오탐을 생각한다.
 - `coverageIncomplete` 는 3단계에서 늘 true 다. AI 는 결핍을 단정하지 않는다.
 - 요구 없이 지원자격 본문만 넘기면 서버는 사전의 기술 키만 뽑는다(지원자격 칸 요구, 결핍 보고 대상). "경력 3년" 같은 자격 문장은 `qualifications[]` 에 나오지 않는다 — 자격을 분리하려면 클라이언트가 `kind: QUALIFICATION` 으로 넘긴다.
@@ -83,7 +85,7 @@
 3. 스위퍼는 여러 행을 한 트랜잭션에서 잠그지 않는다. 쓰기는 CAS 1행일 때만이다.
 4. 같은 모델의 조각끼리만 비교한다(`embedding_model`). 질의 벡터를 만든 모델이 `context.embeddingModel` 이다.
 
-**실행·검증.** `EmbeddingTextsTest`(조각 상한·경계·모드·필드·해시), `SemanticSearchIntegrationTest`(Testcontainers, 가짜 embedder — 죽어 있을 때 저장 성공·degraded·`indexBehind`, 재기동 한 회차에 dirty 0, 동의어 DENSE 와 `why.sourceField`, 답변만 바꾸면 답변 조각만 재계산·연결만 바꾸면 재적재 안 함, 읽은 뒤 원문이 바뀌면 그 회차 미기록, 384 아닌 벡터 거부·CASCADE, D11 실측 출력, 독 행 건너뛰기·미룸, 회차 중 장애는 미루지 않음, 무관 질의 0건, 다른 계정 조각 비노출과 조각 owner_id, 모델 교체 재적재·다른 모델 조각 미사용·회차 중 모델 변경 미기록, 경험 수정의 dirty·source_revision·바뀐 필드만 재계산·CAS), `EmbedderClientTest`(JDK HttpServer — 500·개수 불일치·빈 모델은 `Rejected`, 2초 넘는 응답·연결 거부·JSON 아님은 `Unavailable`). 컨테이너: `docker compose build embedder`(빌드가 `server.py --self-check` — 요청 검증과 가짜 모델로 실제 HTTP 400·200·500·404 왕복), `/health`.
+**실행·검증.** `EmbeddingTextsTest`(조각 상한·경계·모드·필드·해시), `SemanticSearchIntegrationTest`(Testcontainers, 가짜 embedder — 죽어 있을 때 저장 성공·degraded·`indexBehind`, 재기동 한 회차에 dirty 0, 동의어 DENSE 와 `why.sourceField`, 답변만 바꾸면 답변 조각만 재계산·연결만 바꾸면 재적재 안 함, 읽은 뒤 원문이 바뀌면 그 회차 미기록, 384 아닌 벡터 거부·CASCADE, D11 실측 출력, 독 행 건너뛰기·미룸, 회차 중 장애는 미루지 않음, 무관 질의 0건, 다른 계정 조각 비노출과 조각 owner_id, 모델 교체 재적재·다른 모델 조각 미사용·회차 중 모델 변경 미기록, 경험 수정의 dirty·source_revision·바뀐 필드만 재계산·CAS), `EmbedderClientTest`(JDK HttpServer — 500·개수 불일치·빈 모델은 `Rejected`, 2초 넘는 응답·연결 거부·JSON 아님은 `Unavailable`). 컨테이너: `docker compose build embedder`(빌드가 `server.py --self-check` — 요청 검증과 가짜 모델로 실제 HTTP 400·200·500·404 왕복, 문자열이 아닌 `mode`(`[]`)·숫자가 아닌 `Content-Length` 도 연결을 끊지 않고 400), `/health`.
 
 **함정**
 - 모델을 바꾸면 차원도 바뀔 수 있다. 384 가 아니면 `CHECK` 가 막는다 — 새 마이그레이션으로 CHECK 를 바꾸고 조각을 비운 뒤 dirty 를 세운다. 같은 384 차원 모델이면 스위퍼가 알아서 다시 채운다.

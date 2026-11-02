@@ -3,6 +3,7 @@ package com.jobsight.company.resume.dto;
 import com.jobsight.company.resume.ResumeContent;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -19,10 +20,10 @@ public record ResumeAgentUpdateRequest(
         String name,
         @Valid ResumeContent content,
         @Size(max = 30, message = "연결 직무는 30개 이하여야 합니다.")
-        List<UUID> positionIds,
+        List<@NotNull UUID> positionIds,
         Long expectedVersion,
         @Size(max = 50, message = "지울 경험은 50개 이하여야 합니다.")
-        List<UUID> removedExperienceIds
+        List<@NotNull UUID> removedExperienceIds
 ) {
     public ResumeRequest toRequest() {
         return new ResumeRequest(name, content, positionIds, expectedVersion);

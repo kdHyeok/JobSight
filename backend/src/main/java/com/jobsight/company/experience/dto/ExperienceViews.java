@@ -108,8 +108,12 @@ public final class ExperienceViews {
     public record ImportPlan(List<ImportGroup> groups, Map<UUID, Long> resumeVersions) {
     }
 
+    /**
+     * warning: 이 묶음은 CREATE·LINK_TO 할 수 없다는 안내(없으면 null). 지금은 한 이력서의 두 행이 같은 묶음일 때다 —
+     * 한 이력서에서 같은 경험을 두 행에 걸 수 없다(EXPERIENCE_ROW_DUPLICATE). SKIP 하거나 이력서에서 행을 정리한다.
+     */
     public record ImportGroup(String key, ExperienceKind kind, String title, String period, List<Source> rows,
-                              List<String> mergeCandidates) {
+                              List<String> mergeCandidates, String warning) {
     }
 
     public record ImportResult(int created, int linked, int skipped, List<UUID> experienceIds) {

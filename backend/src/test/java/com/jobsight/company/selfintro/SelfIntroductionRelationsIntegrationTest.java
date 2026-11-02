@@ -290,6 +290,31 @@ class SelfIntroductionRelationsIntegrationTest {
     }
 
     /**
+     * 확정(✓)도 화면이 연 version 을 확인한다. 열어 둔 사이 AI 가 답변을 고쳤는데 확정이 version 을 그냥 올려 주면,
+     * 화면이 그 새 version 을 이어받아 옛 초안 저장이 409 없이 남의 수정을 덮는다(OCR 리뷰, SelfIntroductionBoard ✓).
+     */
+    @Test
+    void confirmWithStaleExpectedVersionIsRejected() {
+        signIn();
+        UUID backend = position(posting("확정회사", "백엔드"));
+        McpPrincipal principal = asMcp();
+        var created = (SelfIntroductionResponse) tools.call("self_intro_create", Map.of("request", Map.of(
+                "positionIds", List.of(backend.toString()), "question", "지원 동기", "answer", "AI 초안")), principal);
+        long opened = created.version();
+        tools.call("self_intro_update", mcpUpdate(created.id(), "지원 동기", "AI 가 고친 답변", null, null, opened), principal);
+
+        asWeb();
+        assertThatThrownBy(() -> service.confirm(created.id(),
+                new SelfIntroductionConfirmRequest(List.of(backend), null, opened)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("SELF_INTRO_STALE"));
+        assertThat(positionSource(created.id(), backend)).isEqualTo("AI");
+
+        var confirmed = service.confirm(created.id(),
+                new SelfIntroductionConfirmRequest(List.of(backend), null, version(created.id())));
+        assertThat(confirmed.version()).isGreaterThan(opened + 1);
+    }
+
+    /**
      * MCP 수정은 직무·문항 유형 연결을 더하기만 한다. 사용자가 확정한 연결도, AI 기록도 지우지 못한다 —
      * AI 기록의 확정과 삭제는 웹 전용이다(설계 3절 규칙 3, 5.2). 웹 저장은 목록으로 맞춘다(✗ 해제).
      */

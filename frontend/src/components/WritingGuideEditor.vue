@@ -14,6 +14,8 @@ const loaded = ref(false)
 const busy = ref(false)
 const message = ref('')
 const failed = ref(false)
+/** 처음 읽기 진행 중. 접었다 다시 펼쳐도 두 번째 GET 을 보내지 않는다(늦게 온 응답이 고친 입력을 덮지 않게). */
+let loading = false
 
 async function load() {
   const guide = await getWritingGuide()
@@ -24,12 +26,15 @@ async function load() {
 
 async function toggle(event: Event) {
   open.value = (event.target as HTMLDetailsElement).open
-  if (!open.value || loaded.value) return
+  if (!open.value || loaded.value || loading) return
+  loading = true
   try {
     await load()
   } catch (e) {
     failed.value = true
     message.value = e instanceof ApiClientError ? e.message : '작성 기준을 불러오지 못했습니다.'
+  } finally {
+    loading = false
   }
 }
 
@@ -44,8 +49,13 @@ async function save() {
   } catch (e) {
     failed.value = true
     if (e instanceof ApiClientError && e.code === 'WRITING_GUIDE_STALE') {
-      await load()
-      message.value = '다른 곳에서 바뀌었습니다. 새 내용으로 다시 고치세요.'
+      try {
+        await load()
+        message.value = '다른 곳에서 바뀌었습니다. 새 내용으로 다시 고치세요.'
+      } catch {
+        // 다시 읽기도 실패했다. 입력은 그대로 둔다(version 도 옛것이라 다시 저장하면 또 409 → 다시 읽기를 시도한다).
+        message.value = '다른 곳에서 바뀌었는데 새 내용을 불러오지 못했습니다. 입력을 복사해 두고 잠시 뒤 다시 저장하세요.'
+      }
     } else {
       message.value = e instanceof ApiClientError ? e.message : '저장하지 못했습니다.'
     }

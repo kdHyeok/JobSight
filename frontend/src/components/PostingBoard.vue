@@ -48,7 +48,8 @@ const saving = ref(false)
 const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<JobPosting | null>(null)
 /** 소속 직무로 쓴 자소서의 직접 출처가 함께 사라진다는 안내. 목록에서 고른 공고면 상세를 한 번 불러 수를 얻는다. */
-const deleteNotice = ref('')
+/** 삭제 확인창 덧붙임 문구. null 이면 자소서 수를 받는 중이라 확정을 막는다. */
+const deleteNotice = ref<string | null>('')
 const deleting = ref(false)
 const dragging = ref<JobPosting | null>(null)
 const dropOver = ref('')
@@ -200,7 +201,7 @@ async function dropPosting(targetTab: PostingTab, columnKey?: string) {
 
 async function askDelete(target: JobPosting) {
   deleteTarget.value = target
-  deleteNotice.value = ''
+  deleteNotice.value = null
   const count = await linkedSelfIntroCount(target, () => getPosting(target.id))
   if (deleteTarget.value?.id === target.id) deleteNotice.value = writtenForNotice(count, '이 공고의 직무로')
 }
@@ -365,9 +366,10 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="채용공고를 삭제할까요?"
     :subject="deleteTarget.title"
-    :detail="` 공고와 그 직무·절차 기록이 영구 삭제됩니다.${deleteNotice}`"
+    :detail="` 공고와 그 직무·절차 기록이 영구 삭제됩니다.${deleteNotice ?? ''}`"
     aria-label="채용공고 삭제 확인"
     :busy="deleting"
+    :pending="deleteNotice === null"
     @confirm="remove"
     @cancel="deleteTarget = null"
   />

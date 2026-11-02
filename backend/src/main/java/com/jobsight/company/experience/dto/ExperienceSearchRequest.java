@@ -15,7 +15,7 @@ import java.util.UUID;
 public record ExperienceSearchRequest(
         UUID positionId,
         @Valid Posting posting,
-        @Size(max = 60, message = "요구는 60개 이하여야 합니다.") List<@Valid Requirement> requirements,
+        @Size(max = 60, message = "요구는 60개 이하여야 합니다.") List<@NotNull @Valid Requirement> requirements,
         Integer limit
 ) {
     /** 저장하지 않는 공고의 다섯 칸(설계 2.1). 칸을 섞지 않는다 — 기술 환경 나열은 필수 자격이 아니다. */

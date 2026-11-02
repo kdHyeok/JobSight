@@ -56,17 +56,37 @@ async function load() {
   }
 }
 
+/** 마지막으로 연 상세의 순번. 늦게 온 이전 상세나 닫기·추가·수정 뒤에 온 상세는 버린다. */
+let openSeq = 0
+
 async function open(id: string) {
+  const mine = ++openSeq
   drawerError.value = ''
   try {
-    selected.value = await getExperience(id)
+    const detail = await getExperience(id)
+    if (mine !== openSeq) return
+    selected.value = detail
     mode.value = 'view'
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '경험을 불러오지 못했습니다.'
+    if (mine === openSeq) errorMessage.value = error instanceof Error ? error.message : '경험을 불러오지 못했습니다.'
   }
 }
 
+function startNew() {
+  openSeq++
+  selected.value = null
+  drawerError.value = ''
+  mode.value = 'new'
+}
+
+function startEdit() {
+  openSeq++
+  drawerError.value = ''
+  mode.value = 'edit'
+}
+
 function close() {
+  openSeq++
   mode.value = null
   selected.value = null
   drawerError.value = ''
@@ -170,7 +190,7 @@ onMounted(async () => {
         <button type="button" class="button secondary" :disabled="importing" @click="importing = true">
           이력서에서 가져오기<template v-if="unlinkedRows"> ({{ unlinkedRows }}행)</template>
         </button>
-        <button type="button" class="button primary" @click="selected = null; drawerError = ''; mode = 'new'">경험 추가</button>
+        <button type="button" class="button primary" @click="startNew">경험 추가</button>
       </div>
     </div>
 
@@ -202,7 +222,7 @@ onMounted(async () => {
   <Drawer v-if="mode === 'view' && selected" :title="selected.title" :subtitle="`${kindLabels[selected.kind]} · 개정 ${selected.revision}`" @close="close">
     <template #actions>
       <button v-if="!selected.reviewed" type="button" class="button primary compact" @click="review">검토 확정</button>
-      <button type="button" class="button secondary compact" @click="drawerError = ''; mode = 'edit'">수정</button>
+      <button type="button" class="button secondary compact" @click="startEdit">수정</button>
       <button type="button" class="button danger compact" @click="deleteTarget = selected">삭제</button>
     </template>
     <div v-if="drawerError" class="notice error" role="alert">{{ drawerError }}</div>

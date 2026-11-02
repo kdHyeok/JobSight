@@ -158,6 +158,29 @@ describe('경험 원본 화면', () => {
     expect(drawer(wrapper).text()).toContain('개정 4')
   })
 
+  it('늦게 온 이전 상세는 버리고, 닫거나 추가 폼을 연 뒤 온 상세는 드로어를 다시 열지 않는다', async () => {
+    const wrapper = await mountBoard()
+    let finishA!: (value: ExperienceDetail) => void
+    vi.mocked(api.getExperience)
+      .mockReturnValueOnce(new Promise((resolve) => { finishA = resolve }))
+      .mockResolvedValueOnce(detail({ id: 'e2', title: '배치 이관' }))
+    await wrapper.get('.card').trigger('click')
+    await wrapper.get('.card').trigger('click')
+    await flushPromises()
+    finishA(detail())
+    await flushPromises()
+    expect(drawer(wrapper).text()).toContain('배치 이관')
+
+    let finishC!: (value: ExperienceDetail) => void
+    vi.mocked(api.getExperience).mockReturnValueOnce(new Promise((resolve) => { finishC = resolve }))
+    await wrapper.get('.card').trigger('click')
+    await drawer(wrapper).get('[aria-label="닫기"]').trigger('click')
+    await button(wrapper, '경험 추가').trigger('click')
+    finishC(detail())
+    await flushPromises()
+    expect(wrapper.get('.drawer').text()).toContain('경험 추가')
+  })
+
   it('중복 처리 흐름: 이력서가 쓰면 409 사유를 보여 주고, 자소서 근거만 남으면 끊고 지울지 물어 detach=true 로 지운다', async () => {
     const inUse = new ApiClientError(409, 'EXPERIENCE_IN_USE', '이력서가 쓰고 있는 경험입니다: [백엔드].')
     vi.mocked(api.deleteExperience).mockRejectedValueOnce(inUse)
@@ -201,7 +224,7 @@ describe('경험 가져오기', () => {
       experiences: [line], unlinked: [], index: { counts: { unlinkedRows: 3 } } as never,
     })
     vi.mocked(api.getImportPlan).mockReset().mockResolvedValue(plan)
-    vi.mocked(api.applyImport).mockReset().mockResolvedValue({ created: 1, linked: 1, skipped: 1, experienceIds: ['n1'] })
+    vi.mocked(api.applyImport).mockReset().mockResolvedValue({ created: 1, linked: 1, skipped: 0, experienceIds: ['n1'] })
   })
 
   it('묶음마다 결정을 보내고 같은 경험일 수 있는 묶음을 알린다', async () => {
@@ -219,8 +242,8 @@ describe('경험 가져오기', () => {
     expect(api.applyImport).toHaveBeenCalledWith({ r1: 7}, [
       { key: 'PROJECT|검색개선|202403', action: 'CREATE' },
       { key: 'PROJECT|검색개선|202404', action: 'LINK_TO', experienceId: 'e1' },
-      { key: 'ACTIVITY|동아리|2023', action: 'SKIP' },
     ])
+    // 건너뛴 묶음은 보내지 않는다(서버 결정 상한 500). 건너뜀 수는 화면이 센다.
     expect(wrapper.text()).toContain('가져오기 완료: 새 경험 1개, 연결 1묶음, 건너뜀 1묶음.')
     expect(wrapper.find('[aria-label="경험 가져오기"]').exists()).toBe(false)
   })
@@ -235,5 +258,22 @@ describe('경험 가져오기', () => {
     expect(api.getImportPlan).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('새 계획으로 다시 골라 주세요')
     expect(wrapper.find('[aria-label="경험 가져오기"]').exists()).toBe(true)
+  })
+
+  it('건너뛰지 않은 묶음이 500개를 넘으면 보내지 않고 나눠 가져오라고 알린다', async () => {
+    const many = Array.from({ length: 501 }, (_, i) => ({ ...plan.groups[2], key: `ACTIVITY|동아리${i}|2023`, title: `동아리${i}` }))
+    vi.mocked(api.getImportPlan).mockResolvedValue({ ...plan, groups: many })
+    const wrapper = await mountBoard()
+    await button(wrapper, '이력서에서 가져오기 (3행)').trigger('click')
+    await flushPromises()
+    await button(wrapper, '적용').trigger('click')
+    await flushPromises()
+    expect(api.applyImport).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('한 번에 500묶음까지')
+
+    await wrapper.get('[aria-label="동아리0 처리"]').setValue('SKIP')
+    await button(wrapper, '적용').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(api.applyImport).mock.calls[0][1]).toHaveLength(500)
   })
 })

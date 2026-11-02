@@ -53,8 +53,15 @@ watch(() => props.postingId, () => {
   records.value = []
 })
 
-/** 가장 최근 기록의 문서를 처음 선택으로 둔다 — 보통 LINKED 의 연결 자료가 실제로 낸 것과 같다. */
+/** 확인 폼을 연 순번. 저장 중에 취소·다시 열기를 했으면 이전 저장의 완료·실패는 새 폼을 건드리지 않는다. */
+let formSeq = 0
+
+/**
+ * 가장 최근 기록의 문서를 처음 선택으로 둔다 — 보통 LINKED 의 연결 자료가 실제로 낸 것과 같다.
+ * 기록(스냅샷)은 원본 문서를 지워도 남으므로, 지금 목록에 없는 문서는 빼고 고른다 — 보이지 않는 선택이 404 를 낸다.
+ */
 async function startConfirm() {
+  formSeq++
   const postingId = props.postingId
   error.value = ''
   try {
@@ -65,10 +72,12 @@ async function startConfirm() {
   }
   if (postingId !== props.postingId) return
   const latest = records.value[0]
+  const resumeIds = new Set(resumes.value.map((r) => r.id))
+  const introIds = new Set(intros.value.map((s) => s.id))
   Object.assign(draft, {
     level: 'USER_CONFIRMED',
-    resumeIds: latest ? latest.resumes.map((r) => r.resumeId) : [],
-    selfIntroIds: latest ? latest.selfIntros.map((s) => s.id) : [],
+    resumeIds: latest ? latest.resumes.map((r) => r.resumeId).filter((id) => resumeIds.has(id)) : [],
+    selfIntroIds: latest ? latest.selfIntros.map((s) => s.id).filter((id) => introIds.has(id)) : [],
     receiptExcerpt: '',
     receiptNumber: '',
     receiptFile: '',
@@ -80,6 +89,7 @@ const canSave = computed(() => draft.resumeIds.length + draft.selfIntroIds.lengt
   && (draft.level === 'USER_CONFIRMED' || !!(draft.receiptExcerpt.trim() || draft.receiptNumber.trim() || draft.receiptFile)))
 
 async function save() {
+  const mine = formSeq
   busy.value = true
   error.value = ''
   const receipt = draft.level === 'RECEIPT_VERIFIED'
@@ -92,10 +102,10 @@ async function save() {
       receiptNumber: receipt ? draft.receiptNumber.trim() || null : null,
       receiptAttachmentIds: receipt && draft.receiptFile ? [draft.receiptFile] : [],
     })
-    editing.value = false
+    if (mine === formSeq) editing.value = false
     await load()
   } catch (e) {
-    error.value = message(e, '제출본을 확인하지 못했습니다.')
+    if (mine === formSeq) error.value = message(e, '제출본을 확인하지 못했습니다.')
   } finally {
     busy.value = false
   }

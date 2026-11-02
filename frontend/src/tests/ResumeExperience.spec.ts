@@ -99,7 +99,7 @@ describe('이력서 편집기의 경험 연결', () => {
     expect(row.description).toBe('기존 문구')
   })
 
-  it('"경험에서 불러오기"는 사실로 중립 행을 만들고 experienceId 만 단다', async () => {
+  it('"경험에서 불러오기"는 사실로 중립 행을 만들고 앵커에 불러온 상세의 개정을 단다', async () => {
     const wrapper = await mountEditor(resume([]))
     await projectRows(wrapper).get('select[aria-label="경험에서 불러오기"]').setValue('e2')
     await flushPromises()
@@ -107,9 +107,19 @@ describe('이력서 편집기의 경험 연결', () => {
     const row = savedPayload(wrapper).content.projects[0]
     expect(row).toMatchObject({
       name: '배치 이관', startYm: '2024.03', endYm: '2024.08', role: '백엔드 리드', techStack: 'Kafka, Spring',
-      description: '- 색인 파이프라인을 다시 짰다', outcome: '- p95 1.2초 → 0.4초', experienceId: 'e2',
+      description: '- 색인 파이프라인을 다시 짰다', outcome: '- p95 1.2초 → 0.4초', experienceId: 'e2', experienceRevision: 1,
     })
-    expect('experienceRevision' in row).toBe(false)
+  })
+
+  it('불러온 문구가 옛 개정이면 그 개정을 보내 "재검토 필요"가 남는다(편집기를 연 뒤 원본이 정정된 경우)', async () => {
+    // 편집기가 받아 둔 e1 상세는 개정 1 이다. 저장 전에 서버에서 개정 2 로 정정됐다.
+    const stale = detail('e1', '검색 개선', ['INIT'])
+    vi.mocked(api.getExperiences).mockImplementation(async (ids) => [stale, batch].filter((d) => ids.includes(d.id)))
+    const wrapper = await mountEditor(resume([]))
+    await projectRows(wrapper).get('select[aria-label="경험에서 불러오기"]').setValue('e1')
+    await flushPromises()
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    expect(savedPayload(wrapper).content.projects[0]).toMatchObject({ experienceId: 'e1', experienceRevision: 1 })
   })
 
   it('"경험으로 등록"은 행으로 경험 원본을 만들고 그 행에 앵커를 단다', async () => {
@@ -127,6 +137,39 @@ describe('이력서 편집기의 경험 연결', () => {
     expect(wrapper.text()).toContain('이력서를 저장하면 이 행이 연결됩니다')
     await wrapper.get('.resume-head .button.primary').trigger('click')
     expect(savedPayload(wrapper).content.projects[0]).toMatchObject({ name: '사내 위키', experienceId: 'e3' })
+  })
+
+  it('"경험으로 등록"이 끝나기 전에는 행을 옮기거나 지우거나 다시 등록할 수 없다(다른 행에 앵커가 붙지 않게)', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof api.createExperience>>) => void
+    vi.mocked(api.createExperience).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const wrapper = await mountEditor(resume([bare, { ...bare, name: '사내 메신저' }]))
+    await projectRows(wrapper).findAll('.resume-row__exp .button')[0].trigger('click')
+
+    const rows = projectRows(wrapper).findAll('.resume-row')
+    expect(rows[1].get('[aria-label="위로"]').attributes('disabled')).toBeDefined()
+    expect(rows[0].get('[aria-label="행 삭제"]').attributes('disabled')).toBeDefined()
+    await rows[1].get('.resume-row__exp .button').trigger('click')
+    expect(api.createExperience).toHaveBeenCalledTimes(1)
+
+    finish({ id: 'e3', version: 0, revision: 1, changeKind: 'INIT', needsReview: [], normalizedSkills: [], warnings: [] })
+    await flushPromises()
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    expect(savedPayload(wrapper).content.projects.map((row) => row.experienceId)).toEqual(['e3', undefined])
+    expect(projectRows(wrapper).findAll('.resume-row')[1].get('[aria-label="위로"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('겹친 경험 목록 조회는 마지막 요청의 응답만 반영한다', async () => {
+    let finishOld!: (value: Awaited<ReturnType<typeof api.listExperiences>>) => void
+    vi.mocked(api.listExperiences).mockReset()
+      .mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve }))
+      .mockResolvedValueOnce({ experiences: [line('e1', '검색 개선', 2), line('e2', '배치 이관', 1)], unlinked: [], index: {} as never })
+    const wrapper = await mountEditor(resume([anchored]))
+    await wrapper.setProps({ resume: resume([anchored], { version: 8 }) })
+    await flushPromises()
+    finishOld({ experiences: [line('e1', '검색 개선', 2)], unlinked: [], index: {} as never })
+    await flushPromises()
+    expect(projectRows(wrapper).findAll('select[aria-label="경험에서 불러오기"] option').map((o) => o.text()))
+      .toContain('배치 이관 (2024.03~2024.08)')
   })
 
   it('저장 응답의 unlinkedWarnings 는 끊긴 경험 이름으로 알린다', async () => {
@@ -185,7 +228,7 @@ describe('경험 앵커 섹션 4개', () => {
     })
   })
 
-  it.each(cases)('$label: 이 섹션 종류의 경험만 고르고, 불러온 행은 제목·사실·experienceId 만 갖는다', async (item) => {
+  it.each(cases)('$label: 이 섹션 종류의 경험만 고르고, 불러온 행은 제목·사실·앵커(id·개정)를 갖는다', async (item) => {
     const wrapper = await mountEditor(resumeWith(item.key, []))
     const section = sectionOf(wrapper, item.label)
     const options = section.get('select[aria-label="경험에서 불러오기"]').findAll('option').map((option) => option.text())
@@ -196,7 +239,7 @@ describe('경험 앵커 섹션 4개', () => {
     const row = savedPayload(wrapper).content[item.key][0]
     expect(row[item.titleKey]).toBe(item.title)
     expect(row.experienceId).toBe(item.id)
-    expect('experienceRevision' in row).toBe(false)
+    expect(row.experienceRevision).toBe(1)
     expect(row.description).toContain('- 색인 파이프라인을 다시 짰다')
   })
 

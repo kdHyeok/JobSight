@@ -56,7 +56,7 @@ app_users
 8. **메모는 원문 저장**: 기업·공고·직무 memo는 5,000자 이하 Markdown 문자열이다. 서버는 HTML로 변환하지 않는다.
 9. **공고 수정의 `positions`·`steps` 는 null=유지, 배열=그 목록으로 맞춤, `[]`=비움**(REST PUT 과 `posting_update` 공통). 나머지 공고 필드는 전체 교체다.
    직무는 id 로 먼저, id 가 없으면 이름(`Company.nameKey`: 공백 제거·소문자)으로 남은 기존 직무와 맞춘다. **같은 직무를 지웠다 다시 만들지 않는다** — 직무 행이 바뀌면 `resume_positions`(와 2단계의 자소서 직무 연결)가 `ON DELETE CASCADE` 로 끊긴다. 어느 항목과도 맞지 않은 기존 직무만 삭제한다. — `JobPostingService.syncPositions`, 설계 1.4 T3
-10. **공고 수정은 공고 행을 잠근다.** `JobPostingService.update` 는 `findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽은 뒤 직무를 맞춘다. 잠금이 없으면 병렬 수정 두 건이 같은 기존 직무 목록을 읽고 같은 새 직무를 두 행으로 만든다. 직무 id 에 걸린 연결(이력서, 2단계 자소서 written_for)이 중복·삭제 경쟁으로 오염된다. 3초 안에 잠금을 못 얻으면 409 `BUSY`(docs/backend.md).
+10. **공고 수정과 상태 변경은 공고 행을 잠근다.** `JobPostingService.update`·`changeStatus` 는 `findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽는다. 상태 변경이 잠금 없이 읽으면, SUBMITTED 를 떠나는 수정이 커밋 전일 때 옛 SUBMITTED 를 보고 DRAFTING → SUBMITTED 전이를 놓쳐 LINKED 를 새로 남기지 않는다(계정 잠금은 SUBMITTED 로 가는 쓰기만 잡는다, `JobPostingUpdateIntegrationTest.changeStatusWaitsForAnUpdateLeavingSubmitted`). 수정은 읽은 뒤 직무를 맞춘다. 잠금이 없으면 병렬 수정 두 건이 같은 기존 직무 목록을 읽고 같은 새 직무를 두 행으로 만든다. 직무 id 에 걸린 연결(이력서, 2단계 자소서 written_for)이 중복·삭제 경쟁으로 오염된다. 3초 안에 잠금을 못 얻으면 409 `BUSY`(docs/backend.md).
 
 11. **제출 기록은 상태 전이 한 곳에서 남긴다**(설계 6.6). 쓰기의 결과가 `SUBMITTED` 면 `JobPostingService.withSubmission` 이 `SubmissionService.recordLinked` 를 부른다 — 웹 드래그(`changeStatus`)·공고 수정·공고 생성(MCP `posting_set_status`·`posting_update`·`posting_create` 포함) 셋 모두다. 응답의 `submission{id, level}` 로 돌려준다. `SUBMITTED` 로 가는 쓰기는 트랜잭션 맨 앞에서 `OwnerLock`(T9)을 잡고, 스냅샷은 직무 동기화를 flush 한 뒤 JDBC 로 읽는다.
 12. **LINKED 는 제출본이 아니다.** 상태 변경 때 남는 기록은 "기록 당시 연결 자료"(그 공고 직무에 연결된 이력서 `resume_positions` 와 그 직무용 자소서 written_for)다. 실제로 낸 것은 웹 공고 상세의 "실제로 낸 것 확인"으로 사용자가 고른다(`USER_CONFIRMED`, 접수 메일 발췌·번호·근거 파일을 붙이면 `RECEIPT_VERIFIED`). 기록은 고치지 않고 쌓으며, 같은 공고·수준에서 스냅샷 내용의 SHA-256(`content_hash`)이 같으면 새로 쓰지 않고 기존 기록을 돌려준다.
@@ -151,12 +151,14 @@ cd frontend && npm run type-check && npm test
   소유자 조건을 넣은 count 한 문장이다(`PositionRepository.countSelfIntrosWrittenFor*`). 목록·수정 응답은 null 이다.
   웹 삭제 확인창(`PositionBoard`·`PostingBoard`·`CompanyWorkspace`)은 들고 있는 대상에 수가 없으면(목록에서 고름) 상세를 한 번 불러
   0 보다 크면 "…로 쓴 자소서 N개의 직접 출처 연결이 함께 사라집니다(답변은 남습니다)" 를 붙인다(`utils/writtenFor.ts`).
+  수를 받는 동안은 삭제 버튼만 막고(`ConfirmDialog` 의 `pending`), 받지 못하면 0 으로 치지 않고 "자소서 수를 확인하지 못했습니다" 경고를 붙인다.
   공고 수정 폼에서 직무를 빼는 경우는 알리지 않는다 — docs/self-introductions.md 함정.
 - **공고 PUT 의 직무 목록은 "그 목록으로 맞춤"이다.** `id` 가 있는 항목은 그 직무, 없는 항목은 같은 이름의 남은 기존 직무를 쓰고 이름만 갱신한다. 둘 다 없으면 생성, 어느 항목과도 맞지 않은 기존 직무는 삭제된다. id 를 먼저 다 고른 뒤 이름으로 맞추므로 이름 맞춤이 id 로 지목된 직무를 가져가지 않는다. 이름이 같은 기존 직무가 둘이면 그중 하나만 맞춰지고 나머지는 삭제 대상이다. 같은 id 가 두 번 오면 두 번째는 새 직무가 되고, 이 공고의 직무가 아닌 id 는 없는 것으로 보고 이름으로 맞춘다. 삭제되는 직무가 지원 직무(`targetPositionId`)면 비운다 — 직무 상세(팀·역량 등)는 직무 페이지에서 편집하므로 공고 폼은 `id`+`name` 만 다룬다.
 - **웹 공고 폼은 직무·절차를 항상 배열로 보낸다**(행을 다 지우면 `[]`). 필드를 빼면 서버가 "유지"로 읽어 지운 행이 조용히 남는다. `PostingForm.spec.ts` 가 이것을 지킨다. 전에는 폼이 지웠다 같은 이름으로 다시 추가한 직무가 새 행이 됐지만, 이제는 기존 행을 다시 쓴다.
 - 공고 PUT의 절차 목록은 배열이면 값 기준 통째 교체(null 이면 유지)지만, 영속화할 때는 같은 순번의 엔티티를 갱신하고 끝에서만 추가·삭제한다. 전부 지운 뒤 다시 넣으면 Hibernate flush 순서에 따라 `(posting_id, seq)` 고유키가 충돌한다.
 - 절차 `seq` 는 재정렬하면 바뀐다. step 을 밖에서 id 로 참조하지 않는다.
 - **이미 SUBMITTED 인 공고에 SUBMITTED 를 다시 보내면 새 기록을 만들지 않고 최신 LINKED 를 돌려준다.** 제출 뒤 고친 이력서가 "기록 당시"로 섞이지 않게 하려는 것이다. 이 기능 전부터 SUBMITTED 였던 공고는 LINKED 가 없으므로 그때 한 번 남는다. SUBMITTED → 다른 상태 → SUBMITTED 는 전이라 다시 찍지만, 내용이 같으면 `content_hash` 로 같은 기록이다.
+- **알려진 한계: 확인 제출본을 A → B → A 로 다시 고르면 최신 확인이 B 로 남는다.** `content_hash` 맞춤이 공고·수준의 *모든* 기록과 비교하므로(UNIQUE `(posting_id, content_hash, level)`, 설계 2.5·6.6) 세 번째 확인은 A 의 옛 기록을 돌려주고, `alreadyUsedFor` 는 `recorded_at` 최신인 B 를 쓴다. 고치려면 유일 제약을 바꾸는 마이그레이션(최신 기록과만 맞춤)이 필요해 이번에 손대지 않았다(OCR 리뷰 2026-11-03).
 - **`submissions.recorded_at` 은 `clock_timestamp()` 다(`now()` 금지).** `now()` 는 트랜잭션 시작 시각이라 `OwnerLock` 을 기다린 트랜잭션의 기록이 먼저 커밋된 기록보다 이르게 찍혀, 최신 LINKED·최신 확인 제출본(alreadyUsedFor)·목록 최신순이 직렬 순서와 뒤집힌다. 잠금 아래에서 쓴 시각이면 순서가 맞다. `SubmissionIntegrationTest.recordedAtIsWriteTimeNotTransactionStart` 가 지킨다.
 - `SubmissionRecords.vue` 는 공고 서랍에서 다른 공고로 바뀌어도 같은 인스턴스다. 목록 요청은 번호로 늦게 온 이전 응답을 버리고, `postingId` 가 바뀌면 "실제로 낸 것 확인" 편집을 닫는다(이전 공고용 선택이 새 공고의 확인 기록으로 저장되지 않게).
 - 공고를 지우면 제출 기록도 CASCADE 로 사라진다(`submissions` → `job_postings (id, owner_id)`). 기록은 공고에 딸린 자료다.

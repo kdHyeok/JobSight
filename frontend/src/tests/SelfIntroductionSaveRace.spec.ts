@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { request } from '../api/http'
 import { confirmSelfIntroduction, updateSelfIntroduction } from '../api/self-introductions'
 import { API } from '../routes'
-import type { SelfIntroduction, SelfIntroductionUpdatePayload } from '../types/self-introduction'
+import type { SelfIntroduction, SelfIntroductionConfirmPayload, SelfIntroductionUpdatePayload } from '../types/self-introduction'
 
 vi.mock('../api/http', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api/http')>(), request: vi.fn(),
@@ -28,6 +28,10 @@ describe('같은 자기소개 문항의 연속 저장', () => {
         if (expectedVersion !== stored.version) throw new Error('SELF_INTRO_STALE')
         stored = { ...stored, question, answer }
       }
+      if (path === API.selfIntroductionConfirm('intro')) {
+        const { expectedVersion } = JSON.parse(init!.body as string) as SelfIntroductionConfirmPayload
+        if (expectedVersion !== stored.version) throw new Error('SELF_INTRO_STALE')
+      }
       stored = { ...stored, version: stored.version + 1 }
       return { ...stored }
     })
@@ -45,7 +49,7 @@ describe('같은 자기소개 문항의 연속 저장', () => {
   })
 
   it('확정(✓) 직후의 저장은 확정 응답의 version 을 이어받는다', async () => {
-    const confirming = confirmSelfIntroduction('intro', { positionIds: ['p'] })
+    const confirming = confirmSelfIntroduction('intro', { positionIds: ['p'], expectedVersion: 0 })
     const saving = updateSelfIntroduction('intro', payload('확정 뒤 저장', 0))
     await Promise.resolve()
     expect(writes).toBe(1)
@@ -55,6 +59,13 @@ describe('같은 자기소개 문항의 연속 저장', () => {
     const sent = JSON.parse(vi.mocked(request).mock.calls[1][1]!.body as string) as SelfIntroductionUpdatePayload
     expect(sent.expectedVersion).toBe(1)
     expect(stored.version).toBe(2)
+  })
+
+  it('다른 곳에서 먼저 저장했으면 예전 version 의 확정(✓)도 version 을 올리지 않는다', async () => {
+    releaseFirst()
+    stored = { ...stored, answer: 'AI 가 고친 답변', version: 3 }
+    await expect(confirmSelfIntroduction('intro', { positionIds: ['p'], expectedVersion: 0 })).rejects.toThrow('SELF_INTRO_STALE')
+    expect(stored.version).toBe(3)
   })
 
   it('다른 곳에서 먼저 저장했으면 예전 version 의 저장은 덮어쓰지 않는다', async () => {
