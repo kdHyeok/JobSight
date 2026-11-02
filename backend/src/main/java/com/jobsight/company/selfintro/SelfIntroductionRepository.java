@@ -15,6 +15,15 @@ public interface SelfIntroductionRepository extends JpaRepository<SelfIntroducti
     Optional<SelfIntroduction> findByIdAndOwnerId(UUID id, UUID ownerId);
     List<SelfIntroduction> findAllByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
+    /** 직접 출처(written_for)가 없는 내 문항 수 — experience_index counts(설계 5.2). 소유자 조건을 양쪽에 건다. */
+    @Query(value = """
+            select count(*) from self_introductions s
+             where s.owner_id = :ownerId
+               and not exists (select 1 from self_introduction_positions p
+                                where p.self_introduction_id = s.id and p.owner_id = :ownerId)
+            """, nativeQuery = true)
+    long countWithoutDirectSource(@Param("ownerId") UUID ownerId);
+
     /** PostgreSQL 행 잠금 대기 상한을 이 트랜잭션에만 적용한다. 커밋/롤백 때 자동 복원된다. */
     @Modifying
     @Query(value = "set local lock_timeout = '3s'", nativeQuery = true)

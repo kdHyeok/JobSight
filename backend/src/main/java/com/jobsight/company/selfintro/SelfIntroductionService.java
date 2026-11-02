@@ -2,6 +2,7 @@ package com.jobsight.company.selfintro;
 
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
+import com.jobsight.company.common.Bm25;
 import com.jobsight.company.common.LinkSource;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.position.Position;
@@ -17,28 +18,21 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
 public class SelfIntroductionService {
-    private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}]+");
-    private static final double K1 = 1.2;
-    private static final double B = 0.75;
     /** 요청 DTO 의 @Size 상한과 같다. MCP 의 더하기 결과에도 적용한다. */
     private static final int MAX_POSITIONS = 10;
     private static final int MAX_TYPES = 3;
@@ -155,49 +149,20 @@ public class SelfIntroductionService {
                 .toList();
     }
 
-    /** BM25 유사 점수. 검색어가 없으면 null(정렬하지 않음), 점수가 0 인 문항은 빠진다. */
+    /** BM25 유사 점수(common.Bm25). 검색어가 없으면 null(정렬하지 않음), 점수가 0 인 문항은 빠진다. */
     static Map<SelfIntroduction, Double> scores(List<SelfIntroduction> values, String query) {
-        List<String> terms = terms(query);
-        if (terms.isEmpty() || values.isEmpty()) return null;
-
         Map<SelfIntroduction, List<String>> documents = new HashMap<>();
         values.forEach(value -> documents.put(value, words(value)));
-        double averageLength = documents.values().stream().mapToInt(List::size).average().orElse(1);
-        Map<SelfIntroduction, Double> scores = new HashMap<>();
-
-        for (SelfIntroduction value : values) {
-            List<String> words = documents.get(value);
-            double score = 0;
-            for (String term : terms) {
-                long frequency = words.stream().filter(word -> word.contains(term)).count();
-                if (frequency == 0) continue;
-                long documentFrequency = documents.values().stream()
-                        .filter(doc -> doc.stream().anyMatch(word -> word.contains(term)))
-                        .count();
-                double idf = Math.log(1 + (values.size() - documentFrequency + 0.5) / (documentFrequency + 0.5));
-                double denominator = frequency + K1 * (1 - B + B * words.size() / averageLength);
-                score += idf * frequency * (K1 + 1) / denominator;
-            }
-            if (score > 0) scores.put(value, score);
-        }
-        return scores;
+        return Bm25.scores(documents, terms(query));
     }
 
     static List<String> terms(String query) {
-        return tokenize(query).stream().distinct().toList();
+        return Bm25.terms(query);
     }
 
     /** 질문과 답변의 단어. 검색어는 단어 안 포함으로 맞춘다(형태소 분석 없음). */
     static List<String> words(SelfIntroduction value) {
-        return tokenize(value.getQuestion() + " " + (value.getAnswer() == null ? "" : value.getAnswer()));
-    }
-
-    private static List<String> tokenize(String value) {
-        if (value == null || value.isBlank()) return List.of();
-        Matcher matcher = WORD.matcher(value.toLowerCase(Locale.ROOT));
-        List<String> words = new ArrayList<>();
-        while (matcher.find()) words.add(matcher.group());
-        return words;
+        return Bm25.tokenize(value.getQuestion() + " " + (value.getAnswer() == null ? "" : value.getAnswer()));
     }
 
     private SelfIntroduction findOwned(UUID id) {

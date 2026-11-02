@@ -1,6 +1,6 @@
 ---
 name: jobsight
-description: JobSight에 저장된 기업 정보·복지, 채용공고·지원 상태·절차, 모집 직무·역량, 직무 참고 정보, 기업 뉴스·유튜브 자료, 이력서(여러 버전과 섹션 행), 자기소개 문항(어느 지원 직무용인지와 문항 유형)을 조회·추가·변경·삭제한다. 계정 정보와 관리자 승인 설정도 권한에 따라 관리한다. 사용자가 JobSight 또는 연결된 취업 관리 사이트의 데이터를 관리하려 할 때 사용한다.
+description: JobSight에 저장된 기업 정보·복지, 채용공고·지원 상태·절차, 모집 직무·역량, 직무 참고 정보, 기업 뉴스·유튜브 자료, 이력서(여러 버전과 섹션 행), 자기소개 문항(어느 지원 직무용인지와 문항 유형)을 조회·추가·변경·삭제하고, 공고에 맞는 내 경험(이력서 행)의 원문 출처를 공고를 저장하지 않고 찾는다. 계정 정보와 관리자 승인 설정도 권한에 따라 관리한다. 사용자가 JobSight 또는 연결된 취업 관리 사이트의 데이터를 관리하려 할 때 사용한다.
 ---
 
 # JobSight 사용
@@ -163,6 +163,30 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 - `resume_row_delete({id,section,index,expectedVersion})`: 뒤 행이 앞으로 당겨진다. 여러 행을 지울 때는 큰 index 부터, 응답의 version 을 이어서 쓴다.
 `resume_update` 는 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic` 을 **null 이면 유지, `[]` 면 비움**으로 다룬다. 섹션 하나만 바꿀 때는 행 도구가 더 안전하다.
 사용자가 이력서 항목을 읽어 달라고 하면 `resume_get` 결과의 섹션 순서(학력→…→프로젝트)대로 보여준다.
+
+**이력서 작성·수정 절차** (경험을 빠뜨리지 않게)
+1. `experience_index` 를 부르고 `complete:true` 인지 본다. `false` 면 `nextCursor` 를 `cursor` 로 넘겨 끝까지 읽는다.
+   `unlinkedRows` 는 내 모든 이력서의 경험 행(프로젝트·경력·대내외활동·교육이수)을 (종류, 제목, 시작 연월)로 묶은 목차다. 지금은 `experiences` 가 늘 `[]` 다.
+2. 고칠 이력서는 `resume_get({id, view:"outline"})` 으로 개요(`version`, 섹션별 `count`, 행 머리, `missing`, `unlinkedRows`)를 읽는다. 내용이 필요할 때만 full 로 읽는다.
+3. `missing[]`(다른 이력서에는 있는데 이 이력서에 없는 경험)과 목차를 **번호 목록으로 사용자에게 보여 주고 넣을 것을 확인받는다.**
+   `maybeUnlinked:true` 는 제목은 같고 기간만 다른 행이 이미 있다는 뜻이다 — 같은 경험인지 사용자에게 묻는다.
+4. 고른 행을 행 도구로 추가한다(`sources` 의 원래 이력서 행을 `resume_get` 으로 읽어 옮긴다). 새 이력서는 `resume_create` 로 만들고,
+   응답 맨 앞의 `missing` 이 비어 있지 않으면 빠뜨린 것이 없는지 다시 확인한다.
+5. 마지막 응답의 `count` 가 계획한 행 수와 같은지 대조한다.
+
+## 지원 맞춤 경험 찾기
+
+`experience_search({request:{positionId?|posting?, requirements?, limit?}})` 는 공고에 맞는 내 이력서 경험 행과 그 원문 출처를 찾는다. 아무것도 저장하지 않는다.
+1. 등록된 직무면 `positionId`, 아니면 공고 본문을 다섯 칸으로 나눠 `posting` 으로 넘긴다: `qualifications`(지원자격), `responsibilities`(담당업무),
+   `requiredSkills`(요구 역량), `preferredSkills`(우대 역량), `techStack`(기술 환경 목록), 그리고 `companyName`·`positionName`.
+   **고르기 전에는 공고를 저장하지 않는다.** 공고 여러 개를 추릴 때도 공고마다 `posting` 으로 부른다.
+2. `requirements` 에 공고 원문에서 뽑은 요구를 넣는다: `{text: 기술 이름("Kafka"), field: 위 칸 이름, kind: SKILL|QUALIFICATION, quote: 공고 문장}`.
+   내 자료에 없는 기술도 넣어야 `uncovered` 에 나온다. `text` 에 문장을 넣지 않는다. 경력 연수·학력·고용 조건은 `QUALIFICATION` 이다 — 점수에 넣지 않고
+   `qualifications[]` 로 돌아오며 충족 판단은 사용자가 한다. `requirements` 를 빼면 서버가 일반 사전으로 일부만 뽑는다(`REQUIREMENTS_PARTIAL`).
+3. 후보를 `why`(맞은 신호·칸·공고 인용)와 원문 출처 `source`(이력서·섹션·행 번호·`excerpt`)와 함께 보여 준다. `alsoIn` 은 같은 경험의 다른 이력서 행이다.
+   `uncovered` 는 지원자격·요구 역량 칸의 요구 중 받쳐 줄 행이 없는 것이다(우대·기술 환경 나열은 결핍이 아니다). `coverageIncomplete:true` 면
+   "그 경험이 없다"고 단정하지 말고 이력서에 적지 않은 경험이 있는지 묻는다. `reason:"TAG_MISMATCH_POSSIBLE"` 은 본문에 그 단어가 보인다는 뜻이다.
+4. 사용자가 지원할 공고와 경험을 고른 뒤에 **고른 공고만** `posting_create` 로 저장한다. 이어서 자기소개를 쓰면 `self_intro_create(positionIds)` 로 그 직무에 연결한다.
 
 ## 자기소개 문항
 
