@@ -202,3 +202,9 @@ PyTorch 는 cu126 계열에 고정해야 하고, JVM 안 ONNX 대신 별도 파�
 되돌릴 조건은 적재 경로다. CPU 에서 문서 1건이 142ms(PyTorch)라 긴 답변을 조각내 저장하면 응답에 수초가 붙는다.
 바뀐 행만 재계산하는 해시 비교로 먼저 막고, ONNX 로 다시 재서도 넘치면 그때 적재만 GPU 로 옮긴다.
 검색 경로까지 GPU 로 끌고 가지는 않는다. — docs/experience-graph-search.md
+
+## 경험 병합은 작성 근거를 바꾸지 않는다 (설계, 미구현, 2026-11-02)
+
+현재 경험의 정체성은 병합 경로로 찾되, 작성 근거는 당시의 `(experienceId, experienceRevision)` 쌍으로 보존한다. 자소서 REST/MCP 입력과 조회도 이 쌍을 명시하며, 사건의 현재 소속으로 경험 id를 다시 계산하지 않는다.
+
+재검토 판단은 작성 근거 경험부터 현재 대표 경험까지 모든 경로의 이후 정정을 검사한다. 마지막 target만 검사하면 source나 중간 경험에서 발생한 정정을 놓치기 때문이다. [설계 6.8](02-design/features/experience-graph.design.md#68-병합-경로의-정정과-자소서-작성-근거-계약)과 [계약 PoC](../poc/experience-lineage/README.md)에 반례와 검증 범위를 둔다. 서버와 DB 기능은 이 PR에서 구현하지 않는다.

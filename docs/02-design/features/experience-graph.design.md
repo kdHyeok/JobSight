@@ -755,9 +755,10 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 | `resume_create` | 응답에 `missing` 요약을 붙인다. AI가 생성 때 일부만 고른 경우도 응답 기본값으로 드러난다 |
 | `resume_update` | content·positionIds·빠진 섹션이 null이면 유지한다(1단계). `expectedVersion` 은 **필수**다(문서 전체 교체, 1단계). **`LINKED_ROWS_MISSING` 가드**(4단계): 저장 전 문서의 `experienceId` 중 새 문서에서 사라진 것은 `removedExperienceIds` 에 모두 적혀 있어야 하고, 아니면 409다. 래퍼에 있으므로 웹에는 걸리지 않는다. 설명은 "섹션 일부 편집은 `resume_row_*`, 경험 행 추가는 `resume_add_experiences`"로 바꾼다 |
 | `resume_row_*` | `FOR UPDATE` 로 직렬화한다. `update`·`delete` 는 `expectedVersion` **필수**, `add` 는 선택이다. 다르면 409 `RESUME_STALE`. update는 병합한다(`experienceId` 보존). 반환은 개요와 새 `version` 이다. 모두 1단계 |
-| `self_intro_list` | 필터 `positionId?`·`postingId?`·`companyId?`·`questionType?`·`unlinked?` 와 `limit?=10` 을 둔다. 반환은 `answerPreview`(300자), `score`, `matchedTerms`, 출처 `{direct:[{position, company, trust}], indirect:[{resume, position, company}]}`, `questionTypes`, `episodes[{id,title}]`, `alreadyUsedFor[]` 다. **직접 출처가 0건이면** 빈 배열 대신 `{fallback:"indirect", results:[…각 항목 "출처 미상"]}` 을 준다. `q` 의 100자 제한을 스키마에 드러내고, 넘으면 400을 준다. 원문은 `self_intro_get` 으로 읽는다. 웹 REST 목록은 그대로 둔다 |
-| `self_intro_create` / `_update` | `positionIds?`, `episodes?[{id, experienceRevision}]`, `questionTypes?`, `writingContext?`(6.7) 를 추가한다. 이 필드는 REST에도 생기지만 선택이고 null=유지라 웹에 영향이 없다. 규칙: 생성 시 "이력서 또는 직무 1개 이상", 수정 시 0개 허용. 지금은 생성과 수정이 같은 DTO의 `@Size(min = 1)` 을 공유하므로(`B/selfintro/dto/SelfIntroductionRequest.java:12`) 생성용과 수정용 요청을 분리한다. 빈 목록에서 `ids.get(0)` 로 `IndexOutOfBoundsException` 을 던지는 `requireOwnedResumes`(`SelfIntroductionService.java:118-123`)도 함께 고친다 |
+| `self_intro_list` | 필터 `positionId?`·`postingId?`·`companyId?`·`questionType?`·`unlinked?` 와 `limit?=10` 을 둔다. 반환은 `answerPreview`(300자), `score`, `matchedTerms`, 출처 `{direct:[{position, company, trust}], indirect:[{resume, position, company}]}`, `questionTypes`, `episodes[{id,title,experienceId,experienceRevision}]`, `alreadyUsedFor[]` 다. **직접 출처가 0건이면** 빈 배열 대신 `{fallback:"indirect", results:[…각 항목 "출처 미상"]}` 을 준다. `q` 의 100자 제한을 스키마에 드러내고, 넘으면 400을 준다. 원문은 `self_intro_get` 으로 읽는다. 웹 REST 목록은 그대로 둔다 |
+| `self_intro_create` / `_update` | `positionIds?`, `episodes?[{id, experienceId, experienceRevision}]`, `questionTypes?`, `writingContext?`(6.7) 를 추가한다. `episodes` 를 보내면 항목의 세 키가 모두 필수다. 경험 id를 사건의 현재 소속에서 추론하거나 병합 target으로 치환하지 않는다. 소유자, 개정 존재, 사건과 경험의 정체성 검사는 6.8을 따른다. 이 필드는 REST에도 생기지만 선택이고 null=유지라 웹이 새 필드를 보내지 않는 기존 경로에는 영향이 없다. 규칙: 생성 시 "이력서 또는 직무 1개 이상", 수정 시 0개 허용. 지금은 생성과 수정이 같은 DTO의 `@Size(min = 1)` 을 공유하므로(`B/selfintro/dto/SelfIntroductionRequest.java:12`) 생성용과 수정용 요청을 분리한다. 빈 목록에서 `ids.get(0)` 로 `IndexOutOfBoundsException` 을 던지는 `requireOwnedResumes`(`SelfIntroductionService.java:118-123`)도 함께 고친다 |
 | `posting_update` | `positions`·`steps` 가 null이면 유지한다. id 없는 직무는 이름으로 기존 직무와 맞춘다(1단계) |
+| `self_intro_get` | 사건 연결을 `episodes[{id,title,experienceId,experienceRevision}]` 로 돌려준다. 저장된 작성 근거 쌍을 그대로 반환한다. 조회나 재저장 때 현재 사건 소속에서 경험 id를 다시 계산하지 않는다(6.8) |
 | `posting_set_status` | `SUBMITTED` 로 바꾸면 그 공고의 기록 당시 연결 자료로 제출 기록(LINKED)을 남기고 응답에 `submission{id, level}` 을 싣는다. 같은 요청을 다시 보내면 같은 기록을 돌려준다(6.6). 제출본 확인은 웹에서 한다 |
 | 리소스 설명 | 스킬 설명(`SKILL.md:3`)과 `resources/list` 설명(`McpController.java:54-55`)에 자기소개와 경험을 넣는다 |
 
@@ -868,7 +869,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 - **차이는 세 가지로 나눈다** (R25). 모든 문구 차이에 경고하면 사용자가 경고를 무시하게 된다.
   - 표현 축약·순서 변경: 정상적인 기업별 편집이다. 표시하지 않는다.
   - 행에만 있는 새 사실(원본에 없는 수치·기술 키): "원본 반영 검토"로 보여 준다. 원본을 자동으로 바꾸지 않는다.
-  - 원본 사실 정정(`CORRECT` 개정): 참조한 개정보다 **나중에 만들어진** `CORRECT` 개정이 지금의 경험(병합됐으면 target)에 있으면 그 이력서 행과 자소서에 "재검토 필요"를 붙인다. 개정 번호가 아니라 개정 시각으로 비교한다. 병합 뒤에는 source와 target의 번호를 서로 비교할 수 없기 때문이다. 추가(`ADD`) 개정에는 붙이지 않는다.
+  - 원본 사실 정정(`CORRECT` 개정): 작성 근거 경험부터 `merged_into` 를 따라 현재 대표 경험까지의 **모든 경험**에서, 참조한 개정보다 나중에 만들어진 `CORRECT` 개정을 검사한다(6.8). source나 중간 경험의 정정도 포함한다. 개정 번호는 경험마다 다르므로 개정 시각으로 비교한다. 추가(`ADD`) 개정에는 붙이지 않는다.
 - 이 전환으로 대표 행, "가장 최근에 수정한 이력서" 대체 규칙, 보존본이 필요 없어졌다(10.4). 기업용 문구가 사라져도 사실은 원본에 남기 때문이다.
 - **같은 키를 세 곳에 함께 추가해야 한다.** `experienceId`·`experienceRevision` 을 `ResumeContent` 의 `Activity`·`Experience`·`Project`·`Training`, `ResumeRowRequest`, `frontend/src/types/resume.ts` 에 함께 넣는다. Jackson 3는 모르는 키를 조용히 버리므로, 한 곳이라도 빠지면 저장은 성공하고 값만 사라진다. PUT→GET 왕복 테스트로 막는다.
 - `docs/decisions.md:50` 의 "본문 JSON에 ID를 섞지 않는다"에 대한 예외다(D2).
@@ -997,6 +998,24 @@ JobSight가 개인 취업 컨텍스트의 중앙 관리 지점이다(10.4 R23). 
 - 자소서를 MCP로 저장할 때 `writingContext` 에 위 값, 작성 기준 `version`, 쓴 경험 개정 번호를 남긴다.
 - 같은 컨텍스트여도 모델과 실행 설정에 따라 최종 문장은 달라진다. 보장하는 것은 같은 사실 기반, 검색 기준, 작성 규칙과 검토 이력이다.
 
+### 6.8 병합 경로의 정정과 자소서 작성 근거 계약
+
+작성 근거 `(experienceId, experienceRevision)` 와 현재 사건의 소속은 다를 수 있다. 사실 개정은 작성 당시의 경험에서 찾고, 현재 정체성은 병합 경로로 확인한다. 이력서와 자소서에 같은 규칙을 적용한다.
+
+1. 작성 근거 경험과 개정을 소유자 범위에서 찾는다. 개정의 `created_at` 이 비교 기준 시각이다.
+2. 작성 근거 경험부터 `merged_into` 의 끝까지 순회한다. **source, 중간 경험, 마지막 target을 모두 포함**한다. 각 경험의 `CORRECT` 개정 중 기준 시각보다 뒤의 것이 하나라도 있으면 재검토가 필요하다. `ADD`·`MERGE` 만으로 경고를 지우거나 만들지 않는다.
+3. 계정 경험을 한 번에 읽어 Java Map에서 순회한다. 방문 id를 기록하고 자기 참조나 순환은 `409 MERGE_CYCLE` 로 거절한다. 병합 입력도 같은 검사를 거친다. 소유자가 다른 경로는 404다. 재귀 SQL이나 그래프 DB는 필요 없다.
+
+자소서 REST/MCP 생성·수정 및 조회 계약:
+
+- `episodes` 생략·null은 기존 연결 유지, `[]` 는 비움이다. 목록을 보내면 각 항목은 `{id, experienceId, experienceRevision}` 세 키가 필수다. 빠진 키나 양의 정수가 아닌 개정은 `400 EPISODE_REFERENCE_REQUIRED` 다.
+- 사건과 작성 근거 경험은 모두 내 것이어야 한다(아니면 404). `(experienceId, experienceRevision)` 개정도 실제로 존재해야 한다(없으면 `404 EXPERIENCE_REVISION_NOT_FOUND`).
+- 사건의 현재 소속과 작성 근거 경험이 병합 경로의 같은 대표 경험에 도달해야 한다. 아니면 `400 EPISODE_EXPERIENCE_MISMATCH` 다. 이 검사는 같은 경험임을 확인할 뿐, 과거 근거 쌍을 현재 소속으로 바꾸지 않는다. 사실의 개정과 사건 STAR의 현재 편집 버전은 구분한다.
+- 검사를 모두 통과한 뒤 전달받은 쌍을 그대로 저장하고, `self_intro_get`·`self_intro_list` 에서 그대로 돌려준다. 다른 연결과 문항은 보존하며, 여러 사건 중 하나라도 실패하면 요청 전체가 실패한다.
+- 예: 사건 E가 A에서 B로 옮겨졌고 A와 B 모두 4차 개정이 있어도, `{id:E, experienceId:A, experienceRevision:4}` 는 A의 4차 개정을 가리킨다. 숫자 4만으로 B의 4차 개정을 선택하지 않는다.
+
+합성 자료의 실행 가능한 계약 검증은 [경험 병합 계약 PoC](../../../poc/experience-lineage/README.md)에 둔다. 서버 구현이나 DB 통합 테스트가 아니다. 4단계 구현에서 같은 사례를 REST·MCP 서비스 회귀 테스트로 옮긴다.
+
 ---
 
 ## 7. 단계별 도입 계획
@@ -1027,6 +1046,8 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | **제출·작성 기준 트랙** (2단계 이후 언제든) | `V{n}__submissions_and_guides`: 제출 기록(6.6, `SUBMITTED` 전환 때 LINKED 기록, 웹에서 사용자 확인·접수 근거 첨부), 작성 기준 문서(6.7)와 MCP `writing_guide_get`, 자소서 `writing_context` | 같은 상태 변경을 두 번 보내도 기록이 하나인지. 뒤늦게 등록한 지원 건이 LINKED로만 남고 제출본이라 부르지 않는지. 제출 기록이 가리키는 첨부가 정리 대상에서 빠지는지. 작성 기준 버전이 자소서 `writing_context` 에 남는지 | 낮음. 기록 테이블은 무시해도 된다 |
 
 ### 함께 갱신할 문서
+
+4단계의 추가 회귀 사례는 6.8과 [계약 PoC](../../../poc/experience-lineage/README.md)를 따른다. source의 정정 뒤 병합, 중간 경험의 정정 뒤 재병합, target의 이후 정정, 추가만 있는 경우를 각각 검사한다. REST와 MCP 모두 작성 근거 id가 빠진 요청, 없는 개정, 타인 소유자, 다른 경험의 사건 연결을 거절하고, 같은 개정 번호를 가진 source와 target이 있어도 저장·조회 왕복에서 원래 쌍을 유지해야 한다.
 
 | 문서 | 갱신 내용 |
 |---|---|
@@ -1228,3 +1249,12 @@ P1 1건, P2 3건. 설계에 해당하는 두 건을 여기 남긴다. 나머지 
 |---|---|---|---|
 | R31 | [P1] 병합이 source를 지워 개정 이력도 함께 사라진다. 자소서 연결에는 개정 번호만 있어, 사건이 target으로 옮겨지면 그 번호를 target 기준으로 잘못 읽는다. 이력서도 작성 당시와 다른 개정을 가리키게 된다 | 채택. source는 `merged_into` 로 남기고 지우지 않는다. 참조는 (경험 id, 개정 번호) 쌍으로 고정하고, 자소서 연결에 경험 id를 더했다. 이력서 JSON은 병합 때 고쳐 쓰지 않는다. "재검토 필요"는 개정 시각으로 비교한다 | 2.3, 2.5, 6.1, 6.2, 6.3, 6.4, 7 |
 | R32 | [P2] `resume_add_experiences(from: ROW)` 가 과거 문구를 복사하면서 최신 개정 번호를 기록해, 정정 전 문구를 최신 사실 근거처럼 만들고 "재검토 필요"를 놓친다 | 채택. `ROW` 는 원래 행의 (경험 id, 개정 번호)를 그대로, `FACTS` 만 최신 개정을 쓴다 | 5.2, 7 |
+
+### 10.6 6차 리뷰: 병합 경로와 작성 근거 입력 (2026-11-02)
+
+| # | 지적 | 처리 | 반영 위치 |
+|---|---|---|---|
+| R33 | target의 정정만 검사하면 source에서 정정된 뒤 병합된 문서의 경고가 사라진다 | 작성 근거 경험부터 마지막 대표 경험까지 모든 경로의 이후 정정을 검사한다. source와 중간 경험의 이력을 포함하고, 순환과 다른 소유자의 경로는 거절한다 | 6.1, 6.8, 7 |
+| R34 | 자소서 입력은 사건 id와 개정 번호뿐이라 병합 전 작성 근거의 경험 id를 전달할 수 없다 | `episodes` 항목에 `experienceId`를 필수로 추가한다. 소유자, 개정 존재, 같은 경험 정체성을 검사하고 입력받은 쌍을 변경 없이 저장·조회한다 | 5.3, 6.8, 7 |
+
+합성 계약 검증 12개와 기존 문항 검색·임베딩 스크립트 자체 점검을 통과했다. `poc/experience-lineage/check_contract.py`는 설계의 참조 모델이며 서버·DB 구현 검증을 대신하지 않는다. 로컬 8089 기존 서비스의 스모크는 PASS (58 checks)이고 이번 작업에서 서비스를 재배포하지 않았다.
