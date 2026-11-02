@@ -275,6 +275,33 @@ class ResumeServiceTest {
         assertThat(updated.content().skills()).extracting(ResumeContent.Skill::name).containsExactly("Python");
     }
 
+    /** AI 가 {phone} 만 보내도 이름·이메일·주소·포트폴리오 첨부가 지워지지 않는다(불변 조건 9). */
+    @Test
+    void updateBasicKeepsFieldsTheRequestLeavesOut() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{\"basic\":{\"name\":\"테스트\",\"email\":\"test@example.com\","
+                + "\"address\":\"서울\",\"portfolioFileId\":\"pf-1\"}}");
+
+        ResumeResponse updated = service.updateBasic(resume.getId(),
+                new ResumeContent.BasicInfo(null, "010-0000-0000", null, null, null, null, null, null), null);
+
+        assertThat(updated.content().basic()).isEqualTo(new ResumeContent.BasicInfo(
+                "테스트", "010-0000-0000", null, "test@example.com", "서울", null, "pf-1", null));
+    }
+
+    /** 행 갱신과 같이 "" 는 그 필드를 비운다. 나머지는 그대로다. */
+    @Test
+    void updateBasicEmptyStringClearsOnlyThatField() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{\"basic\":{\"name\":\"테스트\",\"email\":\"test@example.com\"}}");
+
+        ResumeResponse updated = service.updateBasic(resume.getId(),
+                new ResumeContent.BasicInfo(null, null, null, "", null, null, null, null), null);
+
+        assertThat(updated.content().basic().email()).isEmpty();
+        assertThat(updated.content().basic().name()).isEqualTo("테스트");
+    }
+
     /** 다른 계정 소유의 이력서는 존재를 알리지 않고 404. */
     @Test
     void otherOwnersResumeIsNotReachable() {

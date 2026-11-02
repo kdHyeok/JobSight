@@ -108,13 +108,13 @@ public class ResumeService {
     // REST 에는 행 API 가 없다 — 화면은 문서 통째 PUT 이다. MCP 는 문서 전체를 되돌려 보내기 어려우니
     // 서버가 조회 → 한 군데 수정 → 저장을 한 트랜잭션으로 묶어 준다. 나머지 섹션은 건드리지 않는다.
 
-    /** basic 블록만 교체한다. 행 번호에 기대지 않으므로 expectedVersion 은 선택이다. */
+    /** basic 에 보낸 필드만 덮는다. 빠진 필드는 유지, "" 는 비움. 행 번호에 기대지 않으므로 expectedVersion 은 선택이다. */
     @Transactional
     public ResumeResponse updateBasic(UUID id, ResumeContent.BasicInfo basic, Long expectedVersion) {
         Resume resume = lockOwned(id);
         checkVersion(resume, expectedVersion, false);
         ResumeContent current = read(resume.getContent());
-        ResumeContent next = new ResumeContent(basic == null ? ResumeContent.BasicInfo.empty() : basic,
+        ResumeContent next = new ResumeContent(basic == null ? current.basic() : basic.withMissingFrom(current.basic()),
                 current.educations(), current.trainings(), current.activities(), current.experiences(),
                 current.awards(), current.certificates(), current.skills(), current.projects());
         resume.update(resume.getName(), objectMapper.writeValueAsString(next.normalized()));

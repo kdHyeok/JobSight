@@ -1,12 +1,8 @@
 package com.jobsight.company.common;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -19,7 +15,6 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception) {
@@ -48,32 +43,6 @@ public class GlobalExceptionHandler {
         ));
     }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    ResponseEntity<ApiError> handleNotFound(ResourceNotFoundException exception) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError.of(
-                HttpStatus.NOT_FOUND.value(), "COMPANY_NOT_FOUND", exception.getMessage()
-        ));
-    }
-
-    /**
-     * @Version 충돌. 서비스가 잠금과 expectedVersion 으로 먼저 막으므로 보통은 오지 않지만,
-     * 오면 500 이 아니라 409 다 — 다시 읽고 고치면 되는 상황이기 때문이다(docs/resumes.md 불변 조건 8).
-     */
-    @ExceptionHandler(OptimisticLockingFailureException.class)
-    ResponseEntity<ApiError> handleStaleWrite(OptimisticLockingFailureException exception) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(
-                HttpStatus.CONFLICT.value(), "STALE_WRITE", "다른 곳에서 먼저 저장했습니다. 다시 읽고 고칠 대상을 확인한 뒤 보내세요."
-        ));
-    }
-
-    /** 업무 규칙 위반은 예외가 들고 온 상태코드와 코드값을 그대로 사용한다. */
-    @ExceptionHandler(ApiRuleException.class)
-    ResponseEntity<ApiError> handleRule(ApiRuleException exception) {
-        return ResponseEntity.status(exception.getStatus()).body(ApiError.of(
-                exception.getStatus().value(), exception.getCode(), exception.getMessage()
-        ));
-    }
-
     /**
      * 존재하지 않는 경로(예: /api/companies/ 처럼 끝에 슬래시가 붙은 요청)는 404다.
      * 이 핸들러가 없으면 아래 catch-all이 잡아 500과 ERROR 로그를 남긴다.
@@ -85,19 +54,13 @@ public class GlobalExceptionHandler {
         ));
     }
 
-    /** catch-all이 인가 실패를 500으로 바꿔버리지 않도록 명시적으로 403을 유지한다. */
-    @ExceptionHandler(AccessDeniedException.class)
-    ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException exception) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiError.of(
-                HttpStatus.FORBIDDEN.value(), "FORBIDDEN", "권한이 없습니다."
-        ));
-    }
-
+    /**
+     * 도메인 예외(404·업무 규칙·@Version 충돌·잠금 경합·403)와 나머지 500 은 MCP 와 같은 변환을 쓴다.
+     * 500 의 ERROR 로그도 거기서 남긴다 — ApiErrors.
+     */
     @ExceptionHandler(Exception.class)
-    ResponseEntity<ApiError> handleUnexpected(Exception exception) {
-        log.error("Unhandled company API error", exception);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiError.of(
-                HttpStatus.INTERNAL_SERVER_ERROR.value(), "INTERNAL_ERROR", "서버 오류가 발생했습니다."
-        ));
+    ResponseEntity<ApiError> handleDomain(Exception exception) {
+        ApiError error = ApiErrors.translate(exception);
+        return ResponseEntity.status(error.status()).body(error);
     }
 }

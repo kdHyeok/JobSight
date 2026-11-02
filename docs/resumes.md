@@ -47,8 +47,9 @@ content = {
 6. **연결 직무는 관계로 저장한다.** `positionIds`는 같은 소유자의 직무만 허용하고 이력서 복제에도 복사한다. 편집 화면은 검색창과 선택 칩만 보여 주고, 검색창 클릭·포커스 시 미선택 직무를 드롭다운으로 펼친다. 검색어가 없으면 최근 수정순 전체 목록, 검색 시 이름·기업·공고를 좁힌다. 목록은 최대 320px(작은 화면은 화면 높이의 45%) 안에서 휠·스크롤바로 스크롤하며 페이지 본문을 밀어내지 않는다.
 7. **내보내기는 저장된 문서 기준이다.** Word는 브라우저가 `.doc`을 만들고 PDF는 인쇄 대화상자의 PDF 저장을 사용한다. 선택한 첨부는 원본 바이트를 별도 ZIP으로 묶는다.
 8. **예전에 읽은 문서로 덮어쓰지 않는다** (`version`). 이력서는 저장할 때마다 `version` 이 오른다. 문서 전체 저장(`PUT`, `resume_update`)과 행 번호로 고치는 `resume_row_update`·`resume_row_delete` 는 `expectedVersion` 이 **필수**이고, 행 추가·기본정보 수정은 선택이다. 없으면 400 `VERSION_REQUIRED`, 지금 버전과 다르면 409 `RESUME_STALE`. 오류에는 지금 버전을 싣지 않는다 — 클라이언트가 다시 읽고 대상을 확인하게 하려는 것이다. 잠금만으로는 부족하다: AI가 `projects[0]` 을 읽은 뒤 웹에서 0번을 지우면, 잠금이 정상이어도 AI의 0번 수정이 엉뚱한 행에 들어간다.
-9. **수정 요청의 `null` 은 유지, `[]` 는 비움이다.** `PUT`·`resume_update` 의 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic`, `resume_row_update` 의 빠진 행 필드가 모두 그렇다. 행 갱신은 기존 행 위에 보낸 필드만 덮는다(`""` 는 그 필드를 비운다). AI가 섹션을 빠뜨려 보낸 저장이 조용한 삭제가 되던 것을 막는다.
-10. **쓰기는 이력서 행을 잠근다.** `update`·`updateBasic`·행 도구는 `ResumeRepository.findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽는다. 동시에 들어온 행 추가 두 건이 서로를 덮어 한 행이 사라지던 것을 막는다. 3초 안에 잠금을 못 얻으면 409 `RESUME_BUSY`.
+   `RESUME_STALE` 과 `STALE_WRITE` 는 감지 지점이 달라 둘 다 둔다. `RESUME_STALE` 은 서비스가 저장 전에 요청의 `expectedVersion` 을 잠근 행과 비교해 낸다. `STALE_WRITE` 는 저장 flush 때 JPA `@Version` 이 어긋나면 공통 변환(`common/ApiErrors`)이 낸다 — 잠금 덕에 보통은 오지 않는다. 둘 다 409 이고 다시 읽은 뒤 고친다.
+9. **수정 요청의 `null` 은 유지, `[]` 는 비움이다.** `PUT`·`resume_update` 의 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic`, `resume_row_update` 의 빠진 행 필드, `resume_basic_update` 의 빠진 기본정보 필드가 모두 그렇다. 행 갱신과 기본정보 수정은 기존 값 위에 보낸 필드만 덮는다(`""` 는 그 필드를 비운다). AI가 섹션이나 필드를 빠뜨려 보낸 저장이 조용한 삭제가 되던 것을 막는다. 기본정보는 `ResumeServiceTest.updateBasicKeepsFieldsTheRequestLeavesOut`·`updateBasicEmptyStringClearsOnlyThatField` 가 본다.
+10. **쓰기는 이력서 행을 잠근다.** `update`·`updateBasic`·행 도구는 `ResumeRepository.findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽는다. 동시에 들어온 행 추가 두 건이 서로를 덮어 한 행이 사라지던 것을 막는다. 3초 안에 잠금을 못 얻으면 409 `RESUME_BUSY`. 잠금 조회 밖(저장 flush·커밋·FK 검사)에서 잠금 대기 초과(55P03)나 교착(40P01)이 나면 공통 변환이 409 `BUSY` 로 바꾼다 — docs/backend.md.
 
 ## 진입점
 
@@ -73,11 +74,12 @@ POST   /api/resumes/{id}/copy  {name}                            새 버전
 DELETE /api/resumes/{id}
 
 MCP (REST 에는 없음)
-resume_list · resume_get · resume_create · resume_update · resume_copy · resume_delete
-resume_basic_update {id, request:BasicInfo}
-resume_row_add      {id, section, request}          section ∈ educations…projects, request 는 그 섹션 필드만
-resume_row_update   {id, section, index, request}   index 0부터, 행 전체 교체
-resume_row_delete   {id, section, index}
+resume_list · resume_get · resume_create · resume_copy · resume_delete
+resume_update       {id, request:{name, content?, positionIds?, expectedVersion}}   PUT 과 같음
+resume_basic_update {id, request:BasicInfo, expectedVersion?}          보낸 필드만 덮음(null=유지, ""=비움)
+resume_row_add      {id, section, request, expectedVersion?}           section ∈ educations…projects, request 는 그 섹션 필드만
+resume_row_update   {id, section, index, request, expectedVersion}     index 0부터, 보낸 필드만 덮음(null=유지, ""=비움)
+resume_row_delete   {id, section, index, expectedVersion}
 ```
 
 ## 실행·검증

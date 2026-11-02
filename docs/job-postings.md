@@ -56,6 +56,7 @@ app_users
 8. **메모는 원문 저장**: 기업·공고·직무 memo는 5,000자 이하 Markdown 문자열이다. 서버는 HTML로 변환하지 않는다.
 9. **공고 수정의 `positions`·`steps` 는 null=유지, 배열=그 목록으로 맞춤, `[]`=비움**(REST PUT 과 `posting_update` 공통). 나머지 공고 필드는 전체 교체다.
    직무는 id 로 먼저, id 가 없으면 이름(`Company.nameKey`: 공백 제거·소문자)으로 남은 기존 직무와 맞춘다. **같은 직무를 지웠다 다시 만들지 않는다** — 직무 행이 바뀌면 `resume_positions`(와 2단계의 자소서 직무 연결)가 `ON DELETE CASCADE` 로 끊긴다. 어느 항목과도 맞지 않은 기존 직무만 삭제한다. — `JobPostingService.syncPositions`, 설계 1.4 T3
+10. **공고 수정은 공고 행을 잠근다.** `JobPostingService.update` 는 `findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽은 뒤 직무를 맞춘다. 잠금이 없으면 병렬 수정 두 건이 같은 기존 직무 목록을 읽고 같은 새 직무를 두 행으로 만든다. 직무 id 에 걸린 연결(이력서, 2단계 자소서 written_for)이 중복·삭제 경쟁으로 오염된다. 3초 안에 잠금을 못 얻으면 409 `BUSY`(docs/backend.md).
 
 ## 진입점
 
@@ -98,7 +99,7 @@ bash scripts/smoke.sh                       # /api/positions /api/references 미
 cd frontend && npm run type-check && npm test
 ```
 
-자동 검증(불변 조건 9): `JobPostingServiceTest` 의 null 유지·이름 맞춤·`[]` 비움 3건과 id 경로 4건(id 우선 맞춤, id 로 이름 변경·빠진 직무 삭제·지원 직무 비움, 이름 맞춤 시 지원 직무 유지, 같은 id 반복·남의 id), `JobPostingUpdateIntegrationTest`(Testcontainers — 이름만 보낸 수정과 웹 폼처럼 id 를 담은 수정 뒤에도 직무 id 와 `resume_positions` 행이 맞는 이름에 남는다), `McpToolsTest.postingUpdateKeepsOmittedListsAsNull`(MCP 가 빠진 배열을 null 로 넘기고 "전체 교체" 문구를 붙이지 않는다), `PostingForm.spec.ts`(폼은 다 지운 직무·절차를 `[]` 로 보낸다).
+자동 검증(불변 조건 9): `JobPostingServiceTest` 의 null 유지·이름 맞춤·`[]` 비움 3건과 id 경로 4건(id 우선 맞춤, id 로 이름 변경·빠진 직무 삭제·지원 직무 비움, 이름 맞춤 시 지원 직무 유지, 같은 id 반복·남의 id), `JobPostingUpdateIntegrationTest`(Testcontainers — 이름만 보낸 수정과 웹 폼처럼 id 를 담은 수정 뒤에도 직무 id 와 `resume_positions` 행이 맞는 이름에 남는다. 불변 조건 10: 같은 새 직무를 담은 병렬 수정 두 건 뒤에도 그 직무 행은 하나다), `McpToolsTest.postingUpdateKeepsOmittedListsAsNull`(MCP 가 빠진 배열을 null 로 넘기고 "전체 교체" 문구를 붙이지 않는다), `PostingForm.spec.ts`(폼은 다 지운 직무·절차를 `[]` 로 보낸다).
 
 로그인 뒤 브라우저에서:
 1. 공고 추가 → 기업을 직접 입력 → 기업 탭에 생겼는가

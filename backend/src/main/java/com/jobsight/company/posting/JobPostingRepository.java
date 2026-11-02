@@ -27,7 +27,7 @@ public interface JobPostingRepository extends JpaRepository<JobPosting, UUID> {
     @Query(value = "set local lock_timeout = '3s'", nativeQuery = true)
     void setLocalLockTimeout();
 
-    /** 같은 공고의 직무를 동시에 지워도 마지막 직무 판단이 엇갈리지 않게 부모 행을 잠근다. */
+    /** 같은 공고의 직무를 동시에 지우거나 맞춰도(공고 수정) 판단이 엇갈리지 않게 부모 행을 잠근다. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from JobPosting p where p.id = :id and p.ownerId = :ownerId")
     Optional<JobPosting> findOwnedForUpdate(@Param("id") UUID id, @Param("ownerId") UUID ownerId);

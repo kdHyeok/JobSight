@@ -179,9 +179,10 @@ class JobPostingServiceTest {
         assertThat(positions.getValue()).extracting(Position::getName).containsExactly("2026 신입 공채");
     }
 
+    /** 공고 수정은 공고 행을 잠근 조회로 읽는다(docs/job-postings.md 불변 조건 10). */
     private void givenOwnedPosting(JobPosting posting, Position... positions) {
         given(currentUser.id()).willReturn(OWNER_ID);
-        given(repository.findByIdAndOwnerId(posting.getId(), OWNER_ID)).willReturn(Optional.of(posting));
+        given(repository.findOwnedForUpdate(posting.getId(), OWNER_ID)).willReturn(Optional.of(posting));
         given(repository.save(any())).willAnswer(inv -> inv.getArgument(0));
         given(companyRepository.findByIdAndOwnerId(COMPANY_ID, OWNER_ID))
                 .willReturn(Optional.of(new Company(OWNER_ID, CompanyAttributes.nameOnly("회사"))));
@@ -334,5 +335,8 @@ class JobPostingServiceTest {
 
         assertThatThrownBy(() -> service.findById(id)).isInstanceOf(ResourceNotFoundException.class);
         assertThatThrownBy(() -> service.delete(id)).isInstanceOf(ResourceNotFoundException.class);
+        // 잠금 조회도 소유자 조건으로 찾는다. 남의 공고는 잠그지도 않고 404.
+        assertThatThrownBy(() -> service.update(id, request(COMPANY_ID, null, null, null)))
+                .isInstanceOf(ResourceNotFoundException.class);
     }
 }

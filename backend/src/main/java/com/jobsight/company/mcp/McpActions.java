@@ -52,8 +52,8 @@ public class McpActions {
     }
 
     @Operation(summary = "이력서 기본정보 변경",
-            description = "basic 블록(성명·연락처·주소·링크)만 교체한다. 다른 섹션은 그대로다. "
-                    + "expectedVersion 은 선택이다(보내면 다를 때 RESUME_STALE).")
+            description = "basic(성명·연락처·주소·링크)에 보낸 필드만 덮고 빠진 필드는 유지한다(\"\" 는 그 필드를 비움). "
+                    + "다른 섹션은 그대로다. expectedVersion 은 선택이다(보내면 다를 때 RESUME_STALE).")
     public ResumeResponse updateResumeBasic(@PathVariable UUID id, @Valid @RequestBody ResumeContent.BasicInfo request,
                                             @RequestParam(required = false) Long expectedVersion) {
         return resumes.updateBasic(id, request, expectedVersion);

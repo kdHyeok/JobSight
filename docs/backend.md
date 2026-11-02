@@ -11,11 +11,12 @@
 | 브라우저 세션 갱신 | `auth/BrowserRefreshTokenService.java` — HttpOnly opaque 토큰 회전·해시 저장·폐기 |
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
-| 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException` |
+| 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
 | 스키마 | `resources/db/migration/V1~V19` — Flyway, `ddl-auto: validate` |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
 
-DB 연결 획득은 3초 안에 실패시킨다. 마지막 직무 삭제의 PostgreSQL 행 잠금만 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다. `/actuator/health`의 DB 지표와 로그인 옵션 조회가 장애 감지 경로다.
+DB 연결 획득은 3초 안에 실패시킨다. PostgreSQL 행 잠금(직무 삭제·공고 수정의 공고 행, 이력서 쓰기의 이력서 행)은 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다.
+잠금 대기 초과(SQLState 55P03)나 교착(40P01)은 어디서 나든 409 `BUSY` 다(`ApiErrors`). 커밋 시점 실패는 `TransactionSystemException`·`JpaSystemException` 으로 감싸져 오므로 원인 체인의 SQLState 까지 본다. 잠금 조회 자리에서 바로 잡는 `RESUME_BUSY`·`POSITION_DELETE_BUSY` 는 그대로 둔다. `/actuator/health`의 DB 지표와 로그인 옵션 조회가 장애 감지 경로다.
 
 ## 배치 페치와 SQL 수 상한
 
