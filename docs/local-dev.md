@@ -71,6 +71,13 @@ docker compose logs -f backend
 docker compose down            # 볼륨 유지. down -v 는 DB 삭제 — 확인 후에만
 ```
 
+**embedder(4번째 컨테이너, 의미 검색).** `docker compose up -d --build` 가 함께 띄운다. 내부 네트워크에만 붙고 호스트 포트가 없다.
+- 첫 기동은 모델(`dragonkue/multilingual-e5-small-ko-v2`, 약 470MB)을 `embedder-models` 볼륨에 내려받느라 몇 분 걸린다(헬스 `start_period` 300s). 그동안 backend 는 정상이고 검색만 `degraded:["dense"]` 다. 이미지 자체는 약 2GB(torch CPU).
+- 확인: `docker compose exec embedder python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health').read())"`. 적재는 backend 의 스위퍼가 3초마다 따라잡는다 — `select count(*) from experiences where embedding_dirty` 가 0 으로 수렴하면 끝이다.
+- 끄기: `.env` 에 `EMBEDDER_URL=` (빈 값). 저장은 그대로, 검색은 단어 신호만 쓴다. 다시 켜면 dirty 행부터 따라잡는다.
+- GPU(NVIDIA, Pascal 포함): `docker compose -f compose.yaml -f compose.gpu.yaml up -d --build embedder`. torch `2.14.1+cu126` 고정 — cu126 이 sm_61 을 담은 마지막 줄기다. 기본은 CPU 다(`up` 이 곧 공개 배포라서, `docs/nginx-deploy.md`).
+- 스크립트 확인: `python3 embedder/server.py --self-check`(모델 없이 요청 검증·접두). 이미지 빌드도 이것을 돈다.
+
 `http://127.0.0.1:8088` → "Google로 계속하기". 첫 로그인은 기본적으로 가입 신청(PENDING)이 되고 관리자가 `/admin` 에서 승인한다. `/admin` 의 "자동 승인 켜기" 를 켜면 첫 로그인이 곧 가입 완료다. `APP_ADMIN_EMAIL` 계정은 설정과 무관하게 즉시 관리자로 들어간다.
 
 ## 테스트
@@ -120,6 +127,7 @@ Ryuk 를 끄면 JVM 이 비정상 종료할 때 `postgres:17-alpine` 테스트 �
 | 로그인 후 `/?authError=…` | `docker compose logs backend \| grep "Google 로그인 실패"` 에 코드·설명이 남는다 |
 | `authorization_request_not_found` | 세션 쿠키 `SameSite` 가 Strict 로 바뀌었는지 확인 (Lax 여야 함) |
 | 재시작 뒤 backend가 `no password was provided`로 반복 종료 | 다른 worktree의 Compose 컨테이너가 남았는지 `.\scripts\start.ps1`로 확인. 현재 작업공간으로 교체할 때만 `-Takeover` |
+| 검색 응답이 늘 `degraded:["dense"]` | embedder 가 아직 모델을 받는 중이거나 죽었다. `docker compose ps -a embedder`, `docker compose logs embedder`. `EMBEDDER_URL` 이 빈 값이면 일부러 끈 것이다 |
 | 한글 JSON 이 curl 에서 400 | Git Bash 가 CP949 로 보냄. UTF-8 파일로 `--data-binary @file` |
 
 셸·경로·CRLF 같은 환경 일반 사항은 `AGENTS.md` 「환경 사실」에 있다.

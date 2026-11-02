@@ -10,8 +10,9 @@ import java.util.UUID;
  * MCP self_intro_list 응답(설계 5.3). 웹 REST 목록과 다른 모양이다 — 미리보기·limit·출처·trust 를 싣는다.
  * fallback 이 "indirect" 면 이 직무·공고·기업용 직접 출처가 0건이라 연결 이력서로 찾은 "출처 미상" 답변을 준 것이다.
  * complete 가 false 면 total 중 limit 만큼만 실었다(조용히 자르지 않는다).
+ * degraded 에 "dense" 가 있으면 q 의 의미 검색을 하지 못하고 키워드(BM25)로만 찾은 것이다(embedder 장애·미설정, 설계 4.4).
  */
-public record SelfIntroductionList(String fallback, int total, boolean complete, List<Item> results) {
+public record SelfIntroductionList(String fallback, int total, boolean complete, List<Item> results, List<String> degraded) {
 
     /**
      * 목록에서는 answerPreview(300자)만, self_intro_get 에서는 answer 전문만 채운다.

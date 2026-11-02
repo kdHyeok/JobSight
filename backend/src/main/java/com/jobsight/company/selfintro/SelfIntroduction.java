@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -107,6 +108,13 @@ public class SelfIntroduction {
     @Column(nullable = false)
     private long version;
 
+    /** 질문·답변이 바뀌면 true·+1 — 임베딩 스위퍼가 CAS 로 조각을 교체한다(설계 4.4). 연결만 바뀐 저장은 건드리지 않는다. */
+    @Column(name = "embedding_dirty", nullable = false)
+    private boolean embeddingDirty = true;
+
+    @Column(name = "source_revision", nullable = false)
+    private long sourceRevision;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -125,6 +133,10 @@ public class SelfIntroduction {
     public void update(Set<UUID> resumeIds, String question, String answer) {
         this.resumeIds.clear();
         this.resumeIds.addAll(resumeIds);
+        if (!Objects.equals(this.question, question) || !Objects.equals(this.answer, answer)) {
+            this.embeddingDirty = true;
+            this.sourceRevision++;
+        }
         this.question = question;
         this.answer = answer;
         this.updatedAt = Instant.now();
@@ -197,6 +209,8 @@ public class SelfIntroduction {
     public String getQuestion() { return question; }
     public String getAnswer() { return answer; }
     public long getVersion() { return version; }
+    public boolean isEmbeddingDirty() { return embeddingDirty; }
+    public long getSourceRevision() { return sourceRevision; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

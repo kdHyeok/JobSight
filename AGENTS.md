@@ -5,7 +5,7 @@
 ## 이 프로젝트가 무엇인가
 
 Google 계정으로 로그인하는 기업 정보 CRUD. 계정별 데이터 분리, 관리자 승인제(자동 승인 토글 있음).
-PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx, Docker Compose 3 컨테이너.
+PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx + 임베딩 서버(Python, 내부 전용), Docker Compose 4 컨테이너.
 로컬 `http://127.0.0.1:8088`, 정식 배포 주소는 `https://job.donyk.link`(호스트 리버스 프록시).
 
 ## 작업 순서 — 문서가 먼저다
@@ -31,7 +31,7 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx, Docker Compos
 | 이력서 연결 직무·자기소개 문항 | [docs/self-introductions.md](docs/self-introductions.md) |
 | 이력서 증빙 파일 첨부 | [docs/attachments.md](docs/attachments.md) |
 | 경험 원본·개정·이력서 행 앵커·가져오기(`/api/experiences`, `experience_save`, 웹 `/experiences`) | [docs/experiences.md](docs/experiences.md) |
-| 경험 찾기·목차·missing(3단계), 임베딩/그래프 검색, 이력서 조회 지연 | [3단계 구현·모델·실측](docs/experience-graph-search.md) · [설계(4a 까지 적용)](docs/02-design/features/experience-graph.design.md) |
+| 경험 찾기·목차·missing(3단계), 의미 검색·`embedder/`·임베딩 스위퍼(5단계), 이력서 조회 지연 | [구현·모델·실측](docs/experience-graph-search.md) · [설계(5단계까지 적용)](docs/02-design/features/experience-graph.design.md) |
 | 관리자 콘솔·계정별 등록 수 | [docs/admin.md](docs/admin.md) |
 | 관리자 요청·피드백 | [docs/requests.md](docs/requests.md) |
 | MCP·OAuth 위임·플러그인 | [docs/mcp-plugin.md](docs/mcp-plugin.md) |
@@ -61,6 +61,7 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx, Docker Compos
 | `.env.example` | `compose.yaml`·`.env`·`docs/local-dev.md` 세 곳 동기화 |
 | `backend/**` | 컨테이너 안에서 `./gradlew compileJava compileTestJava`, 종료코드 직접 확인 |
 | `frontend/src/**` | `npm run type-check && npm test`, 종료코드 직접 확인 |
+| `embedder/**` | `docker compose build embedder`(빌드가 `server.py --self-check` 를 돈다) 뒤 `/health` 확인 |
 
 ## 검증 절차 규칙 — 이 프로젝트에서 실제로 오판을 낸 것들
 

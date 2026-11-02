@@ -1,6 +1,6 @@
-# 경험 그래프 검색 (첫 구상 — 저장·검색 부분은 폐기, 모델 실측만 유효)
+# 경험 그래프 검색 (3단계 경험 찾기 · 5단계 의미 검색 — 첫 구상의 저장·검색 부분은 폐기)
 
-> **폐기 안내 (2026-11-02)**: 저장 구조와 검색은 [설계](02-design/features/experience-graph.design.md) 가 대체했다. 제목에 **(폐기)** 가 붙은 절 — `stories` 정본, `links` 다형 간선, `pgvector` 컬럼, V22 예약, 단계 — 은 그 설계의 D3·D11 로 폐기됐으니 구현 근거로 쓰지 않는다. pgvector 사용 여부는 설계 5단계에서 `REAL[]` 과 다시 비교한다. **지금도 유효한 절**: 바로 아래 "지금 동작하는 것"(3단계 구현), 모델 선택 근거, 실측, 함정(512토큰 잘림·배칭). 착수할 때 이 문서를 그 설계 기준의 한 화면 문서로 다시 쓴다.
+> **폐기 안내 (2026-11-02)**: 저장 구조와 검색은 [설계](02-design/features/experience-graph.design.md) 가 대체했다. 제목에 **(폐기)** 가 붙은 절 — `stories` 정본, `links` 다형 간선, `pgvector` 컬럼, V22 예약, 단계, JVM 안 ONNX — 은 그 설계의 D3·D6·D11 로 폐기됐으니 구현 근거로 쓰지 않는다. 벡터는 `REAL[]` 로 정했다(D11, 5단계). **지금도 유효한 절**: "지금 동작하는 것"(3단계·5단계 구현), 모델 선택 근거, 실측, 함정(512토큰 잘림·배칭).
 
 ## 지금 동작하는 것 — 3단계 경험 찾기 (2026-11-02)
 
@@ -33,6 +33,61 @@
 - `coverageIncomplete` 는 3단계에서 늘 true 다. AI 는 결핍을 단정하지 않는다.
 - 요구 없이 지원자격 본문만 넘기면 서버는 사전의 기술 키만 뽑는다(지원자격 칸 요구, 결핍 보고 대상). "경력 3년" 같은 자격 문장은 `qualifications[]` 에 나오지 않는다 — 자격을 분리하려면 클라이언트가 `kind: QUALIFICATION` 으로 넘긴다.
 - 묶음은 이력서 JSON 을 매번 전부 읽는다(계정당 이력서 수십 개 규모 가정). 느려지면 4단계 `resume_experiences` 표로 옮긴다.
+
+## 지금 동작하는 것 — 5단계 의미 검색 (2026-11-02)
+
+**목적.** 단어가 달라도 뜻이 가까운 경험·자소서를 찾는다("팀워크" 질의 → "협업" 서술). `experience_search` 에 DENSE 신호, `self_intro_list(q)` 에 의미 검색을 더한다. 리랭커는 6단계로 미뤘다(2026-11-02 사용자 결정).
+
+**진입점**
+- `embedder/server.py`(4번째 컨테이너, Python sentence-transformers, 모델 `dragonkue/multilingual-e5-small-ko-v2`, 384차원): `POST /embed {mode: query|passage, texts[]}` → `{model, dim, vectors, truncated[]}`, `GET /health`. 내부 네트워크만, nginx 경로 없음, 모델은 `embedder-models` 볼륨. 기본 CPU, GPU 는 `compose.gpu.yaml`(torch `2.14.1+cu126` 고정). `/rerank` 는 없다.
+- 백엔드 `embedding/`: `EmbedderClient`, `EmbeddingTexts`(조각 나누기·해시), `EmbeddingSweeper`(3초 `fixedDelay`), `SystemEmbeddingSweepRepository`(D13 예외), `DenseIndex`(DENSE 점수·재현 정보).
+- 테이블: `V26__self_intro_embeddings`(`self_introductions.embedding_dirty·source_revision`, `self_introduction_chunks`), `V27__experience_embeddings`(`experience_chunks`). 조각마다 `text_hash`·`embedding_model`·`embedding REAL[]`(`CHECK cardinality = 384`)·`embedded_at`.
+
+**접두 규칙** (D12, 접두는 embedder 가 mode 로 붙인다)
+
+| 비교 | 질의 쪽 | 문서 쪽 |
+|---|---|---|
+| 공고 다섯 칸·자유 문장 → 경험 조각 | `query: ` | `passage: ` |
+| 자유 문장(`q`) → 자소서 문항 조각 | `query: ` | `query: `(문항↔문항 비교에도 쓰려고 문항은 query 로 적재) |
+| 자유 문장(`q`) → 자소서 답변 조각 | `query: ` | `passage: ` |
+
+**길이 처리.** 조각은 `EmbeddingTexts.MAX_CHARS = 800` 자 이하로 문단·줄·문장 경계에서 나눈다. 토크나이저 실측(2026-11-02, 이 모델): 한국어 서술 글자당 0.50토큰(300자 150, 600자 298, 900자 445, 1200자 596토큰 → 512 넘어 잘림, `truncated:true`), 기술 이름이 섞인 문장 600자 244토큰. 800자 ≈ 400토큰이라 480토큰 목표에 20% 여유가 있다. 그래도 잘리면 스위퍼가 `embedding truncated` 를 WARN 으로 남긴다(본문은 남기지 않는다).
+- 자소서: 질문 조각들(QUESTION) + 답변 조각들(ANSWER).
+- 경험: 필드별로 따로 나누고 조각마다 제목을 머리에 붙인다 — `memo`(메모·기술), `facts.role`(기간·역할), `facts.actions`, `facts.results`, `facts.evidence`(인용), `dossier.narrative`, `dossier.phrasings`. 미확인·충돌·주의사항은 넣지 않는다(키워드 검색과 같은 범위). 사실이 빈 경험도 제목 한 조각은 있다. 이력서의 기업별 문구는 넣지 않는다(4.4).
+
+**계산 시점.** 쓰기 경로는 `embedding_dirty = true, source_revision + 1` 만 표시한다 — 경험은 저장마다(`Experience.touchSearchText`), 자소서는 질문·답변이 바뀔 때만(연결만 바꾼 저장은 아니다). 스위퍼는 ① 테이블마다 dirty 32행을 잠그지 않고 읽고 ② `text_hash`·모델이 같은 기존 조각은 재사용하고 바뀐 조각만 `/embed`(트랜잭션 밖, mode 별 64개씩) ③ **행마다 짧은 트랜잭션**의 첫 문장 `UPDATE … SET embedding_dirty = false WHERE id = ? AND source_revision = ?` 가 1행일 때만 조각을 지우고 다시 넣는다. 0행이면 그사이 원문이 바뀐 것이라 쓰지 않고 다음 회차에 다시 한다. embedder 모델 이름이 바뀌면(`/health`) 다른 모델 조각을 가진 행을 dirty 로 되돌린다.
+
+**검색.**
+- `experience_search`: 질의 텍스트(공고 다섯 칸·기술 환경·라벨, 800자까지)를 **트랜잭션 밖에서** 2초 안에 임베딩하고, 경험 조각과 cosine(정규화라 내적) max-sim 으로 상위 20개에 DENSE 순위를 매겨 가중 RRF 에 더한다. RESUME_ROW(미연결 행)는 DENSE 대상이 아니다. `why` 의 DENSE 항목은 `rank` 와 가장 가까운 조각의 `sourceField`. `context` 에 `embeddingModel`(degraded 면 null)·`indexGeneration`(이 계정 경험 조각의 마지막 적재 시각)·`indexBehind`(dirty 경험이 남음). `searchConfig` 는 `search-v2-2026-11-dense`.
+- `self_intro_list(q)`: BM25 와 DENSE(문항·답변 조각 max-sim 상위 30)를 RRF(k=60)로 합친다. `score` 는 RRF 값이다. 응답에 `degraded`.
+- embedder 가 없거나 2초를 넘기면 `degraded:["dense"]` 로 나머지 신호만 쓴다. `app.embedder.url`(`EMBEDDER_URL`)이 빈 값이면 의미 검색을 끈 것이고 같은 표시다.
+
+**D11 실측 — `REAL[]` (pgvector 를 들이지 않았다).** Testcontainers PostgreSQL 17, 계정 하나에 조각 1000개(`SemanticSearchIntegrationTest.realArrayReadCostForThousandChunks` 가 출력):
+
+| 항목 | 값 |
+|---|---|
+| 저장 크기(`pg_column_size`) | 1,560,000B — 조각당 1,560B(384 × 4B + 헤더) |
+| 텍스트 표현(`embedding::text`) | 3,973,000B — 조각당 약 3,970B. 드라이버가 텍스트로 받으면 검색 한 번에 이만큼 온다 |
+| 읽기 + `Float[]` 변환 + cosine(최선 5회) | 134~150ms(두 번 돌린 값) |
+| 같은 행을 `embedding::text` 문자열로만 받기 | 155ms — 파싱·cosine 을 빼도 줄지 않는다. 비용은 대부분 전송과 서버 쪽 직렬화이고 Java 텍스트 파싱·cosine 은 작다 |
+| embedder CPU 지연(이 개발 PC, 실 컨테이너) | 질의 p50 19ms·p95 24ms, 600자 문서 p50 98ms·p95 128ms, 600자 32개 한 번 2.2초 |
+
+계정당 조각 수는 경험 하나에 필드 수만큼(보통 2~6)이고 자소서는 문항당 2~5개라, 계정당 경험 수십~백 개면 경험 조각 수백 개다 — 검색 한 번의 읽기는 수십 ms 다. 다시 볼 조건(수천 개, 수백 ms)은 docs/decisions.md 「벡터 저장은 pgvector 가 아니라」.
+
+**불변 조건**
+1. embedder 가 죽어 있어도 저장은 성공하고 검색은 `degraded` 로 동작한다. backend 는 embedder 를 `depends_on` 으로 기다리지 않는다.
+2. 조각 조회는 `DenseIndex` 에서 늘 `owner_id` 조건이다. 소유자 조건 없는 조회는 `SystemEmbeddingSweepRepository`(패키지 전용) 하나뿐이고 스위퍼만 쓴다(D13).
+3. 스위퍼는 여러 행을 한 트랜잭션에서 잠그지 않는다. 쓰기는 CAS 1행일 때만이다.
+4. 같은 모델의 조각끼리만 비교한다(`embedding_model`). 질의 벡터를 만든 모델이 `context.embeddingModel` 이다.
+
+**실행·검증.** `EmbeddingTextsTest`(조각 상한·경계·모드·필드·해시), `SemanticSearchIntegrationTest`(Testcontainers, 가짜 embedder — 죽어 있을 때 저장 성공·degraded·`indexBehind`, 재기동 한 회차에 dirty 0, 동의어 DENSE 와 `why.sourceField`, 답변만 바꾸면 답변 조각만 재계산·연결만 바꾸면 재적재 안 함, 읽은 뒤 원문이 바뀌면 그 회차 미기록, 384 아닌 벡터 거부·CASCADE, D11 실측 출력). 컨테이너: `docker compose build embedder`(빌드가 `server.py --self-check`), `/health`.
+
+**함정**
+- 모델을 바꾸면 차원도 바뀔 수 있다. 384 가 아니면 `CHECK` 가 막는다 — 새 마이그레이션으로 CHECK 를 바꾸고 조각을 비운 뒤 dirty 를 세운다. 같은 384 차원 모델이면 스위퍼가 알아서 다시 채운다.
+- 방금 저장한 것은 몇 초 동안 DENSE 에 없다(`indexBehind:true`). 테스트는 `sweepOnce()` 를 직접 부르고 예약 실행은 `app.embedder.sweep=false` 로 끈다.
+- 질의는 800자에서 자른다(공고 다섯 칸 전체가 512토큰을 넘을 수 있다). 앞쪽 칸(지원자격·담당업무)이 먼저 들어간다.
+- DENSE 는 모든 후보에 값이 있다 — 상위 20(자소서 30)개만 순위에 넣는다. 다 넣으면 관계없는 경험이 결과를 채운다.
+- 엔티티 저장은 dirty 열을 다시 쓴다. 스위퍼와 엇갈리면 이미 끝난 행이 한 번 더 돌 수 있다(해시가 같아 embedder 는 부르지 않는다).
 
 ## 목적 (폐기 — 첫 구상)
 
@@ -189,7 +244,7 @@ GPU 의 8.7ms 와의 차이는 DB 왕복에 묻힌다. 이 숫자는 PyTorch 값
   먼저 동시 임베딩 호출 수를 작은 세마포어로 묶어 스레드 경합만 막고, p95 목표를 넘길 때 배칭을 넣는다.
 - **모델 저장소에 ONNX 파일이 없다.** `optimum-cli export onnx` 로 직접 내보낸다. 원본 multilingual-e5-small 과 같은 구조다.
 - ONNX 모델 파일은 이미지에 굽지 말고 볼륨으로 마운트한다. 이미지 빌드가 500MB~2GB 늘어난다.
-- **접두를 빠뜨리면 성능이 떨어진다.** 한국어 미세조정본도 원본 e5 와 같이 질의는 `query: `, 문서는 `passage: ` 로 시작해야 한다. 한쪽만 붙이는 실수가 흔하다.
+- **접두를 빠뜨리면 성능이 떨어진다.** 한국어 미세조정본도 원본 e5 와 같이 질의는 `query: `, 문서는 `passage: ` 로 시작해야 한다. 한쪽만 붙이는 실수가 흔하다. 문항↔문항은 양쪽 `query: `(D12) — 위 「5단계 의미 검색」의 접두 규칙 표가 정본이다.
 - BM25 점수와 cosine 은 척도가 달라 더하면 안 된다. 순위만 쓰는 RRF 로 합친다.
 - 이력서 복제는 `storyId` 를 그대로 복사한다(같은 경험). 자소서 문항은 지금처럼 복제하지 않는다.
 - `links` 양끝이 다른 소유자면 저장 시 거부. `owner_id` 없이 id 만 보고 조회하는 메서드를 만들지 않는다.

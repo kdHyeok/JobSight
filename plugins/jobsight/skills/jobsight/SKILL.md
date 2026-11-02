@@ -193,6 +193,8 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
    (`reviewed:false` 면 'AI 기록')이고 원문 근거는 `experience_index({ids:[...]})` 상세의 `facts.evidence` 다. `alsoIn` 은 같은 경험을 쓴 이력서 행이다.
    `uncovered` 는 지원자격·요구 역량 칸의 요구 중 받쳐 줄 행이 없는 것이다(우대·기술 환경 나열은 결핍이 아니다). `coverageIncomplete:true` 면
    "그 경험이 없다"고 단정하지 말고 이력서에 적지 않은 경험이 있는지 묻는다. `reason:"TAG_MISMATCH_POSSIBLE"` 은 본문에 그 단어가 보인다는 뜻이다.
+   `why` 에 `DENSE`(의미 검색)만 있는 후보는 "뜻이 비슷할 뿐 요구를 직접 받치지 않는다"고 밝힌다. `degraded:["dense"]` 면 의미 검색 없이 찾은 것이고,
+   `context.indexBehind:true` 면 방금 저장한 경험이 의미 검색에 아직 없다 — 몇 초 뒤 다시 부르면 들어온다.
 4. 사용자가 지원할 공고와 경험을 고른 뒤에 **고른 공고만** `posting_create` 로 저장한다. 이어서 자기소개를 쓰면
    `self_intro_create(positionIds, experiences)` 로 그 직무와 쓴 경험에 연결한다. `experiences` 는 `[{experienceId, experienceRevision}]` — 읽은 개정 그대로다.
    상세의 `needsReview:true`(재검토 필요)나 `reviewed:false`(AI 기록)인 사실은 쓰기 전에 사용자에게 확인받는다.

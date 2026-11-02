@@ -12,7 +12,8 @@
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
 | 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
-| 스키마 | `resources/db/migration/V1~V25` — Flyway, `ddl-auto: validate` |
+| 스키마 | `resources/db/migration/V1~V27` — Flyway, `ddl-auto: validate` |
+| 의미 검색(5단계) | `embedding/` — `EmbedderClient`(embedder 호출), `EmbeddingSweeper`(dirty 스위퍼, 유일한 `@Scheduled`), `SystemEmbeddingSweepRepository`(소유자 조건 없는 유일한 저장소, 패키지 전용), `DenseIndex`(소유자로 거른 벡터·cosine) — docs/experience-graph-search.md |
 | 계정 단위 직렬화(T9) | `common/OwnerLock.acquire(owner)` — 경험 관계를 바꾸는 쓰기의 맨 앞. 아래 「경험 관계 쓰기의 잠금과 관문」 |
 | 이력서 content 쓰기 관문 | `resume/ResumeWriter` — 이력서 JSON 을 쓰는 유일한 곳(검증 → 링커 → 저장 → `resume_experiences` → `SET CONSTRAINTS ALL IMMEDIATE`) — docs/experiences.md |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
@@ -30,6 +31,10 @@ DB 연결 획득은 3초 안에 실패시킨다. PostgreSQL 행 잠금(직무 �
   (ArchUnit 을 들이지 않았다). JPA 엔티티 저장 뒤 같은 트랜잭션에서 `JdbcTemplate` 으로 `resume_experiences` 를 맞춘다 — 같은 연결이므로 저장을 먼저 flush 한다.
 - **`Persistable`**: 생성자에서 UUID 를 채우고 `@Version` 이 primitive 인 엔티티는 `save` 가 merge(+SELECT)가 된다. 대량 insert 하는 `Experience` 는 `isNew` 를 직접 답한다.
 - **`TEXT[]` 매핑**: `@JdbcTypeCode(SqlTypes.ARRAY)` + `List<String>` + `columnDefinition = "text[]"` 로 `ddl-auto: validate` 를 통과한다(V25, 통합 테스트 기동으로 확인).
+- **`REAL[]` 벡터는 엔티티에 매핑하지 않는다**(5단계). 조각 테이블(`self_introduction_chunks`·`experience_chunks`)은 JDBC 로만 쓰고 읽는다 — 쓰기는
+  `createArrayOf("float4", Float[])`, 읽기는 `rs.getArray(...).getArray()` 가 `Float[]` 다. 그래서 `ddl-auto: validate` 와 무관하다.
+  엔티티(`SelfIntroduction`·`Experience`)에는 `embedding_dirty`·`source_revision` 만 있고 원문이 바뀔 때만 올린다. 엔티티 저장은 이 두 열을 다시 쓰므로,
+  스위퍼가 그사이 dirty 를 내렸다면 낡은 true 가 다시 써질 수 있다 — 한 번 더 도는 것뿐이라 무해하다(해시가 같아 embedder 를 부르지 않는다).
 - **PostgreSQL 드라이버는 `implementation`** 이다(전에는 `runtimeOnly`). `ApiErrors` 가 FK 위반의 제약 이름·메시지를 `PSQLException` 에서 읽는다.
 
 ## 배치 페치와 SQL 수 상한

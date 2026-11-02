@@ -13,9 +13,13 @@ import com.jobsight.company.posting.JobPostingRepository;
 import com.jobsight.company.resume.ResumeRepository;
 import com.jobsight.company.resume.dto.ResumePositionRow;
 import com.jobsight.company.selfintro.dto.SelfIntroductionList;
+import com.jobsight.company.embedding.DenseIndex;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -41,6 +45,9 @@ public class SelfIntroductionAgentService {
     static final int PREVIEW = 300;
     static final int DEFAULT_LIMIT = 10;
     static final int MAX_LIMIT = 50;
+    private static final int RRF_K = 60;
+    /** 의미 검색 후보 수(설계 4.2 PAST_QUESTION 의 상위 30 과 같다). */
+    private static final int DENSE_TOP = 30;
 
     private final SelfIntroductionRepository repository;
     private final PositionRepository positions;
@@ -50,11 +57,17 @@ public class SelfIntroductionAgentService {
     private final CurrentUser currentUser;
     private final ExperienceRepository experiences;
     private final ExperienceRevisions revisions;
+    private final DenseIndex dense;
+    private final TransactionTemplate readOnly;
 
     public SelfIntroductionAgentService(SelfIntroductionRepository repository, PositionRepository positions,
                                         ResumeRepository resumes, JobPostingRepository postings,
                                         CompanyRepository companies, CurrentUser currentUser,
-                                        ExperienceRepository experiences, ExperienceRevisions revisions) {
+                                        ExperienceRepository experiences, ExperienceRevisions revisions,
+                                        DenseIndex dense, PlatformTransactionManager transactions) {
+        this.dense = dense;
+        this.readOnly = new TransactionTemplate(transactions);
+        this.readOnly.setReadOnly(true);
         this.experiences = experiences;
         this.revisions = revisions;
         this.repository = repository;
@@ -120,11 +133,23 @@ public class SelfIntroductionAgentService {
      * 직접 출처가 0건이면 빈 배열 대신 연결 이력서가 그 직무를 지원하는 답변 중 직접 출처가 없는 것을
      * fallback "indirect" 로 준다 — 다른 직무용으로 쓴 것이 분명한 답변은 섞지 않는다.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public SelfIntroductionList list(String q, UUID resumeId, UUID positionId, UUID postingId, UUID companyId,
                                      Competency questionType, Boolean unlinked, Integer limit) {
         if (q != null && q.length() > MAX_QUERY) {
             throw new ApiRuleException(HttpStatus.BAD_REQUEST, "QUERY_TOO_LONG", "q 는 100자 이하여야 합니다.");
         }
+        // q 의 질의 벡터는 트랜잭션 밖에서 받는다(설계 4.3 ⑥). 못 받으면 BM25 만 쓰고 degraded:["dense"].
+        boolean searching = q != null && !q.isBlank();
+        DenseIndex.Query query = searching ? dense.query(q).orElse(null) : null;
+        List<String> degraded = searching && query == null ? List.of("dense") : List.of();
+        return readOnly.execute(status -> list(q, query, degraded, resumeId, positionId, postingId, companyId,
+                questionType, unlinked, limit));
+    }
+
+    private SelfIntroductionList list(String q, DenseIndex.Query query, List<String> degraded, UUID resumeId,
+                                      UUID positionId, UUID postingId, UUID companyId, Competency questionType,
+                                      Boolean unlinked, Integer limit) {
         int size = limit == null ? DEFAULT_LIMIT : Math.clamp(limit, 1, MAX_LIMIT);
         Context context = new Context();
         Target target = target(context, positionId, postingId, companyId);
@@ -154,7 +179,8 @@ public class SelfIntroductionAgentService {
             }
         }
 
-        Map<SelfIntroduction, Double> scores = SelfIntroductionService.scores(values, q);
+        Map<SelfIntroduction, Double> lexical = SelfIntroductionService.scores(values, q);
+        Map<SelfIntroduction, Double> scores = query == null ? lexical : fuse(lexical, denseScores(values, query, context.owner));
         if (scores != null) values = SelfIntroductionService.ranked(scores);
         List<String> terms = SelfIntroductionService.terms(q);
         List<SelfIntroduction> page = values.stream().limit(size).toList();
@@ -162,7 +188,30 @@ public class SelfIntroductionAgentService {
         List<SelfIntroductionList.Item> results = page.stream()
                 .map(value -> item(value, context, target, scores == null ? null : scores.get(value), terms, false))
                 .toList();
-        return new SelfIntroductionList(fallback, values.size(), values.size() <= size, results);
+        return new SelfIntroductionList(fallback, values.size(), values.size() <= size, results, degraded);
+    }
+
+    /** 필터를 지난 문항만, 질문·답변 조각 max-sim 상위 DENSE_TOP 개. 아직 적재되지 않은 문항은 BM25 로만 나온다. */
+    private Map<SelfIntroduction, Double> denseScores(List<SelfIntroduction> values, DenseIndex.Query query, UUID owner) {
+        Map<UUID, Double> byId = dense.selfIntros(owner, query);
+        return values.stream().filter(value -> byId.containsKey(value.getId()))
+                .sorted(Comparator.comparing((SelfIntroduction value) -> byId.get(value.getId())).reversed())
+                .limit(DENSE_TOP)
+                .collect(Collectors.toMap(value -> value, value -> byId.get(value.getId())));
+    }
+
+    /**
+     * BM25 와 DENSE 를 가중 없는 RRF(k=60)로 합친다(설계 4.3 ①, 척도가 다른 점수는 더하지 않는다). 반환 점수는 RRF 값이다.
+     * 리랭커(K=10)는 6단계로 미뤘다(2026-11-02 사용자 결정).
+     */
+    static Map<SelfIntroduction, Double> fuse(Map<SelfIntroduction, Double> lexical, Map<SelfIntroduction, Double> denseScores) {
+        Map<SelfIntroduction, Double> fused = new HashMap<>();
+        for (Map<SelfIntroduction, Double> signal : List.of(lexical == null ? Map.<SelfIntroduction, Double>of() : lexical,
+                denseScores)) {
+            List<SelfIntroduction> ordered = SelfIntroductionService.ranked(signal);
+            for (int i = 0; i < ordered.size(); i++) fused.merge(ordered.get(i), 1.0 / (RRF_K + i + 1), Double::sum);
+        }
+        return fused;
     }
 
     /** 원문은 여기서 읽는다. 목록과 같은 출처·문항 유형에 답변 전문을 싣는다. */
