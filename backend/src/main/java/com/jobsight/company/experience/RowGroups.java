@@ -28,7 +28,8 @@ public final class RowGroups {
 
     /** 경험 섹션의 행 하나. text 는 검색·해시·발췌용 평문이다. */
     public record Row(Doc resume, String section, int index, ExperienceKind kind, String title,
-                      String startYm, String endYm, String techStack, String text) {
+                      String startYm, String endYm, String techStack, String text, UUID experienceId,
+                      Integer experienceRevision) {
         public String groupKey() {
             return kind + "|" + KeyNormalizer.key(title) + "|" + KeyNormalizer.yearMonth(startYm);
         }
@@ -55,20 +56,26 @@ public final class RowGroups {
         List<Row> rows = new ArrayList<>();
         each(c.projects(), (row, i) -> rows.add(new Row(doc, "projects", i, ExperienceKind.PROJECT, row.name(),
                 row.startYm(), row.endYm(), row.techStack(),
-                join(row.name(), row.summary(), row.techStack(), row.role(), row.outcome(), row.description()))));
+                join(row.name(), row.summary(), row.techStack(), row.role(), row.outcome(), row.description()),
+                row.experienceId(), row.experienceRevision())));
         each(c.experiences(), (row, i) -> rows.add(new Row(doc, "experiences", i, ExperienceKind.CAREER, row.company(),
-                row.startYm(), row.endYm(), null, join(row.company(), row.description()))));
+                row.startYm(), row.endYm(), null, join(row.company(), row.description()), row.experienceId(), row.experienceRevision())));
         each(c.activities(), (row, i) -> rows.add(new Row(doc, "activities", i, ExperienceKind.ACTIVITY, row.name(),
-                row.startYm(), row.endYm(), null, join(row.name(), row.organizer(), row.description()))));
+                row.startYm(), row.endYm(), null, join(row.name(), row.organizer(), row.description()),
+                row.experienceId(), row.experienceRevision())));
         each(c.trainings(), (row, i) -> rows.add(new Row(doc, "trainings", i, ExperienceKind.TRAINING, row.name(),
-                row.startYm(), row.endYm(), null, join(row.name(), row.institution(), row.description()))));
+                row.startYm(), row.endYm(), null, join(row.name(), row.institution(), row.description()),
+                row.experienceId(), row.experienceRevision())));
         return rows.stream().filter(row -> !KeyNormalizer.key(row.title()).isEmpty()).toList();
     }
 
-    /** 여러 이력서의 행을 묶는다. 정렬은 종류 순서, 같은 종류 안에서는 처음 나온 순서(docs 순서를 따른다). */
-    public static List<Group> of(List<Doc> docs) {
+    /**
+     * 여러 이력서의 미연결 행(경험 앵커가 없는 행)을 묶는다 — 은행에 없는 행이다(4단계). 앵커가 있는 행은 경험 원본이 대표한다.
+     * 정렬은 종류 순서, 같은 종류 안에서는 처음 나온 순서(docs 순서를 따른다).
+     */
+    public static List<Group> unlinked(List<Doc> docs) {
         Map<String, List<Row>> byKey = new LinkedHashMap<>();
-        docs.stream().flatMap(doc -> rows(doc).stream())
+        docs.stream().flatMap(doc -> rows(doc).stream()).filter(row -> row.experienceId() == null)
                 .forEach(row -> byKey.computeIfAbsent(row.groupKey(), key -> new ArrayList<>()).add(row));
         return byKey.entrySet().stream()
                 .map(entry -> new Group(entry.getKey(), entry.getValue().get(0).kind(), List.copyOf(entry.getValue())))

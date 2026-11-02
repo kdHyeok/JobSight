@@ -34,7 +34,8 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     // OpenAPI 문서 + Swagger UI. 3.x 가 Spring Boot 4 대응이다.
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
-    runtimeOnly 'org.postgresql:postgresql'
+    // 공용 오류 변환(ApiErrors)이 FK 위반의 제약 이름·테이블을 PSQLException 에서 읽는다 — 컴파일 클래스패스에 둔다.
+    implementation 'org.postgresql:postgresql'
 
     testImplementation platform('org.testcontainers:testcontainers-bom:2.0.5')
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

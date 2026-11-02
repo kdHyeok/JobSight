@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * experience_search 응답 — 설계 5.4 의 3단계 판. 결과는 RESUME_ROW 뿐이고, 4단계에 EXPERIENCE 가 같은 형식으로 더해진다.
+ * experience_search 응답 — 설계 5.4. 결과는 EXPERIENCE(경험 원본)와 RESUME_ROW(미연결 행 묶음)이고 형식은 3단계와 같다.
  * 3단계에 없는 신호·필드(DENSE, episodes, alreadyUsedFor, embeddingModel 등)는 싣지 않는다.
  */
 public record ExperienceSearchResult(
@@ -48,8 +48,12 @@ public record ExperienceSearchResult(
     public record Why(String signal, Integer rank, List<String> matched, Field field, String quote) {
     }
 
-    /** source 는 대표 행(가장 최근에 고친 이력서), alsoIn 은 같은 묶음의 다른 행이다. */
+    /**
+     * type RESUME_ROW: source 는 대표 행(가장 최근에 고친 이력서), alsoIn 은 같은 묶음의 다른 행이다. experienceId 등은 null.
+     * type EXPERIENCE: 경험 원본. source 는 null(원문 근거는 experience_index 상세의 facts.evidence), alsoIn 은 이 경험을 쓰는 이력서 행,
+     * revision 은 지금 개정, reviewed:false 면 'AI 기록'.
+     */
     public record Result(int rank, String type, ExperienceKind kind, String title, String period, Source source,
-                         List<Source> alsoIn, List<Why> why) {
+                         List<Source> alsoIn, List<Why> why, UUID experienceId, Integer revision, Boolean reviewed) {
     }
 }

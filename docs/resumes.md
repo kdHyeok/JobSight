@@ -51,6 +51,10 @@ content = {
 9. **수정 요청의 `null` 은 유지, `[]` 는 비움이다.** `PUT`·`resume_update` 의 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic`, `resume_row_update` 의 빠진 행 필드, `resume_basic_update` 의 빠진 기본정보 필드가 모두 그렇다. 행 갱신과 기본정보 수정은 기존 값 위에 보낸 필드만 덮는다(`""` 는 그 필드를 비운다). AI가 섹션이나 필드를 빠뜨려 보낸 저장이 조용한 삭제가 되던 것을 막는다. 기본정보는 `ResumeServiceTest.updateBasicKeepsFieldsTheRequestLeavesOut`·`updateBasicEmptyStringClearsOnlyThatField` 가 본다.
 10. **쓰기는 이력서 행을 잠근다.** `update`·`updateBasic`·행 도구는 `ResumeRepository.findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽는다. 동시에 들어온 행 추가 두 건이 서로를 덮어 한 행이 사라지던 것을 막는다. 3초 안에 잠금을 못 얻으면 409 `RESUME_BUSY`. 잠금 조회 밖(저장 flush·커밋·FK 검사)에서 잠금 대기 초과(55P03)나 교착(40P01)이 나면 공통 변환이 409 `BUSY` 로 바꾼다 — docs/backend.md.
 11. **경험 행의 앵커를 버리지 않는다.** 프로젝트·경력·대내외활동·교육이수 행은 `experienceId`·`experienceRevision`(이 행이 쓴 경험과 그 개정, docs/experiences.md)을 든다. 화면에 칸이 없지만 `fillRow` 가 그대로 통과시켜 저장 payload 로 돌아간다. 행 도구 요청(`ResumeRowRequest`)은 `experienceId` 만 받는다 — 개정은 서버가 정한다. 키 하나라도 빠지면 Jackson 이 조용히 버려 연결이 끊기므로, `ResumeServiceTest.experienceAnchorsSurviveSaveAndRowEdit` 와 `resume.spec.ts` "경험 앵커 통과" 가 왕복을 고정한다.
+12. **이력서 content 는 `ResumeWriter` 한 곳으로만 쓴다**(4단계). 모든 쓰기는 계정 잠금(`OwnerLock`) → 행 잠금 → version 확인 뒤 관문에서 문서 전체 검증(섹션 상한 포함,
+    400 `INVALID_CONTENT`) → 링커(앵커 이어받기·개정 검사·자동 연결) → 저장과 `resume_experiences` 반영을 한다. 웹 PUT 의 `refreshExperienceIds` 는 그 경험 행을
+    지금 개정으로 올리고("원본으로 갱신"), 저장으로 끊긴 앵커는 응답 `unlinkedWarnings` 로 알린다. MCP `resume_update` 는 연결 행이 빠지면 409 `LINKED_ROWS_MISSING`
+    (`removedExperienceIds` 로 허용), 행 도구는 `experienceId` 로도 행을 지목한다 — docs/experiences.md.
 
 ## 진입점
 

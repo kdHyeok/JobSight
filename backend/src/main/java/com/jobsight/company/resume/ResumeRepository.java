@@ -28,6 +28,14 @@ public interface ResumeRepository extends JpaRepository<Resume, UUID> {
     @Query("select r from Resume r where r.id = :id and r.ownerId = :ownerId")
     Optional<Resume> findOwnedForUpdate(@Param("id") UUID id, @Param("ownerId") UUID ownerId);
 
+    /**
+     * 경험 가져오기 적용(설계 6.3): 계정의 이력서를 id 오름차순으로 잠근다 — T9 규약의 "이력서(id 오름차순) → 경험" 순서.
+     * PESSIMISTIC_WRITE 는 PostgreSQL 에서 for no key update 다(자식 INSERT 의 FK 검사와 충돌하지 않는다).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from Resume r where r.ownerId = :ownerId order by r.id")
+    List<Resume> findAllOwnedForUpdate(@Param("ownerId") UUID ownerId);
+
     List<Resume> findAllByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
     List<Resume> findAllByIdInAndOwnerId(List<UUID> ids, UUID ownerId);

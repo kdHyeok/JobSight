@@ -4,7 +4,13 @@ import com.jobsight.company.attachment.AttachmentRepository;
 import com.jobsight.company.attachment.dto.AttachmentResponse;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
+import com.jobsight.company.common.OwnerLock;
 import com.jobsight.company.common.ResourceNotFoundException;
+import com.jobsight.company.experience.Experience;
+import com.jobsight.company.experience.ExperienceKind;
+import com.jobsight.company.experience.ExperienceRepository;
+import com.jobsight.company.experience.dto.ExperienceFacts;
+import com.jobsight.company.experience.dto.ExperienceRequests;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.resume.dto.ResumeCopyRequest;
 import com.jobsight.company.resume.dto.ResumeRequest;
@@ -29,13 +35,17 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 이력서는 문서 하나로 읽고 쓴다. REST 에 행 단위 API 는 없다 — docs/resumes.md. 모든 조회는 소유자로 한정.
- * 쓰기는 이력서 행을 잠그고 version 을 확인한다(불변 조건 8·10). 수정 요청의 null 은 유지다(불변 조건 9).
+ * 쓰기는 계정 잠금(OwnerLock, T9) → 이력서 행 잠금 → version 확인 뒤 ResumeWriter 한 곳으로 저장한다(불변 조건 8·10, 설계 6.2).
+ * 수정 요청의 null 은 유지다(불변 조건 9).
  */
 @Service
 @Transactional(readOnly = true)
@@ -46,16 +56,23 @@ public class ResumeService {
     private final Validator validator;
     private final PositionRepository positionRepository;
     private final AttachmentRepository attachmentRepository;
+    private final ResumeWriter writer;
+    private final OwnerLock ownerLock;
+    private final ExperienceRepository experiences;
 
     public ResumeService(ResumeRepository repository, CurrentUser currentUser, ObjectMapper objectMapper,
                          Validator validator, PositionRepository positionRepository,
-                         AttachmentRepository attachmentRepository) {
+                         AttachmentRepository attachmentRepository, ResumeWriter writer, OwnerLock ownerLock,
+                         ExperienceRepository experiences) {
         this.repository = repository;
         this.currentUser = currentUser;
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.positionRepository = positionRepository;
         this.attachmentRepository = attachmentRepository;
+        this.writer = writer;
+        this.ownerLock = ownerLock;
+        this.experiences = experiences;
     }
 
     /** 목록엔 content 를 싣지 않는다. 카드는 이름·수정일만 그린다. */
@@ -66,42 +83,58 @@ public class ResumeService {
     }
 
     public ResumeResponse findById(UUID id) {
-        return toResponse(findOwned(id));
+        return toResponse(findOwned(id), Set.of());
     }
 
     @Transactional
     public ResumeResponse create(ResumeRequest request) {
-        Resume resume = new Resume(currentUser.id(), request.name().trim(), write(request.content()));
+        ownerLock.acquire(currentUser.id());
+        Resume resume = new Resume(currentUser.id(), request.name().trim(), "{}");
         resume.replacePositions(ownedPositionIds(request.positionIds()));
-        return toResponse(repository.save(resume));
+        ResumeContent content = request.content() == null ? ResumeContent.empty() : request.content();
+        return saved(writer.write(resume, resume.getName(), ResumeContent.empty(), content, Set.of(), null));
     }
 
-    /** content·positionIds·빠진 섹션이 null 이면 유지, [] 면 비움. expectedVersion 필수. */
+    /** 웹 PUT. content·positionIds·빠진 섹션이 null 이면 유지, [] 면 비움. expectedVersion 필수. */
     @Transactional
     public ResumeResponse update(UUID id, ResumeRequest request) {
+        return update(id, request, null);
+    }
+
+    /**
+     * allowedRemovals 가 null 이 아니면(MCP resume_update) 사라지는 경험 앵커가 모두 그 안에 있어야 한다 — 409 LINKED_ROWS_MISSING.
+     * refreshExperienceIds(웹 "원본으로 갱신")는 그 경험 행의 개정을 지금 개정으로 올린다.
+     */
+    @Transactional
+    public ResumeResponse update(UUID id, ResumeRequest request, Set<UUID> allowedRemovals) {
+        ownerLock.acquire(currentUser.id());
         Resume resume = lockOwned(id);
         checkVersion(resume, request.expectedVersion(), true);
         ResumeContent stored = read(resume.getContent());
         ResumeContent next = request.content() == null ? stored : request.content().withMissingFrom(stored);
-        resume.update(request.name().trim(), objectMapper.writeValueAsString(next.normalized()));
         if (request.positionIds() != null) {
             resume.replacePositions(ownedPositionIds(request.positionIds()));
         }
-        return toResponse(repository.saveAndFlush(resume));
+        Set<UUID> refresh = request.refreshExperienceIds() == null ? Set.of() : Set.copyOf(request.refreshExperienceIds());
+        return saved(writer.write(resume, request.name().trim(), stored, next, refresh, allowedRemovals));
     }
 
-    /** 같은 내용의 새 버전. 원본은 건드리지 않는다. */
+    /** 같은 내용의 새 버전. 원본을 잠그고 읽어 앵커(경험 id·개정)를 그대로 복사한다 — 링커의 before 는 원본 문서다(6.4). */
     @Transactional
     public ResumeResponse copy(UUID id, ResumeCopyRequest request) {
-        Resume source = findOwned(id);
-        Resume copy = new Resume(currentUser.id(), request.name().trim(), source.getContent());
+        ownerLock.acquire(currentUser.id());
+        Resume source = lockOwned(id);
+        ResumeContent content = read(source.getContent());
+        Resume copy = new Resume(currentUser.id(), request.name().trim(), "{}");
         copy.replacePositions(source.getPositionIds());
-        return toResponse(repository.save(copy));
+        return saved(writer.write(copy, copy.getName(), content, content, Set.of(), null));
     }
 
+    /** resume_experiences 는 CASCADE 로 지워진다. 경험 원본·개정 이력·자소서는 남는다(6.4). */
     @Transactional
     public void delete(UUID id) {
-        repository.delete(findOwned(id));
+        ownerLock.acquire(currentUser.id());
+        repository.delete(lockOwned(id));
     }
 
     // ── 행 단위 도구 (MCP 전용) ───────────────────────────────────────────
@@ -111,14 +144,14 @@ public class ResumeService {
     /** basic 에 보낸 필드만 덮는다. 빠진 필드는 유지, "" 는 비움. 행 번호에 기대지 않으므로 expectedVersion 은 선택이다. */
     @Transactional
     public ResumeResponse updateBasic(UUID id, ResumeContent.BasicInfo basic, Long expectedVersion) {
+        ownerLock.acquire(currentUser.id());
         Resume resume = lockOwned(id);
         checkVersion(resume, expectedVersion, false);
         ResumeContent current = read(resume.getContent());
         ResumeContent next = new ResumeContent(basic == null ? current.basic() : basic.withMissingFrom(current.basic()),
                 current.educations(), current.trainings(), current.activities(), current.experiences(),
                 current.awards(), current.certificates(), current.skills(), current.projects());
-        resume.update(resume.getName(), objectMapper.writeValueAsString(next.normalized()));
-        return toResponse(repository.saveAndFlush(resume));
+        return saved(writer.write(resume, resume.getName(), current, next, Set.of(), null));
     }
 
     /** 섹션 맨 뒤에 붙인다. 행 번호에 기대지 않으므로 expectedVersion 은 선택이다. */
@@ -134,45 +167,170 @@ public class ResumeService {
     @Transactional
     public ResumeRowResult updateRow(UUID id, ResumeSection section, int index, ResumeRowRequest row,
                                      Long expectedVersion) {
+        return updateRow(id, section, index, null, row, expectedVersion);
+    }
+
+    /** 대상은 index 또는 experienceId 중 하나(설계 5.3, R50). experienceId 면 행 번호가 밀려도 같은 경험 행을 찾는다. */
+    @Transactional
+    public ResumeRowResult updateRow(UUID id, ResumeSection section, Integer index, UUID experienceId,
+                                     ResumeRowRequest row, Long expectedVersion) {
         return mutateRows(id, section, expectedVersion, true, rows -> {
-            requireIndex(rows, index);
-            rows.set(index, toNode(section, row, rows.get(index)));
-            return index;
+            int target = target(rows, section, index, experienceId);
+            rows.set(target, toNode(section, row, rows.get(target)));
+            return target;
         });
     }
 
     /** index(0-based) 행을 지운다. 뒤 행이 앞으로 당겨진다. expectedVersion 필수. */
     @Transactional
     public ResumeRowResult deleteRow(UUID id, ResumeSection section, int index, Long expectedVersion) {
+        return deleteRow(id, section, index, null, expectedVersion);
+    }
+
+    @Transactional
+    public ResumeRowResult deleteRow(UUID id, ResumeSection section, Integer index, UUID experienceId,
+                                     Long expectedVersion) {
         return mutateRows(id, section, expectedVersion, true, rows -> {
-            requireIndex(rows, index);
-            rows.remove(index);
+            rows.remove(target(rows, section, index, experienceId));
             return null;
         });
+    }
+
+    /**
+     * resume_add_experiences — 경험마다 행을 만들어 종류에 맞는 섹션 끝에 붙인다(설계 5.2). 문구는 경험 원본의 사실로 만든 중립 문구(FACTS)이고
+     * 행에 experienceId 와 지금 개정을 쓴다 — 개정을 올리는 두 길 중 하나다. 이미 이 이력서에 있는 경험은 건너뛴다.
+     * 섹션 상한(T6)을 넘으면 하나도 넣지 않는다(ResumeWriter 의 문서 검증). expectedVersion 은 선택이다(행 추가).
+     */
+    @Transactional
+    public ResumeRowResult addExperiences(UUID id, List<ExperienceRequests.AddItem> items, Long expectedVersion) {
+        UUID owner = currentUser.id();
+        ownerLock.acquire(owner);
+        Resume resume = lockOwned(id);
+        checkVersion(resume, expectedVersion, false);
+        Set<UUID> wanted = items.stream().map(ExperienceRequests.AddItem::experienceId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<UUID, Experience> found = experiences.findAllByIdInAndOwnerId(wanted, owner).stream()
+                .collect(Collectors.toMap(Experience::getId, Function.identity()));
+        UUID missing = wanted.stream().filter(experienceId -> !found.containsKey(experienceId)).findFirst().orElse(null);
+        if (missing != null) throw new ResourceNotFoundException(missing);
+        ResumeContent current = read(resume.getContent());
+        ObjectNode root = objectMapper.valueToTree(current);
+        Set<UUID> present = ResumeExperienceLinker.anchors(root);
+        String lastSection = null;
+        for (UUID experienceId : wanted) {
+            if (present.contains(experienceId)) continue;
+            Experience experience = found.get(experienceId);
+            String section = sectionOf(experience.getKind());
+            ((ArrayNode) root.get(section)).add(factsRow(experience));
+            lastSection = section;
+        }
+        ResumeContent next = objectMapper.treeToValue(root, ResumeContent.class);
+        ResumeWriter.Saved saved = writer.write(resume, resume.getName(), current, next, Set.of(), null);
+        String section = lastSection == null ? "projects" : lastSection;
+        JsonNode rows = objectMapper.valueToTree(saved.content()).get(section);
+        return new ResumeRowResult(saved.resume().getId(), saved.resume().getVersion(), section, rows.size(),
+                lastSection == null ? null : rows.size() - 1, null);
+    }
+
+    /** 경험 종류 → 이력서 섹션. OTHER 는 이력서에 그리지 않는다. */
+    private static String sectionOf(ExperienceKind kind) {
+        return ResumeExperienceLinker.SECTION_KINDS.entrySet().stream().filter(entry -> entry.getValue() == kind)
+                .map(Map.Entry::getKey).findFirst()
+                .orElseThrow(() -> new ApiRuleException(HttpStatus.BAD_REQUEST, "EXPERIENCE_SECTION_MISMATCH",
+                        "OTHER 경험은 이력서 섹션에 넣을 수 없습니다."));
+    }
+
+    /** 경험 원본의 사실로 만든 중립 행(FACTS). 사실에 없는 것을 지어내지 않는다. */
+    private ObjectNode factsRow(Experience experience) {
+        ExperienceFacts facts = objectMapper.readValue(experience.getFacts(), ExperienceFacts.class);
+        String period = facts.period() == null ? "" : facts.period();
+        String[] ends = period.split("~", 2);
+        String start = experience.getStartYm() != null ? experience.getStartYm() : blankToNull(ends[0]);
+        String end = ends.length == 2 ? blankToNull(ends[1]) : null;
+        String actions = texts(facts.actions());
+        String results = texts(facts.results());
+        Map<String, Object> row = new LinkedHashMap<>();
+        switch (experience.getKind()) {
+            case PROJECT -> {
+                row.put("name", experience.getTitle());
+                row.put("role", facts.role());
+                row.put("techStack", experience.getSkills().isEmpty() ? null : String.join(", ", experience.getSkills()));
+                row.put("description", actions);
+                row.put("outcome", results);
+            }
+            case CAREER -> {
+                row.put("company", experience.getTitle());
+                row.put("description", join(facts.role(), actions, results));
+            }
+            default -> {
+                row.put("name", experience.getTitle());
+                row.put("description", join(facts.role(), actions, results));
+            }
+        }
+        row.put("startYm", start);
+        row.put("endYm", end);
+        row.put(ResumeExperienceLinker.ID, experience.getId().toString());
+        row.put(ResumeExperienceLinker.REVISION, experience.getRevision());
+        row.values().removeIf(Objects::isNull);
+        return objectMapper.valueToTree(row);
+    }
+
+    private static String texts(List<ExperienceFacts.Item> items) {
+        if (items == null || items.isEmpty()) return null;
+        return items.stream().map(item -> "- " + item.text()).collect(Collectors.joining("\n"));
+    }
+
+    private static String join(String... parts) {
+        String joined = Stream.of(parts).filter(part -> part != null && !part.isBlank()).collect(Collectors.joining("\n"));
+        return joined.isEmpty() ? null : joined;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    /** index 또는 experienceId 중 정확히 하나. experienceId 는 이 섹션에서 그 앵커를 든 행을 찾는다. */
+    private static int target(ArrayNode rows, ResumeSection section, Integer index, UUID experienceId) {
+        if ((index == null) == (experienceId == null)) {
+            throw new ApiRuleException(HttpStatus.BAD_REQUEST, "TARGET_REQUIRED", "index 또는 experienceId 중 하나만 보내세요.");
+        }
+        if (index != null) {
+            requireIndex(rows, index);
+            return index;
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            JsonNode anchor = rows.get(i) == null ? null : rows.get(i).get(ResumeExperienceLinker.ID);
+            if (anchor != null && experienceId.toString().equals(anchor.asString())) return i;
+        }
+        throw new ApiRuleException(HttpStatus.NOT_FOUND, "ROW_NOT_FOUND",
+                section.key() + " 에 경험 " + experienceId + " 이 연결된 행이 없습니다. 이력서를 다시 읽어 확인하세요.");
     }
 
     /** change 는 바꾼 행의 index 를 돌려준다(삭제면 null). 응답은 이력서 전체가 아니라 그 행의 개요다. */
     private ResumeRowResult mutateRows(UUID id, ResumeSection section, Long expectedVersion, boolean versionRequired,
                                        Function<ArrayNode, Integer> change) {
+        ownerLock.acquire(currentUser.id());
         Resume resume = lockOwned(id);
         checkVersion(resume, expectedVersion, versionRequired);
+        ResumeContent current = read(resume.getContent());
         ObjectNode root = (ObjectNode) objectMapper.readTree(resume.getContent());
         JsonNode existing = root.get(section.key());
         ArrayNode rows = existing instanceof ArrayNode array ? array : root.putArray(section.key());
         Integer index = change.apply(rows);
-        ResumeContent next = objectMapper.treeToValue(root, ResumeContent.class).normalized();
-        resume.update(resume.getName(), objectMapper.writeValueAsString(next));
-        Resume saved = repository.saveAndFlush(resume);
-        JsonNode savedRows = objectMapper.readTree(saved.getContent()).get(section.key());
+        ResumeContent next = objectMapper.treeToValue(root, ResumeContent.class);
+        ResumeWriter.Saved saved = writer.write(resume, resume.getName(), current, next, Set.of(), null);
+        JsonNode savedRows = objectMapper.valueToTree(saved.content()).get(section.key());
         Map<String, Object> savedRow = index == null ? null : asMap(savedRows.get(index));
-        return new ResumeRowResult(saved.getId(), saved.getVersion(), section.key(), savedRows.size(), index, savedRow);
+        return new ResumeRowResult(saved.resume().getId(), saved.resume().getVersion(), section.key(), savedRows.size(),
+                index, savedRow);
     }
 
     /**
      * 합집합 record 를 이 섹션의 record 로 엄격 변환한다. 다른 섹션 필드가 섞이면 거부한다 —
      * Jackson 이 조용히 버리면 값이 사라진 채 저장되고, 도구 사용자는 성공으로 알기 때문이다.
      * previous 가 있으면 그 위에 보낸 필드만 덮는다. 그래서 행 요청이 표현하지 못하는 중첩 배열
-     * (학년별·학기별 이수 내역)도 남는다 — 이 병합이 없으면 학력 행을 고칠 때마다 성적표가 사라진다.
+     * (학년별·학기별 이수 내역)과 경험 개정(experienceRevision)도 남는다 — 이 병합이 없으면 학력 행을 고칠 때마다 성적표가 사라진다.
+     * 다른 experienceId 를 보내면 "다른 경험에 연결"이라 이전 개정을 버린다(새 연결은 링커가 지금 개정을 쓴다).
      */
     private JsonNode toNode(ResumeSection section, ResumeRowRequest row, JsonNode previous) {
         Map<String, Object> present = new LinkedHashMap<>();
@@ -180,6 +338,10 @@ public class ResumeService {
             present.putAll(asMap(before));
         }
         Map<?, ?> requested = objectMapper.convertValue(row, Map.class);
+        Object relinked = requested.get(ResumeExperienceLinker.ID);
+        if (relinked != null && !relinked.equals(present.get(ResumeExperienceLinker.ID))) {
+            present.remove(ResumeExperienceLinker.REVISION);
+        }
         requested.forEach((key, value) -> {
             if (value != null) present.put(String.valueOf(key), value);
         });
@@ -247,9 +409,13 @@ public class ResumeService {
                 .orElseThrow(() -> new ResourceNotFoundException(id));
     }
 
-    private ResumeResponse toResponse(Resume resume) {
+    private ResumeResponse saved(ResumeWriter.Saved saved) {
+        return toResponse(saved.resume(), saved.removed());
+    }
+
+    private ResumeResponse toResponse(Resume resume, Set<UUID> unlinked) {
         ResumeContent content = read(resume.getContent());
-        return ResumeResponse.of(resume, content, attachmentMetas(content));
+        return ResumeResponse.of(resume, content, attachmentMetas(content), List.copyOf(unlinked));
     }
 
     /**
@@ -281,12 +447,6 @@ public class ResumeService {
             if (!owned.contains(id)) throw new ResourceNotFoundException(id);
         }
         return ids;
-    }
-
-    /** 생성 때 null 은 빈 문서로. 저장되는 JSON 이 항상 같은 모양이어야 읽는 쪽이 편하다. */
-    private String write(ResumeContent content) {
-        ResumeContent normalized = (content == null ? ResumeContent.empty() : content).normalized();
-        return objectMapper.writeValueAsString(normalized);
     }
 
     private ResumeContent read(String json) {

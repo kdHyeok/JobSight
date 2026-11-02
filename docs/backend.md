@@ -12,11 +12,25 @@
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
 | 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
-| 스키마 | `resources/db/migration/V1~V23` — Flyway, `ddl-auto: validate` |
+| 스키마 | `resources/db/migration/V1~V25` — Flyway, `ddl-auto: validate` |
+| 계정 단위 직렬화(T9) | `common/OwnerLock.acquire(owner)` — 경험 관계를 바꾸는 쓰기의 맨 앞. 아래 「경험 관계 쓰기의 잠금과 관문」 |
+| 이력서 content 쓰기 관문 | `resume/ResumeWriter` — 이력서 JSON 을 쓰는 유일한 곳(검증 → 링커 → 저장 → `resume_experiences` → `SET CONSTRAINTS ALL IMMEDIATE`) — docs/experiences.md |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
 
 DB 연결 획득은 3초 안에 실패시킨다. PostgreSQL 행 잠금(직무 삭제·공고 수정의 공고 행, 이력서 쓰기의 이력서 행)은 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다.
 잠금 대기 초과(SQLState 55P03)나 교착(40P01)은 어디서 나든 409 `BUSY` 다(`ApiErrors`). 커밋 시점 실패는 `TransactionSystemException`·`JpaSystemException` 으로 감싸져 오므로 원인 체인의 SQLState 까지 본다. 잠금 조회 자리에서 바로 잡는 `RESUME_BUSY`·`POSITION_DELETE_BUSY` 는 그대로 둔다. `/actuator/health`의 DB 지표와 로그인 옵션 조회가 장애 감지 경로다.
+
+## 경험 관계 쓰기의 잠금과 관문 (4단계, docs/experiences.md)
+
+- **`OwnerLock`**: `SET LOCAL lock_timeout = '3s'` **바로 다음 문장**에서 `pg_advisory_xact_lock(hashtextextended('exp-graph:' || owner, 0))`.
+  순서를 바꾸면 권고 잠금 대기에 상한이 없어 연결 풀이 마를 수 있다. 대기 초과는 55P03 → 409 `BUSY`. `Propagation.MANDATORY` 라 트랜잭션 밖에서 부르면 실패한다.
+  부르는 곳: 이력서 create·update·copy·delete·basic·행 도구·`addExperiences`, 경험 저장·검토·삭제·가져오기, 자소서 create·update.
+- **행 잠금 순서**: 권고 잠금 → 이력서(id 오름차순, `findOwnedForUpdate`·`findAllOwnedForUpdate`) → 경험. JPA `PESSIMISTIC_WRITE` 는 PostgreSQL 에서 `for no key update` 다.
+- **`ResumeWriter` 단일 관문**: `ResumeRepository.save*` 는 이 클래스 밖에서 부르지 않고 `Resume.update` 는 패키지 전용이다. `ResumeWriterGateTest` 가 소스를 검사한다
+  (ArchUnit 을 들이지 않았다). JPA 엔티티 저장 뒤 같은 트랜잭션에서 `JdbcTemplate` 으로 `resume_experiences` 를 맞춘다 — 같은 연결이므로 저장을 먼저 flush 한다.
+- **`Persistable`**: 생성자에서 UUID 를 채우고 `@Version` 이 primitive 인 엔티티는 `save` 가 merge(+SELECT)가 된다. 대량 insert 하는 `Experience` 는 `isNew` 를 직접 답한다.
+- **`TEXT[]` 매핑**: `@JdbcTypeCode(SqlTypes.ARRAY)` + `List<String>` + `columnDefinition = "text[]"` 로 `ddl-auto: validate` 를 통과한다(V25, 통합 테스트 기동으로 확인).
+- **PostgreSQL 드라이버는 `implementation`** 이다(전에는 `runtimeOnly`). `ApiErrors` 가 FK 위반의 제약 이름·메시지를 `PSQLException` 에서 읽는다.
 
 ## 배치 페치와 SQL 수 상한
 
@@ -31,7 +45,7 @@ EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, 
 - 함정: 같은 종류의 소유 엔티티가 100개를 넘으면(예: 직무 101개) 그 컬렉션의 SQL 이 묶음 수만큼 는다(101개면 2회). 컬렉션 하나에 원소가 많은 것과는 무관하다. 새 컬렉션은 EAGER 든 LAZY 든 이 설정을 자동으로 탄다.
 - MCP 자소서 `self_intro_get`·`self_intro_list`(`SelfIntroductionAgentService`)는 계정 직무 상세(`PositionService.findAll`)와 이력서 엔티티(content JSONB)를
   읽지 않고, 연결된 것의 이름만 constructor projection(`PositionRepository.findLabels`·`findAllLabels`, `ResumeRepository.findPositionRows`)으로 읽는다.
-  `SelfIntroductionRelationsIntegrationTest.agentReadsOnlyLabelsWithinStatementLimit` 가 상한(실측 상세 6·목록 6·직무 필터 7·기업 필터 7)과
+  `SelfIntroductionRelationsIntegrationTest.agentReadsOnlyLabelsWithinStatementLimit` 가 상한(실측 상세 6·목록 6·직무 필터 7·기업 필터 7, 4단계에서 작성 근거 컬렉션 1회가 더해져 7·7·8·8. 작성 근거가 있는 문항이 쪽에 있으면 경험 이름·개정 이력 2회가 더 붙는다)과
   `Resume`·`Position`·`JobPosting`·`Company` 엔티티 로드 0을 단언한다. 공고·기업 소유 확인은 `existsByIdAndOwnerId` 다.
 
 ## 요청 한 번의 흐름

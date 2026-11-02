@@ -22,6 +22,15 @@ public record SelfIntroductionUpdateRequest(
         @NotBlank(message = "질문은 필수입니다.")
         @Size(max = 1000, message = "질문은 1,000자 이하여야 합니다.") String question,
         @Size(max = 10000, message = "답변은 10,000자 이하여야 합니다.") String answer,
-        Long expectedVersion
+        Long expectedVersion,
+        /**
+         * 작성 근거 (경험 id, 개정) 쌍(설계 6.8). null 은 유지. 웹은 목록으로 맞추고([] 는 비움), MCP 는 더하기만 한다 —
+         * 이미 연결된 경험은 건너뛰고, 빼기와 개정 바꾸기는 웹에서만 한다.
+         */
+        @Size(max = 10, message = "작성 근거 경험은 10개 이하여야 합니다.") List<ExperienceRef> experiences
 ) {
+    public SelfIntroductionUpdateRequest(List<UUID> resumeIds, List<UUID> positionIds, List<Competency> questionTypes,
+                                         String question, String answer, Long expectedVersion) {
+        this(resumeIds, positionIds, questionTypes, question, answer, expectedVersion, null);
+    }
 }

@@ -5,6 +5,8 @@ import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.LinkSource;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.CompanyRepository;
+import com.jobsight.company.experience.ExperienceRepository;
+import com.jobsight.company.experience.ExperienceRevisions;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.position.dto.PositionLabel;
 import com.jobsight.company.posting.JobPostingRepository;
@@ -46,10 +48,15 @@ public class SelfIntroductionAgentService {
     private final JobPostingRepository postings;
     private final CompanyRepository companies;
     private final CurrentUser currentUser;
+    private final ExperienceRepository experiences;
+    private final ExperienceRevisions revisions;
 
     public SelfIntroductionAgentService(SelfIntroductionRepository repository, PositionRepository positions,
                                         ResumeRepository resumes, JobPostingRepository postings,
-                                        CompanyRepository companies, CurrentUser currentUser) {
+                                        CompanyRepository companies, CurrentUser currentUser,
+                                        ExperienceRepository experiences, ExperienceRevisions revisions) {
+        this.experiences = experiences;
+        this.revisions = revisions;
         this.repository = repository;
         this.positions = positions;
         this.resumes = resumes;
@@ -67,6 +74,8 @@ public class SelfIntroductionAgentService {
         private final Map<UUID, PositionLabel> positionLabels = new HashMap<>();
         private final Map<UUID, String> resumeNames = new HashMap<>();
         private final Map<UUID, List<UUID>> resumePositions = new HashMap<>();
+        private final Map<UUID, String> experienceTitles = new HashMap<>();
+        private Map<UUID, List<ExperienceRevisions.Rev>> experienceHistory = Map.of();
 
         void addPositions(Collection<PositionLabel> labels) {
             labels.forEach(label -> positionLabels.put(label.id(), label));
@@ -90,6 +99,12 @@ public class SelfIntroductionAgentService {
                             values.stream().flatMap(value -> value.getResumeIds().stream()).flatMap(this::positionsOf))
                     .distinct().filter(id -> !positionLabels.containsKey(id)).toList();
             if (!missing.isEmpty()) addPositions(positions.findLabels(missing, owner));
+            // 작성 근거가 있는 문항이 있을 때만 경험 이름과 개정 이력을 읽는다(각 1회).
+            List<UUID> used = values.stream().flatMap(value -> value.getExperienceLinks().stream())
+                    .map(SelfIntroduction.ExperienceLink::experienceId).distinct().toList();
+            if (used.isEmpty()) return;
+            experiences.findHeads(owner).forEach(head -> experienceTitles.put(head.id(), head.title()));
+            experienceHistory = revisions.of(owner, used);
         }
 
         Stream<UUID> positionsOf(UUID resumeId) {
@@ -215,7 +230,13 @@ public class SelfIntroductionAgentService {
         List<String> matched = terms.stream().filter(term -> words.stream().anyMatch(word -> word.contains(term))).toList();
         return new SelfIntroductionList.Item(value.getId(), value.getQuestion(), preview, full ? value.getAnswer() : null,
                 answer.length(), value.getUpdatedAt(), score, matched, direct.isEmpty() ? "출처 미상" : "직접 출처",
-                new SelfIntroductionList.Sources(direct, indirect), types, usedFor, value.getVersion());
+                new SelfIntroductionList.Sources(direct, indirect), types, usedFor, value.getVersion(),
+                value.getExperienceLinks().stream()
+                        .map(link -> new SelfIntroductionList.ExperienceUse(link.experienceId(), link.experienceRevision(),
+                                context.experienceTitles.get(link.experienceId()), link.source().trust(),
+                                ExperienceRevisions.needsReview(context.experienceHistory.getOrDefault(link.experienceId(),
+                                        List.of()), link.experienceRevision())))
+                        .sorted(Comparator.comparing(SelfIntroductionList.ExperienceUse::experienceId)).toList());
     }
 
     /**

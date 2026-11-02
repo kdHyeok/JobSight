@@ -158,41 +158,63 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 - `resume_row_add({id,section,request,expectedVersion?})`: 섹션 맨 뒤에 행 추가. `request` 에는 **그 섹션의 필드만** 넣는다 —
   다른 섹션 필드가 섞이면 UNKNOWN_ROW_FIELD 로 거부된다(조용히 버려져 값이 사라지는 일을 막기 위해).
   응답은 이력서 전체가 아니라 `{id, version, section, count, index, row}` 개요다.
-- `resume_row_update({id,section,index,request,expectedVersion})`: `index` 는 **0부터**. **보낸 필드만 덮고 빠진 필드는 유지**한다.
+- `resume_row_update({id,section,index|experienceId,request,expectedVersion})`: 대상은 `index`(**0부터**) 또는 `experienceId`(그 경험이 연결된 행) 중 하나다.
+  **경험 행은 `experienceId` 로 지목한다** — 행 번호가 밀려도 같은 행을 고친다. **보낸 필드만 덮고 빠진 필드는 유지**한다.
   필드를 비우려면 `""` 를 보낸다. 성적표처럼 행 도구가 표현하지 못하는 표는 그대로 남는다.
-- `resume_row_delete({id,section,index,expectedVersion})`: 뒤 행이 앞으로 당겨진다. 여러 행을 지울 때는 큰 index 부터, 응답의 version 을 이어서 쓴다.
+- `resume_row_delete({id,section,index|experienceId,expectedVersion})`: 뒤 행이 앞으로 당겨진다. 여러 행을 지울 때는 큰 index 부터, 응답의 version 을 이어서 쓴다.
 `resume_update` 는 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic` 을 **null 이면 유지, `[]` 면 비움**으로 다룬다. 섹션 하나만 바꿀 때는 행 도구가 더 안전하다.
+**경험 앵커**: 프로젝트·경력·대내외활동·교육이수 행의 `experienceId`·`experienceRevision` 은 그 행이 쓴 경험 원본과 개정이다. 행을 고쳐 보낼 때
+**지우거나 바꾸지 않는다**(개정을 바꾸면 400 `EXPERIENCE_REVISION_MISMATCH`). `resume_update` 에서 경험이 연결된 행이 빠지면 409 `LINKED_ROWS_MISSING` 이다 —
+일부러 지우는 것이면 그 경험 id 를 `request.removedExperienceIds` 에 모두 적는다.
 사용자가 이력서 항목을 읽어 달라고 하면 `resume_get` 결과의 섹션 순서(학력→…→프로젝트)대로 보여준다.
 
 **이력서 작성·수정 절차** (경험을 빠뜨리지 않게)
 1. `experience_index` 를 부르고 `complete:true` 인지 본다. `false` 면 `nextCursor` 를 `cursor` 로 넘겨 끝까지 읽는다.
-   `unlinkedRows` 는 내 모든 이력서의 경험 행(프로젝트·경력·대내외활동·교육이수)을 (종류, 제목, 시작 연월)로 묶은 목차다. 지금은 `experiences` 가 늘 `[]` 다.
-2. 고칠 이력서는 `resume_get({id, view:"outline"})` 으로 개요(`version`, 섹션별 `count`, 행 머리, `missing`, `unlinkedRows`)를 읽는다. 내용이 필요할 때만 full 로 읽는다.
-3. `missing[]`(다른 이력서에는 있는데 이 이력서에 없는 경험)과 목차를 **번호 목록으로 사용자에게 보여 주고 넣을 것을 확인받는다.**
-   `maybeUnlinked:true` 는 제목은 같고 기간만 다른 행이 이미 있다는 뜻이다 — 같은 경험인지 사용자에게 묻는다.
-4. 고른 행을 행 도구로 추가한다(`sources` 의 원래 이력서 행을 `resume_get` 으로 읽어 옮긴다). 새 이력서는 `resume_create` 로 만들고,
-   응답 맨 앞의 `missing` 이 비어 있지 않으면 빠뜨린 것이 없는지 다시 확인한다.
+   `experiences` 는 경험 원본(사실의 기준) 목차이고, `unlinkedRows` 는 아직 경험 원본과 연결되지 않은 이력서 행 묶음이다.
+   `importHint` 가 있으면 웹 [경험] 화면의 '경험 가져오기'로 미등록 행을 등록하라고 안내한다(MCP 로 가져오지 않는다).
+2. 고칠 이력서는 `resume_get({id, view:"outline"})` 으로 개요(`version`, 섹션별 `count`, 행 머리와 `experienceId`, `missing`, `unlinkedRows`)를 읽는다. 내용이 필요할 때만 full 로 읽는다.
+3. `missing[]`(이 이력서에 없는 경험)과 목차를 **번호 목록으로 사용자에게 보여 주고 넣을 것을 확인받는다.** `experienceId` 가 있으면 은행 경험,
+   null 이면 다른 이력서에만 있는 미연결 행이다. `maybeUnlinked:true` 는 같은 종류·제목의 미연결 행이 이미 있다는 뜻이다 — 같은 경험인지 사용자에게 묻는다.
+4. 은행 경험이면 `resume_add_experiences({id, request:{items:[{experienceId}]}, expectedVersion?})` 로 넣는다 — 경험 원본의 사실로 행을 만들고
+   개정을 기록한다. 은행에 없는 경험이면 사용자 확인 뒤 `experience_save` 로 등록하고 넣는다. 기업에 맞춘 문구는 `resume_row_update` 에 `experienceId` 로 다듬는다.
+   새 이력서는 `resume_create` 로 만들고, 응답 맨 앞의 `missing` 이 비어 있지 않으면 빠뜨린 것이 없는지 다시 확인한다.
 5. 마지막 응답의 `count` 가 계획한 행 수와 같은지 대조한다.
 
 ## 지원 맞춤 경험 찾기
 
-`experience_search({request:{positionId?|posting?, requirements?, limit?}})` 는 공고에 맞는 내 이력서 경험 행과 그 원문 출처를 찾는다. 아무것도 저장하지 않는다.
+`experience_search({request:{positionId?|posting?, requirements?, limit?}})` 는 공고에 맞는 내 경험(경험 원본 `type:"EXPERIENCE"`, 아직 연결되지 않은 이력서 행 `type:"RESUME_ROW"`)과 그 출처를 찾는다. 아무것도 저장하지 않는다.
 1. 등록된 직무면 `positionId`, 아니면 공고 본문을 다섯 칸으로 나눠 `posting` 으로 넘긴다: `qualifications`(지원자격), `responsibilities`(담당업무),
    `requiredSkills`(요구 역량), `preferredSkills`(우대 역량), `techStack`(기술 환경 목록), 그리고 `companyName`·`positionName`.
    **고르기 전에는 공고를 저장하지 않는다.** 공고 여러 개를 추릴 때도 공고마다 `posting` 으로 부른다.
 2. `requirements` 에 공고 원문에서 뽑은 요구를 넣는다: `{text: 기술 이름("Kafka"), field: 위 칸 이름, kind: SKILL|QUALIFICATION, quote: 공고 문장}`.
    내 자료에 없는 기술도 넣어야 `uncovered` 에 나온다. `text` 에 문장을 넣지 않는다. 경력 연수·학력·고용 조건은 `QUALIFICATION` 이다 — 점수에 넣지 않고
    `qualifications[]` 로 돌아오며 충족 판단은 사용자가 한다. `requirements` 를 빼면 서버가 일반 사전으로 일부만 뽑는다(`REQUIREMENTS_PARTIAL`).
-3. 후보를 `why`(맞은 신호·칸·공고 인용)와 원문 출처 `source`(이력서·섹션·행 번호·`excerpt`)와 함께 보여 준다. `alsoIn` 은 같은 경험의 다른 이력서 행이다.
+3. 후보를 `why`(맞은 신호·칸·공고 인용)와 출처와 함께 보여 준다. RESUME_ROW 는 `source`(이력서·섹션·행 번호·`excerpt`), EXPERIENCE 는 `experienceId`·`revision`
+   (`reviewed:false` 면 'AI 기록')이고 원문 근거는 `experience_index({ids:[...]})` 상세의 `facts.evidence` 다. `alsoIn` 은 같은 경험을 쓴 이력서 행이다.
    `uncovered` 는 지원자격·요구 역량 칸의 요구 중 받쳐 줄 행이 없는 것이다(우대·기술 환경 나열은 결핍이 아니다). `coverageIncomplete:true` 면
    "그 경험이 없다"고 단정하지 말고 이력서에 적지 않은 경험이 있는지 묻는다. `reason:"TAG_MISMATCH_POSSIBLE"` 은 본문에 그 단어가 보인다는 뜻이다.
-4. 사용자가 지원할 공고와 경험을 고른 뒤에 **고른 공고만** `posting_create` 로 저장한다. 이어서 자기소개를 쓰면 `self_intro_create(positionIds)` 로 그 직무에 연결한다.
+4. 사용자가 지원할 공고와 경험을 고른 뒤에 **고른 공고만** `posting_create` 로 저장한다. 이어서 자기소개를 쓰면
+   `self_intro_create(positionIds, experiences)` 로 그 직무와 쓴 경험에 연결한다. `experiences` 는 `[{experienceId, experienceRevision}]` — 읽은 개정 그대로다.
+   상세의 `needsReview:true`(재검토 필요)나 `reviewed:false`(AI 기록)인 사실은 쓰기 전에 사용자에게 확인받는다.
+
+## 경험 원본 등록과 정리
+
+경험 원본이 사실의 기준이다. 이력서 행과 자소서는 그 경험의 기업별 표현이다.
+1. 사용자가 준 설명·자료를 읽고 `experience_index` 로 겹치는 경험이 있는지 먼저 찾는다. 자소서 답변은 "어느 경험을 썼나"를 찾는 데만 쓰고 사실 근거로 쓰지 않는다.
+2. 역할·행동·결과·측정 범위를 근거(인용 `quote`·주변 문맥·위치)와 함께 정리하고, 확인하지 못한 것(`unverified`)과 자료끼리 어긋나는 것(`conflicts`)을 따로 적는다.
+   로컬 파일은 경로가 아니라 필요한 발췌를 근거로 넣는다(로컬 경로만 있으면 400 `EVIDENCE_LOCAL_PATH`).
+3. 사용자가 요청하고 검토한 범위만 `experience_save` 로 저장한다. 겹치는 경험이 있으면 새로 만들지 말고 그 경험에 저장한다:
+   `experience_index({ids:[id]})` 상세의 `version` 을 `request.expectedVersion` 으로 넘기고, `facts` 배열 항목의 기존 `id` 는 그대로 둔다. 고친 항목은 같은 `id`, 새 항목은 `id` 없이 보낸다.
+   개정 종류(ADD·CORRECT)는 서버가 판정해 `changeKind` 로 준다. `CORRECT` 면 응답 `needsReview[]` 의 이력서·자소서를 사용자에게 알린다.
+   `EXPERIENCE_STALE`(409)이면 다시 읽어 바뀐 사실을 확인한 뒤 보낸다. 저장 내용은 "AI 기록"이고 사용자가 웹에서 검토해 확정한다.
+4. 같은 경험이 둘로 등록된 것을 찾으면 합치지 않는다. 웹에서 행을 남길 경험에 "다른 경험에 연결"로 다시 잇고, 쓰지 않게 된 경험을 지우라고 안내한다(경험 삭제는 웹 전용).
 
 ## 자기소개 문항
 
 `self_intro_list`, `self_intro_get({id})`, `self_intro_create({request})`,
 `self_intro_update({id,request})`, `self_intro_delete({id})`를 사용한다.
-요청 필드는 `resumeIds`, `positionIds`(이 답변을 낸 지원 직무, 10개 이하), `questionTypes`(문항 유형 코드, 3개 이하), `question`, `answer`다.
+요청 필드는 `resumeIds`, `positionIds`(이 답변을 낸 지원 직무, 10개 이하), `questionTypes`(문항 유형 코드, 3개 이하), `question`, `answer`,
+`experiences`(작성 근거 `[{experienceId, experienceRevision}]`, 10개 이하, 두 키 필수)다. 목록·상세 항목의 `experiences[]` 는 저장된 쌍 그대로이고 `needsReview` 가 붙는다.
 **생성은 `resumeIds` 또는 `positionIds` 가 1개 이상**이어야 하고, 수정은 연결 0개도 된다.
 
 **버전 규칙.** 사용자도 웹에서 같은 답변을 고친다. `self_intro_get`·목록 항목과 생성·수정 응답에는 `version` 이 있다.
@@ -213,7 +235,8 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 **저장한 연결은 "AI 기록"이다.** MCP로 보낸 `positionIds`·`questionTypes` 는 항상 AI 기록으로 저장되고, 확정은 사용자가 웹 `/introductions` 에서만 한다(✓ 확정, ✗ 해제).
 자소서를 저장하면 어느 직무용으로 연결했는지와 "웹에서 확정해야 한다"는 것을 사용자에게 알린다. 확정 도구는 없다.
 수정에서 연결을 바꾸지 않으면 `positionIds`·`questionTypes` 를 뺀다. **MCP 수정은 연결을 더하기만 한다** — 목록에서 빼도 기존 연결(확정·AI 기록)은 지워지지 않는다.
-연결을 빼야 하면(잘못 단 직무 포함) 사용자에게 웹 `/introductions` 에서 ✗ 로 해제하라고 안내한다. 더한 결과가 직무 10개·유형 3개를 넘으면 `TOO_MANY_LINKS` 다.
+연결을 빼야 하면(잘못 단 직무 포함) 사용자에게 웹 `/introductions` 에서 ✗ 로 해제하라고 안내한다. 더한 결과가 직무 10개·유형 3개·경험 10개를 넘으면 `TOO_MANY_LINKS` 다.
+작성 근거 `experiences` 도 더하기만 한다 — 이미 연결된 경험은 건너뛰고(개정도 그대로), 빼기·개정 바꾸기는 웹에서 한다.
 다른 회사용 답변을 고쳐 쓸 때는 기존 문항을 수정하지 말고 새 문항으로 만든다 — 원래 회사의 직접 출처가 남아 있어야 재사용 금지 표시가 유지된다.
 
 ## 계정과 관리자

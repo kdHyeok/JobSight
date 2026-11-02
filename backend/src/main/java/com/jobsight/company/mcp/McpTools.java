@@ -73,7 +73,8 @@ public class McpTools {
         // 상세·생성은 응답 머리에 missing 을 붙이는 래퍼다(설계 5.3, 3단계). 웹 REST 응답은 그대로다.
         register("resume_get", actions, "getResume", true, false);
         register("resume_create", actions, "createResume", false, false);
-        register("resume_update", resumes, "update", false, true);
+        // 저장은 LINKED_ROWS_MISSING 가드와 removedExperienceIds 가 있는 래퍼다(설계 5.3, 4단계). 웹 PUT 은 가드가 없다.
+        register("resume_update", actions, "updateResume", false, true);
         register("resume_copy", resumes, "copy", false, false);
         register("resume_delete", resumes, "delete", false, true);
         // 행 도구: 서버가 조회→수정→저장을 한 트랜잭션으로 묶는다. 문서 전체를 되돌려 보내지 않아도 된다.
@@ -81,6 +82,7 @@ public class McpTools {
         register("resume_row_add", actions, "addResumeRow", false, false);
         register("resume_row_update", actions, "updateResumeRow", false, true);
         register("resume_row_delete", actions, "deleteResumeRow", false, true);
+        register("resume_add_experiences", actions, "addResumeExperiences", false, false);
         // 목록·상세는 미리보기·출처·trust 를 싣는 MCP 전용 모양이다. 웹 REST 목록(답변 전문)은 그대로 둔다(설계 5.3).
         // 확정(confirm)은 웹 전용이라 등록하지 않는다.
         register("self_intro_list", actions, "listSelfIntros", true, false);
@@ -88,9 +90,10 @@ public class McpTools {
         register("self_intro_create", selfIntroductions, "create", false, false);
         register("self_intro_update", selfIntroductions, "update", false, true);
         register("self_intro_delete", selfIntroductions, "delete", false, true);
-        // 경험 목차·검색(3단계): 이력서 행 묶음이 자료원이다. 4단계는 형식을 유지하고 자료원만 경험 원본으로 바꾼다.
+        // 경험 목차·검색·저장(4단계): 경험 원본과 미연결 행 묶음이 자료원이다. 검토 확정·삭제·가져오기는 웹 전용이라 등록하지 않는다.
         register("experience_index", actions, "indexExperiences", true, false);
         register("experience_search", actions, "searchExperiences", true, false);
+        register("experience_save", actions, "saveExperience", false, false);
         register("account_get", actions, "me", true, false);
         register("account_update", auth, "updateMe", false, true);
         register("admin_users_list", admin, "findUsers", true, false);

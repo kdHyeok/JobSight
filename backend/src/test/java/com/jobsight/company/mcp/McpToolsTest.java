@@ -37,6 +37,7 @@ class McpToolsTest {
     AdminStatsService stats = mock(AdminStatsService.class);
     com.jobsight.company.experience.ExperienceService experiences = mock(com.jobsight.company.experience.ExperienceService.class);
     com.jobsight.company.experience.ExperienceSearch experienceSearch = mock(com.jobsight.company.experience.ExperienceSearch.class);
+    com.jobsight.company.experience.ExperienceBankService bank = mock(com.jobsight.company.experience.ExperienceBankService.class);
     CurrentUser current = new CurrentUser();
     McpTools tools;
     McpPrincipal principal = new McpPrincipal(UUID.randomUUID(), Set.copyOf(McpOAuthConfig.SCOPES));
@@ -48,7 +49,7 @@ class McpToolsTest {
                 new ResumeController(resumes), new SelfIntroductionController(selfIntroductions),
                 new AdminController(users, settings, stats, current), new AuthController(users, settings, current, null, null),
                 new McpActions(current, users, positions, references, contents, resumes, selfIntroAgent, experiences,
-                        experienceSearch, JsonMapper.builder().findAndAddModules().build()),
+                        experienceSearch, bank, JsonMapper.builder().findAndAddModules().build()),
                 JsonMapper.builder().findAndAddModules().build(), validator);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
                 List.of(new SimpleGrantedAuthority("ROLE_USER"))));
@@ -56,7 +57,7 @@ class McpToolsTest {
     @AfterEach void clear() { SecurityContextHolder.clearContext(); }
 
     @Test void catalogScopesAndAdministratorRoleAreEnforced() {
-        assertThat(tools.list(principal)).hasSize(48);
+        assertThat(tools.list(principal)).hasSize(50);
         assertThat(tools.list(principal)).extracting(tool -> tool.get("name")).contains(
                 "resume_list", "resume_get", "resume_create", "resume_update", "resume_copy", "resume_delete",
                 "self_intro_list", "self_intro_get", "self_intro_create", "self_intro_update", "self_intro_delete",
@@ -86,7 +87,7 @@ class McpToolsTest {
         UUID resumeId = UUID.randomUUID();
         when(resumes.create(any())).thenReturn(new com.jobsight.company.resume.dto.ResumeResponse(resumeId,
                 "플러그인 테스트 이력서", ResumeContent.empty(), List.of(), 0L, Map.of(),
-                java.time.Instant.EPOCH, java.time.Instant.EPOCH));
+                java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of()));
         tools.call("resume_create", Map.of("request", Map.of(
                 "name", "플러그인 테스트 이력서",
                 "content", Map.of("basic", Map.of("name", "테스트 사용자")),
@@ -95,7 +96,7 @@ class McpToolsTest {
                 && request.content().basic().name().equals("테스트 사용자")));
 
         when(selfIntroductions.create(any())).thenReturn(new com.jobsight.company.selfintro.dto.SelfIntroductionResponse(
-                UUID.randomUUID(), List.of(resumeId), "지원 동기", "협업 경험", java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of(), 0L));
+                UUID.randomUUID(), List.of(resumeId), "지원 동기", "협업 경험", java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of(), 0L, List.of()));
         tools.call("self_intro_create", Map.of("request", Map.of(
                 "resumeIds", List.of(resumeId.toString()), "question", "지원 동기", "answer", "협업 경험")), principal);
         tools.call("self_intro_list", Map.of("q", "협업", "resumeId", resumeId.toString()), principal);
@@ -120,7 +121,7 @@ class McpToolsTest {
         verifyNoInteractions(selfIntroductions);
 
         when(selfIntroductions.create(any())).thenReturn(new com.jobsight.company.selfintro.dto.SelfIntroductionResponse(
-                id, List.of(), "지원 동기", null, java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of(), 0L));
+                id, List.of(), "지원 동기", null, java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of(), 0L, List.of()));
         tools.call("self_intro_create", Map.of("request", Map.of("positionIds", List.of(positionId.toString()),
                 "questionTypes", List.of("MOTIVATION", "ASPIRATION"), "question", "지원 동기")), principal);
         verify(selfIntroductions).create(argThat(request -> request.resumeIds() == null
@@ -164,7 +165,7 @@ class McpToolsTest {
                 "request", Map.of("name", "SQLD", "acquiredYm", "2026.03")), principal);
         verify(resumes).addRow(eq(id), eq(ResumeSection.certificates), argThat(r -> r.name().equals("SQLD") && r.school() == null), isNull());
         tools.call("resume_row_delete", Map.of("id", id.toString(), "section", "projects", "index", 2, "expectedVersion", 7), principal);
-        verify(resumes).deleteRow(id, ResumeSection.projects, 2, 7L);
+        verify(resumes).deleteRow(id, ResumeSection.projects, 2, null, 7L);
         assertThatThrownBy(() -> tools.call("resume_row_delete", Map.of("id", id.toString(), "section", "nope", "index", 0), principal))
                 .isInstanceOf(RuntimeException.class);
         var schema = JsonMapper.builder().build().writeValueAsString(tools.list(principal).stream()

@@ -66,7 +66,8 @@ public class Resume {
         this.content = contentJson;
     }
 
-    public void update(String name, String contentJson) {
+    /** 패키지 밖에서 content 를 바꾸지 못하게 한다 — 쓰기는 ResumeWriter 하나로(설계 6.2). */
+    void update(String name, String contentJson) {
         this.name = name;
         this.content = contentJson;
         this.updatedAt = Instant.now();

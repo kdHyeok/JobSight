@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -51,7 +52,10 @@ class SelfIntroductionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SelfIntroductionService(repository, resumeRepository, positionRepository, currentUser);
+        service = new SelfIntroductionService(repository, resumeRepository, positionRepository, currentUser,
+                mock(com.jobsight.company.common.OwnerLock.class),
+                mock(com.jobsight.company.experience.ExperienceRepository.class),
+                mock(org.springframework.jdbc.core.JdbcTemplate.class));
         lenient().when(currentUser.id()).thenReturn(OWNER_ID);
         lenient().when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
             SelfIntroduction value = invocation.getArgument(0);

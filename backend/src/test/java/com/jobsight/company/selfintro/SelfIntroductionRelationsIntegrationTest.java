@@ -76,13 +76,14 @@ import static org.assertj.core.api.Assertions.tuple;
 @SpringBootTest(properties = "spring.jpa.properties.hibernate.generate_statistics=true")
 class SelfIntroductionRelationsIntegrationTest {
     /**
-     * MCP 목록·상세 1회의 SQL 수 상한(2026-11-02 실측 6·6·7·7, docs/backend.md). 문항 1 + 문항 컬렉션 3(이력서·직무·유형)
+     * MCP 목록·상세 1회의 SQL 수 상한(2026-11-02 실측 6·6·7·7, 4단계에서 작성 근거 컬렉션 1회가 더해져 7·7·8·8, docs/backend.md).
+     * 문항 1 + 문항 컬렉션 4(이력서·직무·유형·작성 근거 경험)
      * + 이력서 이름 1 + 직무 이름 1. 필터가 있으면 대상 직무 이름 1회와 공고·기업 소유 확인(exists) 1회가 붙고,
-     * 대상 직무 이름을 이미 읽었으면 출처용 직무 이름 조회는 생략된다. 컬렉션은 100건씩 묶여 계정의 문항이 100건 이하면 문항 수와 무관하다.
+     * 대상 직무 이름을 이미 읽었으면 출처용 직무 이름 조회는 생략된다. 작성 근거가 있는 문항이 있을 때만 경험 이름·개정 이력 2회가 붙는다. 컬렉션은 100건씩 묶여 계정의 문항이 100건 이하면 문항 수와 무관하다.
      */
-    private static final long MAX_GET_STATEMENTS = 6;
-    private static final long MAX_LIST_STATEMENTS = 6;
-    private static final long MAX_FILTERED_LIST_STATEMENTS = 7;
+    private static final long MAX_GET_STATEMENTS = 7;
+    private static final long MAX_LIST_STATEMENTS = 7;
+    private static final long MAX_FILTERED_LIST_STATEMENTS = 8;
 
     @Container
     static final PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");

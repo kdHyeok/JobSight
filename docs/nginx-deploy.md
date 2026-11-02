@@ -139,3 +139,25 @@ docker compose up -d --build
 ```bash
 docker compose exec -T db pg_dump -U jobsite_app -d jobsite > ~/jobsite-db-$(date +%Y%m%d).sql
 ```
+
+### 정기 백업과 복원 리허설 (경험 원본 4a 사용 배포의 선행 조건, 설계 7절 R54)
+
+경험 원본(V25)부터 사실의 정본이 DB 에만 있다. 사용 배포 전에 아래를 한 번 끝내 둔다. **아직 수행하지 않았다(절차만 적었다).**
+
+1. 정기 덤프(사용자 정의 형식). 서버 crontab 에 하루 한 번:
+   ```bash
+   cd ~/jobsite && docker compose exec -T db pg_dump -U jobsite_app -d jobsite -Fc > ~/backups/jobsite-$(date +%Y%m%d).dump
+   find ~/backups -name 'jobsite-*.dump' -mtime +14 -delete   # 2주 보관
+   ```
+2. 다른 기기로 사본: `rsync -a ~/backups/ <다른 기기>:jobsite-backups/` (같은 디스크에만 있으면 백업이 아니다).
+3. 복원 리허설: 빈 DB 에 복원해 스모크를 돈다. 운영 스택이 아니라 별도 프로젝트 이름으로 한다.
+   ```bash
+   docker run -d --name jobsite-restore -e POSTGRES_PASSWORD=rehearsal postgres:17-alpine
+   docker cp ~/backups/jobsite-YYYYMMDD.dump jobsite-restore:/tmp/db.dump
+   docker exec jobsite-restore createuser -U postgres jobsite_app
+   docker exec jobsite-restore createdb -U postgres -O jobsite_app jobsite
+   docker exec jobsite-restore pg_restore -U postgres -d jobsite --no-owner --role=jobsite_app /tmp/db.dump
+   docker exec jobsite-restore psql -U postgres -d jobsite -c "select version, success from flyway_schema_history order by installed_rank desc limit 1"
+   ```
+   복원 DB 를 가리키는 별도 compose 프로젝트(다른 포트)로 백엔드를 띄워 `bash scripts/smoke.sh <그 주소>` 가 PASS 인지 본 뒤 컨테이너를 지운다.
+4. 리허설 날짜와 결과를 이 절 아래에 적는다.

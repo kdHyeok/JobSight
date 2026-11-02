@@ -52,6 +52,20 @@ public class SelfIntroduction {
         public Competency key() { return code; }
     }
 
+    /**
+     * 작성 근거 uses: 이 답변에 쓴 경험과 그 개정(설계 6.8). 키는 경험 id 다(한 답변에 경험당 한 쌍).
+     * (경험, 개정, owner) FK 는 지연 NO ACTION 이라 쓰기 뒤 SET CONSTRAINTS ALL IMMEDIATE 로 위반을 당긴다.
+     */
+    @Embeddable
+    public record ExperienceLink(
+            @Column(name = "owner_id", nullable = false) UUID ownerId,
+            @Column(name = "experience_id", nullable = false) UUID experienceId,
+            @Column(name = "experience_revision", nullable = false) int experienceRevision,
+            @Enumerated(EnumType.STRING) @Column(name = "source", nullable = false, length = 4) LinkSource source
+    ) implements Link<UUID> {
+        public UUID key() { return experienceId; }
+    }
+
     @Id
     private UUID id;
 
@@ -73,6 +87,11 @@ public class SelfIntroduction {
     @CollectionTable(name = "self_introduction_competencies",
             joinColumns = @JoinColumn(name = "self_introduction_id"))
     private Set<CompetencyLink> questionTypes = new LinkedHashSet<>();
+
+    @ElementCollection
+    @CollectionTable(name = "self_introduction_experiences",
+            joinColumns = @JoinColumn(name = "self_introduction_id"))
+    private Set<ExperienceLink> experienceLinks = new LinkedHashSet<>();
 
     @Column(nullable = false, length = 1000)
     private String question;
@@ -120,6 +139,18 @@ public class SelfIntroduction {
         relink(questionTypes, codes, code -> new CompetencyLink(ownerId, code, source));
     }
 
+    /**
+     * 작성 근거를 이 (경험 → 개정) 묶음으로 맞춘다. 같은 경험·같은 개정으로 남는 연결은 출처를 유지하고, 새 연결과 개정이 바뀐 연결만
+     * source 로 단다. MCP 의 더하기만은 서비스가 wanted 에 기존 연결을 미리 넣어 표현한다.
+     */
+    public void linkExperiences(java.util.Map<UUID, Integer> wanted, LinkSource source) {
+        experienceLinks.removeIf(link -> !Integer.valueOf(link.experienceRevision()).equals(wanted.get(link.experienceId())));
+        Set<UUID> kept = experienceLinks.stream().map(ExperienceLink::experienceId).collect(Collectors.toSet());
+        wanted.forEach((experienceId, revision) -> {
+            if (!kept.contains(experienceId)) experienceLinks.add(new ExperienceLink(ownerId, experienceId, revision, source));
+        });
+    }
+
     /** 웹의 ✓: 연결된 AI 기록을 USER 로 바꾼다. 연결돼 있지 않은 대상이 하나라도 있으면 false. */
     public boolean confirm(Collection<UUID> positionIds, Collection<Competency> codes) {
         return confirm(positionLinks, positionIds, id -> new PositionLink(ownerId, id, LinkSource.USER))
@@ -162,6 +193,7 @@ public class SelfIntroduction {
     public Set<UUID> getResumeIds() { return Set.copyOf(resumeIds); }
     public Set<PositionLink> getPositionLinks() { return Set.copyOf(positionLinks); }
     public Set<CompetencyLink> getQuestionTypes() { return Set.copyOf(questionTypes); }
+    public Set<ExperienceLink> getExperienceLinks() { return Set.copyOf(experienceLinks); }
     public String getQuestion() { return question; }
     public String getAnswer() { return answer; }
     public long getVersion() { return version; }
