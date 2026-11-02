@@ -133,6 +133,7 @@ check "GET /swagger-ui/index.html"          "401"  "$(code "$BASE/swagger-ui/ind
 check "GET /v3/api-docs"                    "401"  "$(code "$BASE/v3/api-docs")"
 check "POST /api/companies (CSRF 없음)"     "403"  "$(code -X POST -H 'Content-Type: application/json' -d '{}' "$BASE/api/companies")"
 check "PATCH /api/auth/me (CSRF 없음)"       "403"  "$(code -X PATCH -H 'Content-Type: application/json' -d '{}' "$BASE/api/auth/me")"
+check "POST 자소서 확정 (CSRF 없음)"         "403"  "$(code -X POST -H 'Content-Type: application/json' -d '{}' "$BASE/api/self-introductions/00000000-0000-0000-0000-000000000000/confirm")"
 check "POST /api/auth/refresh (CSRF 없음)"   "403"  "$(code -X POST "$BASE/api/auth/refresh")"
 check "DELETE /api/admin/users/x (CSRF 없음)" "403"  "$(code -X DELETE "$BASE/api/admin/users/00000000-0000-0000-0000-000000000000")"
 

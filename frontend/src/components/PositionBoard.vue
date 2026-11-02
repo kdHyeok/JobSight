@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import {
   ApiClientError,
   deletePosition,
+  getPosition,
   listPositions,
   replacePositionReferences,
   updatePosition,
@@ -15,6 +16,7 @@ import PositionForm from './PositionForm.vue'
 import type { Position, PositionPayload, ReferenceItem, ReferencePayload } from '../types/position'
 import type { PostingTab } from '../types/posting'
 import { ddayLabel, ddayTone, postingTabFor } from '../types/posting'
+import { linkedSelfIntroCount, writtenForNotice } from '../utils/writtenFor'
 
 const props = defineProps<{ focus: string | null }>()
 
@@ -36,6 +38,8 @@ const selected = ref<Position | null>(null)
 const saving = ref(false)
 const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<Position | null>(null)
+/** 이 직무로 쓴 자소서의 직접 출처가 함께 사라진다는 안내. 목록에서 고른 직무라 상세를 한 번 불러 수를 얻는다. */
+const deleteNotice = ref('')
 const deleting = ref(false)
 /** 참고 정보 삭제는 여러 직무에 영향을 주므로 따로 확인받는다. */
 const referenceDeleteTarget = ref<ReferenceItem | null>(null)
@@ -197,6 +201,13 @@ async function createAndAttach(payload: ReferencePayload) {
   }
 }
 
+async function askDelete(target: Position) {
+  deleteTarget.value = target
+  deleteNotice.value = ''
+  const count = await linkedSelfIntroCount(target, () => getPosition(target.id))
+  if (deleteTarget.value?.id === target.id) deleteNotice.value = writtenForNotice(count, '이 직무로')
+}
+
 async function remove() {
   if (!deleteTarget.value) return
   deleting.value = true
@@ -293,7 +304,7 @@ onMounted(async () => {
   >
     <template #actions>
       <button type="button" class="button secondary compact" @click="formErrors = {}; mode = 'edit'">수정</button>
-      <button type="button" class="button danger compact" @click="deleteTarget = selected">삭제</button>
+      <button type="button" class="button danger compact" @click="askDelete(selected)">삭제</button>
     </template>
     <PositionDetail
       :position="selected"
@@ -341,7 +352,7 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="직무를 삭제할까요?"
     :subject="deleteTarget.name"
-    detail=" 직무 기록이 영구 삭제됩니다. 공고의 마지막 직무라면 채용공고와 절차도 함께 삭제됩니다."
+    :detail="` 직무 기록이 영구 삭제됩니다. 공고의 마지막 직무라면 채용공고와 절차도 함께 삭제됩니다.${deleteNotice}`"
     aria-label="직무 삭제 확인"
     :busy="deleting"
     @confirm="remove"

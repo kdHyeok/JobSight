@@ -12,7 +12,7 @@
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
 | 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
-| 스키마 | `resources/db/migration/V1~V19` — Flyway, `ddl-auto: validate` |
+| 스키마 | `resources/db/migration/V1~V23` — Flyway, `ddl-auto: validate` |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
 
 DB 연결 획득은 3초 안에 실패시킨다. PostgreSQL 행 잠금(직무 삭제·공고 수정의 공고 행, 이력서 쓰기의 이력서 행)은 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다.
@@ -29,6 +29,10 @@ EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, 
 - 이 테스트가 상한 9를 단언한다. 목록 경로에 SQL 을 더하면 여기서 깨진다. 늘어난 이유가 정당하면 실측해서 상한과 이 줄을 함께 고친다.
 - `hibernate.generate_statistics` 는 그 테스트의 `@SpringBootTest(properties=…)` 에서만 켠다. `application.yml` 에 넣지 않는다.
 - 함정: 같은 종류의 소유 엔티티가 100개를 넘으면(예: 직무 101개) 그 컬렉션의 SQL 이 묶음 수만큼 는다(101개면 2회). 컬렉션 하나에 원소가 많은 것과는 무관하다. 새 컬렉션은 EAGER 든 LAZY 든 이 설정을 자동으로 탄다.
+- MCP 자소서 `self_intro_get`·`self_intro_list`(`SelfIntroductionAgentService`)는 계정 직무 상세(`PositionService.findAll`)와 이력서 엔티티(content JSONB)를
+  읽지 않고, 연결된 것의 이름만 constructor projection(`PositionRepository.findLabels`·`findAllLabels`, `ResumeRepository.findPositionRows`)으로 읽는다.
+  `SelfIntroductionRelationsIntegrationTest.agentReadsOnlyLabelsWithinStatementLimit` 가 상한(실측 상세 6·목록 6·직무 필터 7·기업 필터 7)과
+  `Resume`·`Position`·`JobPosting`·`Company` 엔티티 로드 0을 단언한다. 공고·기업 소유 확인은 `existsByIdAndOwnerId` 다.
 
 ## 요청 한 번의 흐름
 
@@ -69,6 +73,8 @@ nginx → SecurityFilterChain
 
 기업별 뉴스·유튜브 자료는 `V11__company_contents.sql`과 `companycontent/*`가 담당한다. 회사·콘텐츠 조회 모두 `owner_id` 조건을 쿼리에 포함한다.
 이력서–직무 연결과 자기소개 문항은 `V19__resume_positions_and_self_introductions.sql`, `resume/*`, `selfintro/*`가 담당한다.
+자기소개의 직접 출처(직무)·문항 유형 간선은 `V23__self_intro_relations.sql` 이다. 간선은 `@ElementCollection` 의 `@Embeddable` record
+(`owner_id` 포함)로 매핑해 `(id, owner_id)` 복합 FK 를 Hibernate 가 그대로 채운다. 시스템 어휘 표 `competencies` 는 enum 과 기동 시 대조한다.
 
 ## 컴파일·테스트
 

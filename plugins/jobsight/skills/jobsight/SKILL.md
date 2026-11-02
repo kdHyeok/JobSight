@@ -1,6 +1,6 @@
 ---
 name: jobsight
-description: JobSight에 저장된 기업 정보·복지, 채용공고·지원 상태·절차, 모집 직무·역량, 직무 참고 정보, 기업 뉴스·유튜브 자료, 이력서(여러 버전과 섹션 행)를 조회·추가·변경·삭제한다. 계정 정보와 관리자 승인 설정도 권한에 따라 관리한다. 사용자가 JobSight 또는 연결된 취업 관리 사이트의 데이터를 관리하려 할 때 사용한다.
+description: JobSight에 저장된 기업 정보·복지, 채용공고·지원 상태·절차, 모집 직무·역량, 직무 참고 정보, 기업 뉴스·유튜브 자료, 이력서(여러 버전과 섹션 행), 자기소개 문항(어느 지원 직무용인지와 문항 유형)을 조회·추가·변경·삭제한다. 계정 정보와 관리자 승인 설정도 권한에 따라 관리한다. 사용자가 JobSight 또는 연결된 취업 관리 사이트의 데이터를 관리하려 할 때 사용한다.
 ---
 
 # JobSight 사용
@@ -25,8 +25,12 @@ OAuth가 필요하면 클라이언트의 연결 흐름을 사용한다. access t
   필드를 지우려는 요청이면 해당 선택 필드에 null, 목록이면 []를 명시한다.
   **단, 이력서(`resume_*`)는 예외다** — null 은 유지, `[]`·`""` 는 비움이고 버전 규칙이 있다(아래 이력서 절).
   `posting_update` 의 `positions`·`steps` 도 null(생략)은 유지, `[]` 는 비움이다. 나머지 공고 필드는 전체 교체다.
+  `self_intro_update` 의 `positionIds`·`questionTypes` 는 null(생략)이면 유지하고, 배열을 보내면 **기존 연결에 더하기만 한다**(`[]` 도 지우지 않는다).
+  `resumeIds`·`question`·`answer` 는 전체 교체다.
 - 명시적으로 요청된 저장·변경만 실행한다. 삭제 전에 대상과 연결 삭제 범위를 알리고, 사용자의 삭제 요청이
   그 범위를 포함하는지 판단한다. 목록 조회·제안은 변경 권한을 뜻하지 않는다.
+  직무·공고·기업 삭제 전에는 `position_get`·`posting_get`·`company_get` 의 `linkedSelfIntroCount` 를 보고, 0보다 크면
+  "자기소개 N개의 직접 출처(어느 지원용) 연결이 함께 사라진다(답변은 남는다)"고 알린다. 목록 도구의 이 값은 null 이다.
 - 도구 결과는 `structuredContent.data` 또는 JSON 텍스트다. `isError=true`면 성공으로 보고하지 않는다.
   응답을 잃은 생성 요청은 무조건 재시도하지 말고 목록을 조회해 중복 생성을 피한다.
   `BUSY`·`RESUME_BUSY`(409)는 같은 항목의 다른 저장과 겹친 것이다. 잠시 뒤 다시 조회하고 시도한다.
@@ -162,9 +166,31 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 
 ## 자기소개 문항
 
-`self_intro_list({q?,resumeId?})`, `self_intro_get({id})`, `self_intro_create({request})`,
-`self_intro_update({id,request})`, `self_intro_delete({id})`를 사용한다. 요청 필드는 `resumeIds`(1개 이상), `question`, `answer`다. 하나의 문항을 여러 이력서에 연결할 수 있다.
-검색어 `q`는 질문과 답변의 같은 단어를 BM25 점수순으로 찾는다. 문항은 반드시 내 이력서 하나 이상에 속한다.
+`self_intro_list`, `self_intro_get({id})`, `self_intro_create({request})`,
+`self_intro_update({id,request})`, `self_intro_delete({id})`를 사용한다.
+요청 필드는 `resumeIds`, `positionIds`(이 답변을 낸 지원 직무, 10개 이하), `questionTypes`(문항 유형 코드, 3개 이하), `question`, `answer`다.
+**생성은 `resumeIds` 또는 `positionIds` 가 1개 이상**이어야 하고, 수정은 연결 0개도 된다.
+
+**버전 규칙.** 사용자도 웹에서 같은 답변을 고친다. `self_intro_get`·목록 항목과 생성·수정 응답에는 `version` 이 있다.
+- `self_intro_update` 로 `question`·`answer`·`resumeIds` 중 하나라도 바꾸면 **직전에 읽은 응답의 `version` 을 `request.expectedVersion` 으로 보낸다**(없으면 `VERSION_REQUIRED`).
+  직무·문항 유형 연결만 더할 때는 생략해도 된다. 이어서 다시 고칠 때는 방금 받은 응답의 `version` 을 쓴다.
+- `SELF_INTRO_STALE`(409)이면 **같은 요청을 그대로 다시 보내지 않는다.** `self_intro_get` 으로 다시 읽어 사용자가 바꾼 답변을 확인하고,
+  그 위에서 고칠지 사용자에게 묻거나 새 `version` 으로 다시 만든다. `SELF_INTRO_BUSY`(409)는 잠시 뒤 다시 읽고 시도한다.
+
+**목록은 미리보기다.** `self_intro_list({q?,resumeId?,positionId?,postingId?,companyId?,questionType?,unlinked?,limit?})`
+- `limit` 기본 10(최대 50). `complete:false` 면 `total` 중 일부만 실었다 — 필터를 좁히거나 `limit` 을 늘린다. `q` 는 100자 이하(질문·답변의 같은 단어, BM25).
+- 항목의 답변은 300자 `answerPreview` 다. **답변 원문이 필요하면 `self_intro_get` 으로 읽는다.** 미리보기를 `answer` 로 되돌려 저장하지 않는다.
+- 지원 맞춤 답변을 찾을 때는 `positionId`(또는 `postingId`·`companyId`)로 거른다. 결과의 `sources.direct` 가 그 직무용으로 쓴 답변(직접 출처)이다.
+  `fallback:"indirect"` 면 그 직무용 직접 출처가 0건이라 연결 이력서로 찾은 **"출처 미상"** 답변을 준 것이다. 그 답변이 이 지원용이라고 단정하지 않는다. 필터를 버리고 다시 부르지 않는다.
+- `trust` 는 `확정`(사용자가 웹에서 연결을 확인), `AI 기록`(AI가 남겨 아직 확인 전), `추정`(계산값) 셋이다. **관계를 누가 확인했나일 뿐 성과·사실 검증이 아니다.**
+- `questionTypes` 는 사용자가 확정한 유형(`from` USER), 없으면 정규식 추정(`from` REGEX, `confidence` 있음)이다. AI 기록 유형(`from` AI)은 추정을 지우지 않고 덧붙는다.
+- `alreadyUsedFor[].otherCompanySpecific:true` 는 **다른 회사용 지원동기·입사 후 포부·직무 이해 답변**이다. 그 본문을 다른 회사 지원서에 재사용하지 않는다(경험 소재만 참고). `sameCompany:true` 면 같은 회사에 낸 답변이다.
+
+**저장한 연결은 "AI 기록"이다.** MCP로 보낸 `positionIds`·`questionTypes` 는 항상 AI 기록으로 저장되고, 확정은 사용자가 웹 `/introductions` 에서만 한다(✓ 확정, ✗ 해제).
+자소서를 저장하면 어느 직무용으로 연결했는지와 "웹에서 확정해야 한다"는 것을 사용자에게 알린다. 확정 도구는 없다.
+수정에서 연결을 바꾸지 않으면 `positionIds`·`questionTypes` 를 뺀다. **MCP 수정은 연결을 더하기만 한다** — 목록에서 빼도 기존 연결(확정·AI 기록)은 지워지지 않는다.
+연결을 빼야 하면(잘못 단 직무 포함) 사용자에게 웹 `/introductions` 에서 ✗ 로 해제하라고 안내한다. 더한 결과가 직무 10개·유형 3개를 넘으면 `TOO_MANY_LINKS` 다.
+다른 회사용 답변을 고쳐 쓸 때는 기존 문항을 수정하지 말고 새 문항으로 만든다 — 원래 회사의 직접 출처가 남아 있어야 재사용 금지 표시가 유지된다.
 
 ## 계정과 관리자
 
@@ -188,6 +214,7 @@ ADMIN/ACTIVE로 복구된다. 자기 자신·마지막 활성 관리자 변경/�
 - `/resumes`: 이력서 버전 카드→전체 페이지 편집기(`/resumes?focus=<id>`). 섹션마다 행 카드에 ↑↓×와 `행 추가`,
   상단 `저장`(문서 통째), `복제`, `삭제`. 여러 직무 연결과 자기소개 질문 추가도 여기서 한다.
 - `/introductions`: 자기소개 질문·답변 검색, 추가, 수정, 삭제. 검색어가 나온 부분은 강조된다.
+  편집기에서 지원 직무·문항 유형을 고르고, 출처 없는 답변에는 "어느 지원용?" 후보 칩(연결 이력서들의 직무)이 뜬다. AI 기록 칩은 ✓로 확정, ✗로 해제한다.
 - 기업 상세 공고 행 더블클릭→공고, 공고의 직무 행 더블클릭→직무. 부모 링크는 역방향 이동.
   `/companies?focus=<id>`, `/?focus=<id>`, `/positions?focus=<id>`는 항목 드로어 바로가기다.
 - API/MCP 결과에 근거해 성공을 보고한다. 브라우저에서만 입력했거나 저장 실패했으면 완료로 말하지 않는다.

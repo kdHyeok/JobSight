@@ -1,5 +1,6 @@
 package com.jobsight.company.resume;
 
+import com.jobsight.company.resume.dto.ResumePositionRow;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -7,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,4 +31,12 @@ public interface ResumeRepository extends JpaRepository<Resume, UUID> {
     List<Resume> findAllByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
     List<Resume> findAllByIdInAndOwnerId(List<UUID> ids, UUID ownerId);
+
+    /** 이름과 지원 직무만 이력서×직무 한 줄씩 읽는다(직무가 없으면 null 한 줄). content JSONB 를 읽지 않는다 — 설계 1.3 P4. */
+    @Query("""
+            select new com.jobsight.company.resume.dto.ResumePositionRow(r.id, r.name, p)
+              from Resume r left join r.positionIds p
+             where r.id in :ids and r.ownerId = :ownerId
+            """)
+    List<ResumePositionRow> findPositionRows(@Param("ids") Collection<UUID> ids, @Param("ownerId") UUID ownerId);
 }

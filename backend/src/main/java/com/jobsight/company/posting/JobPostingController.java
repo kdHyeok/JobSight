@@ -44,7 +44,8 @@ public class JobPostingController {
         return archived ? service.findArchived() : service.findOpen();
     }
 
-    @Operation(summary = "공고 상세", description = "타인 소유이거나 없으면 404.")
+    @Operation(summary = "공고 상세", description = "linkedSelfIntroCount 는 이 공고를 지우면 소속 직무용 직접 출처 연결이 "
+            + "함께 사라지는 자기소개 문항 수다(답변은 남는다). 삭제 전에 알린다. 타인 소유이거나 없으면 404.")
     @GetMapping("/{id}")
     public JobPostingResponse findById(@PathVariable UUID id) {
         return service.findById(id);

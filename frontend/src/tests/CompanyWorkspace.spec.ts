@@ -196,6 +196,21 @@ describe('CompanyWorkspace', () => {
     expect(api.deleteCompany).toHaveBeenCalledWith(company.id)
   })
 
+  it('삭제 확인창은 상세에 실린 자소서 수를 다시 부르지 않고 알린다', async () => {
+    vi.mocked(api.getCompany).mockResolvedValue({ ...company, openPostings: [posting], linkedSelfIntroCount: 3 })
+    const wrapper = mount(CompanyWorkspace)
+    await flushPromises()
+    await wrapper.get('.card').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('.drawer__actions .danger').trigger('click')
+    await flushPromises()
+
+    expect(api.getCompany).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.confirm-card').text())
+      .toContain('이 기업 공고의 직무로 쓴 자소서 3개의 직접 출처 연결이 함께 사라집니다(답변은 남습니다).')
+  })
+
   it('저장 성공 뒤 목록 갱신이 실패해도 폼을 닫고 중복 호출하지 않는다', async () => {
     const created = { ...company, id: '10000000-0000-0000-0000-000000000099', name: '새 기업' }
     vi.mocked(api.listCompanies)

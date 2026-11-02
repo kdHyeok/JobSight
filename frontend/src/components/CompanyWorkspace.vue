@@ -14,6 +14,7 @@ import CompanyList from './CompanyList.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import Drawer from './Drawer.vue'
 import type { Company, CompanyPayload } from '../types/company'
+import { linkedSelfIntroCount, writtenForNotice } from '../utils/writtenFor'
 
 /** 다른 화면이 열어 달라고 넘긴 기업. 목록에서만 찾는다(기업엔 보관 개념이 없다). */
 const props = withDefaults(defineProps<{ focus?: string | null }>(), { focus: null })
@@ -36,6 +37,8 @@ const selectedId = ref<string | null>(null)
 const saving = ref(false)
 const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<Company | null>(null)
+/** 소속 공고 직무로 쓴 자소서의 직접 출처가 함께 사라진다는 안내. 보통 드로어가 이미 상세를 들고 있다. */
+const deleteNotice = ref('')
 const deleting = ref(false)
 const industryOptions = computed(() => [...new Set(companies.value.flatMap((company) => company.industries))].sort())
 
@@ -102,6 +105,13 @@ async function save(payload: CompanyPayload) {
   } finally {
     saving.value = false
   }
+}
+
+async function askDelete(target: Company) {
+  deleteTarget.value = target
+  deleteNotice.value = ''
+  const count = await linkedSelfIntroCount(target, () => getCompany(target.id))
+  if (deleteTarget.value?.id === target.id) deleteNotice.value = writtenForNotice(count, '이 기업 공고의 직무로')
 }
 
 async function remove() {
@@ -176,7 +186,7 @@ onMounted(async () => {
   >
     <template #actions>
       <button type="button" class="button secondary compact" @click="startEdit">수정</button>
-      <button type="button" class="button danger compact" @click="deleteTarget = selected">삭제</button>
+      <button type="button" class="button danger compact" @click="askDelete(selected)">삭제</button>
     </template>
     <CompanyDetail :company="selected" @edit="startEdit" @open-posting="emit('openPosting', $event)" />
   </Drawer>
@@ -213,7 +223,7 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="기업 정보를 삭제할까요?"
     :subject="deleteTarget.name"
-    detail="의 기록과 연결된 채용공고가 함께 삭제됩니다."
+    :detail="`의 기록과 연결된 채용공고가 함께 삭제됩니다.${deleteNotice}`"
     aria-label="기업 삭제 확인"
     :busy="deleting"
     @confirm="remove"

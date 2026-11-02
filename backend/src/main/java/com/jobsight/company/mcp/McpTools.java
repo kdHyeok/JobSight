@@ -80,8 +80,10 @@ public class McpTools {
         register("resume_row_add", actions, "addResumeRow", false, false);
         register("resume_row_update", actions, "updateResumeRow", false, true);
         register("resume_row_delete", actions, "deleteResumeRow", false, true);
-        register("self_intro_list", selfIntroductions, "findAll", true, false);
-        register("self_intro_get", selfIntroductions, "findById", true, false);
+        // 목록·상세는 미리보기·출처·trust 를 싣는 MCP 전용 모양이다. 웹 REST 목록(답변 전문)은 그대로 둔다(설계 5.3).
+        // 확정(confirm)은 웹 전용이라 등록하지 않는다.
+        register("self_intro_list", actions, "listSelfIntros", true, false);
+        register("self_intro_get", actions, "getSelfIntro", true, false);
         register("self_intro_create", selfIntroductions, "create", false, false);
         register("self_intro_update", selfIntroductions, "update", false, true);
         register("self_intro_delete", selfIntroductions, "delete", false, true);
@@ -175,7 +177,11 @@ public class McpTools {
         Map<String, Object> properties = new LinkedHashMap<>();
         List<String> required = new ArrayList<>();
         for (var p : method.getParameters()) {
-            properties.put(p.getName(), McpSchema.of(p.getParameterizedType()));
+            var schema = new LinkedHashMap<>(McpSchema.of(p.getParameterizedType()));
+            // 문자열 인자의 길이 상한을 스키마에 드러낸다(self_intro_list 의 q 100자).
+            var size = p.getAnnotation(jakarta.validation.constraints.Size.class);
+            if (size != null && p.getType() == String.class) schema.put("maxLength", size.max());
+            properties.put(p.getName(), schema);
             var query = p.getAnnotation(RequestParam.class);
             if (query == null || (query.required() && query.defaultValue().equals(ValueConstants.DEFAULT_NONE))) required.add(p.getName());
         }

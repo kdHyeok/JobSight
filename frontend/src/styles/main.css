@@ -412,6 +412,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -.01em; }
 .resume-links > * { min-width: 0; }
 .selected-resumes .chip { min-width: 0; max-width: 100%; }
 .selected-resumes .chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 자소서 편집기의 지원 직무·문항 유형 칩. AI 기록은 warning 톤에 ✓(확정)·✗(연결 해제)를 붙인다. */
+.intro-links { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.intro-links > * { min-width: 0; }
+.link-chips, .link-candidates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.link-chips .chip { gap: 4px; min-width: 0; max-width: 100%; }
+.link-chips .chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.link-candidates .chip { cursor: pointer; }
+.chip-action { padding: 0 2px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .question-add, .question-search, .intro-search { display: flex; align-items: end; gap: 8px; }
 .question-add .field, .intro-search .field { flex: 1; margin: 0; }
 .question-list { display: grid; gap: 6px; margin: 12px 0; padding-left: 24px; }

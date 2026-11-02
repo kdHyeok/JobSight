@@ -7,6 +7,7 @@ import type { Position } from '../types/position'
 vi.mock('../api/positions', () => ({
   ApiClientError: class extends Error { fieldErrors = {} },
   listPositions: vi.fn(),
+  getPosition: vi.fn(),
   updatePosition: vi.fn(),
   replacePositionReferences: vi.fn(),
   deletePosition: vi.fn(),
@@ -89,5 +90,25 @@ describe('PositionBoard', () => {
     const tabs = wrapper.findAll('.tabs button')
     expect(tabs[2].attributes('aria-selected')).toBe('true')
     expect(wrapper.findAll('.card__title').map((title) => title.text())).toEqual(['보관 인프라'])
+  })
+
+  /** 직무를 지우면 그 직무로 쓴 자소서의 직접 출처가 CASCADE 로 사라진다. 목록에는 수가 없어 상세를 한 번 불러 알린다. */
+  it('삭제 확인창은 이 직무로 쓴 자소서 수를 알리고, 0 이면 문구를 붙이지 않는다', async () => {
+    vi.mocked(api.getPosition).mockReset()
+      .mockResolvedValueOnce({ ...position('관심 백엔드', 'INTERESTED'), linkedSelfIntroCount: 2 })
+      .mockResolvedValueOnce({ ...position('관심 백엔드', 'INTERESTED'), linkedSelfIntroCount: 0 })
+    const wrapper = mount(PositionBoard, { props: { focus: '관심 백엔드' } })
+    await flushPromises()
+
+    await wrapper.get('.drawer__actions .danger').trigger('click')
+    await flushPromises()
+    expect(api.getPosition).toHaveBeenCalledWith('관심 백엔드')
+    expect(wrapper.get('.confirm-card').text())
+      .toContain('이 직무로 쓴 자소서 2개의 직접 출처 연결이 함께 사라집니다(답변은 남습니다).')
+
+    await wrapper.get('.confirm-card .button.secondary').trigger('click')
+    await wrapper.get('.drawer__actions .danger').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.confirm-card').text()).not.toContain('자소서')
   })
 })

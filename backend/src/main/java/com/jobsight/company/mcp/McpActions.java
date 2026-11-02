@@ -16,9 +16,13 @@ import com.jobsight.company.resume.ResumeService;
 import com.jobsight.company.resume.dto.ResumeResponse;
 import com.jobsight.company.resume.dto.ResumeRowRequest;
 import com.jobsight.company.resume.dto.ResumeRowResult;
+import com.jobsight.company.selfintro.Competency;
+import com.jobsight.company.selfintro.SelfIntroductionAgentService;
+import com.jobsight.company.selfintro.dto.SelfIntroductionList;
 import com.jobsight.company.user.AppUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
@@ -32,10 +36,12 @@ public class McpActions {
     private final ReferenceService references;
     private final CompanyContentService contents;
     private final ResumeService resumes;
+    private final SelfIntroductionAgentService selfIntros;
     public McpActions(CurrentUser current, AppUserService users, PositionService positions,
-                      ReferenceService references, CompanyContentService contents, ResumeService resumes) {
+                      ReferenceService references, CompanyContentService contents, ResumeService resumes,
+                      SelfIntroductionAgentService selfIntros) {
         this.current = current; this.users = users; this.positions = positions;
-        this.references = references; this.contents = contents; this.resumes = resumes;
+        this.references = references; this.contents = contents; this.resumes = resumes; this.selfIntros = selfIntros;
     }
     @Operation(summary = "연결된 내 계정 조회")
     public MeResponse me() { return MeResponse.of(users.findById(current.id()).orElseThrow()); }
@@ -86,6 +92,34 @@ public class McpActions {
     public ResumeRowResult deleteResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
                                            @PathVariable int index, @RequestParam Long expectedVersion) {
         return resumes.deleteRow(id, section, index, expectedVersion);
+    }
+
+    /** 웹 REST 목록(답변 전문)을 바꾸지 않도록 MCP 전용 모양을 따로 둔다 — 설계 5.1·5.3. */
+    @Operation(summary = "자기소개 문항 검색",
+            description = "필터는 모두 AND 다. positionId·postingId·companyId 는 그 직무용으로 쓴 답변(직접 출처 written_for)을 찾는다. "
+                    + "직접 출처가 0건이면 fallback:\"indirect\" 로 연결 이력서가 그 직무를 지원하는 '출처 미상' 답변을 준다. "
+                    + "questionType 은 문항 유형(사용자 확정 태그, 없으면 정규식 추정. AI 기록 태그는 추정을 지우지 않고 덧붙는다), "
+                    + "unlinked:true 는 직접 출처가 없는 답변만. "
+                    + "q 는 100자 이하, 질문·답변의 같은 단어를 BM25 점수순으로. limit 기본 10(최대 50), complete:false 면 잘린 것이다. "
+                    + "답변은 300자 미리보기(answerPreview)다. 원문은 self_intro_get. "
+                    + "trust 는 '확정'(사용자가 웹에서 연결)·'AI 기록'(확정 전)·'추정'이며 관계 확인 여부일 뿐 성과 검증이 아니다. "
+                    + "alreadyUsedFor 의 otherCompanySpecific:true 는 다른 회사용 지원동기·포부·직무 이해 답변이라 본문을 재사용하지 않는다.")
+    public SelfIntroductionList listSelfIntros(@RequestParam(required = false) @Size(max = 100) String q,
+                                               @RequestParam(required = false) UUID resumeId,
+                                               @RequestParam(required = false) UUID positionId,
+                                               @RequestParam(required = false) UUID postingId,
+                                               @RequestParam(required = false) UUID companyId,
+                                               @RequestParam(required = false) Competency questionType,
+                                               @RequestParam(required = false) Boolean unlinked,
+                                               @RequestParam(required = false) Integer limit) {
+        return selfIntros.list(q, resumeId, positionId, postingId, companyId, questionType, unlinked, limit);
+    }
+
+    @Operation(summary = "자기소개 문항 상세 조회",
+            description = "답변 전문(answer)과 직접·간접 출처, 문항 유형, alreadyUsedFor 를 준다. 수정 전에 이것으로 원문을 읽는다. "
+                    + "version 은 self_intro_update 의 request.expectedVersion 으로 보낸다(질문·답변·이력서를 바꿀 때 필수).")
+    public SelfIntroductionList.Item getSelfIntro(@PathVariable UUID id) {
+        return selfIntros.get(id);
     }
 
     @Operation(summary = "기업 뉴스·유튜브 상세 조회")

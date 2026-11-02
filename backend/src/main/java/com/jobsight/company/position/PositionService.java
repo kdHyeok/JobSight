@@ -59,8 +59,10 @@ public class PositionService {
         return all.stream().filter(p -> p.matches(needle)).toList();
     }
 
+    /** 상세에는 이 직무를 지우면 직접 출처가 사라질 자소서 수를 싣는다(삭제 확인창용, count 한 문장). */
     public PositionResponse findById(UUID id) {
-        return toResponses(List.of(findOwned(id))).get(0);
+        return toResponses(List.of(findOwned(id))).get(0)
+                .withLinkedSelfIntroCount(repository.countSelfIntrosWrittenFor(id, currentUser.id()));
     }
 
     @Transactional

@@ -20,6 +20,9 @@ public interface CompanyRepository extends JpaRepository<Company, UUID> {
      */
     Optional<Company> findByIdAndOwnerId(UUID id, UUID ownerId);
 
+    /** 소유 확인만 필요할 때. 엔티티와 EAGER 업종·주요 사업을 읽지 않는다. */
+    boolean existsByIdAndOwnerId(UUID id, UUID ownerId);
+
     /** 공고 목록에서 기업 이름을 한 번에 채우기 위한 조회(N+1 방지). */
     List<Company> findAllByIdInAndOwnerId(Collection<UUID> ids, UUID ownerId);
 

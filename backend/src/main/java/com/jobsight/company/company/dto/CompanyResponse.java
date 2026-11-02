@@ -31,7 +31,8 @@ public record CompanyResponse(
         String memo,
         List<JobPostingResponse> openPostings,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long linkedSelfIntroCount
 ) {
     public static CompanyResponse summaryOf(Company company) {
         return of(company, List.of());
@@ -55,7 +56,17 @@ public record CompanyResponse(
                 company.getMemo(),
                 openPostings,
                 company.getCreatedAt(),
-                company.getUpdatedAt()
+                company.getUpdatedAt(),
+                null
         );
+    }
+
+    /**
+     * 상세 조회(GET·company_get)에서만 채운다 — 이 기업을 지우면 소속 공고(마감 지난 것 포함)의 직무 전부에서 직접 출처
+     * 연결이 CASCADE 로 사라지는 내 자소서 수. 삭제 확인창이 보여 준다. 목록·수정 응답은 null.
+     */
+    public CompanyResponse withLinkedSelfIntroCount(long count) {
+        return new CompanyResponse(id, name, websiteUrl, industries, businesses, companySize, annualRevenue, revenueUnit,
+                employeeCount, address, foundedOn, summary, benefits, memo, openPostings, createdAt, updatedAt, count);
     }
 }

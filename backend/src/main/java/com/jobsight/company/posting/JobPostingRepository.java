@@ -22,6 +22,9 @@ public interface JobPostingRepository extends JpaRepository<JobPosting, UUID> {
      */
     Optional<JobPosting> findByIdAndOwnerId(UUID id, UUID ownerId);
 
+    /** 소유 확인만 필요할 때. 엔티티와 EAGER 절차를 읽지 않는다. */
+    boolean existsByIdAndOwnerId(UUID id, UUID ownerId);
+
     /** PostgreSQL 행 잠금 대기 상한을 이 트랜잭션에만 적용한다. 커밋/롤백 때 자동 복원된다. */
     @Modifying
     @Query(value = "set local lock_timeout = '3s'", nativeQuery = true)

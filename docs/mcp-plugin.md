@@ -160,13 +160,28 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 ## 도구 계약과 검증 범위
 
-도구는 53개이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
+도구는 54개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 46개)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
 도구명·동작별 사용법은 스킬에 있다. `/mcp`의 `tools/list`는 연결 계정의 scope/역할에 따라 목록을 줄인다.
-관리자 도구 7개는 일반 사용자에게 노출하지 않으며 직접 이름을 호출해도 거부한다.
+관리자 도구 8개는 일반 사용자에게 노출하지 않으며 직접 이름을 호출해도 거부한다.
+**MCP 전용 모양은 `McpActions` 의 별도 메서드로 만든다.** 도구가 REST 컨트롤러를 감싸므로 응답 모양을 바꾸면 웹에도 그대로 적용되기 때문이다
+(설계 5.1). `@RequestParam String` 인자의 `@Size(max)` 는 입력 스키마의 `maxLength` 로 나간다(`McpTools.inputSchema`).
+자기소개 `self_intro_list`·`self_intro_get` 은 이 방식이다(`McpActions.listSelfIntros`·`getSelfIntro` → `SelfIntroductionAgentService`).
+목록은 300자 미리보기·`limit`(기본 10)·`complete`·직접/간접 출처와 `trust`·문항 유형·`alreadyUsedFor` 를 싣고, 직접 출처가 0건이면
+`fallback:"indirect"` 로 "출처 미상" 답변을 준다. 웹 REST 목록은 답변 전문 그대로다 — docs/self-introductions.md.
+관계 간선의 출처는 요청 주체가 정한다: MCP 토큰 요청은 항상 `AI`("AI 기록", `CurrentUser.viaMcp()`), 웹은 `USER`. 확정(AI→USER)은 웹 전용
+`POST /api/self-introductions/{id}/confirm` 이며 MCP 도구로 등록하지 않는다.
 `posting_list`는 자동 보관을 일으켜 쓰기 scope와 readOnlyHint=false를 사용한다.
 뉴스/유튜브·참고 상세 조회는 소유자 필터된 목록에서 ID를 찾는다.
 MCP용 `position_create`는 기존 `PositionService` 트랜잭션에서 공고 소유권을 검증하고 직무를 추가한다.
 이력서는 `resume_list/get/create/update/copy/delete`, 자기소개는 `self_intro_list/get/create/update/delete`로 전체 CRUD를 제공한다.
+자기소개 생성은 이력서 또는 직무 1개 이상, 수정은 0개 허용이고, 수정의 `positionIds`·`questionTypes` 는 null=유지다. **MCP 요청은 이 두 목록을
+기존 연결에 더하기만 한다**(사용자가 확정한 연결·AI 기록을 지우지 못함, 빼기는 웹 전용 — `docs/decisions.md` D4). `self_intro_update` 에는
+다른 update 도구처럼 "전체 교체" 문구가 붙지만 이 두 필드의 규칙은 도구 설명(`SelfIntroductionController`)에 있다.
+자기소개 쓰기도 이력서처럼 행을 잠그고 `version` 을 확인한다. `self_intro_update` 의 `request.expectedVersion` 은 `resumeIds`·`question`·`answer`
+중 하나라도 바꾸면 필수, 직무·문항 유형 연결만 더할 때는 선택이다(웹 PUT 은 항상 필수). `self_intro_list`·`get` 항목과 쓰기 응답에 `version` 이 있고,
+업무 오류 `VERSION_REQUIRED`·`SELF_INTRO_STALE`·`SELF_INTRO_BUSY` 는 REST 와 MCP 가 같은 코드다 — docs/self-introductions.md 불변 조건 12.
+`company_get`·`posting_get`·`position_get` 은 응답 전용 `linkedSelfIntroCount`(지우면 직접 출처 연결이 CASCADE 로 사라지는 자기소개 문항 수)를 싣는다.
+SKILL 의 삭제 규칙이 이 값을 사용자에게 알리라고 한다. 목록 도구에서는 null 이다.
 이력서 행 도구(`resume_basic_update`, `resume_row_add/update/delete`)는 REST 에 없는 MCP 전용이다. REST 는 문서 통째 PUT 만 있고,
 MCP 는 문서 전체를 되돌려 보내기 어려워 서버가 조회→한 군데 수정→저장을 한 트랜잭션으로 묶는다(`ResumeService.mutateRows`).
 행 입력 `ResumeRowRequest` 는 8개 섹션 필드의 합집합 record 다 — 스키마 생성기가 Map 을 그리지 못하고 섹션별 도구는 24개가 되기 때문.

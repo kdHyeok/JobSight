@@ -57,6 +57,8 @@ export interface JobPosting {
   archived: boolean
   createdAt: string
   updatedAt: string
+  /** 상세에서만 온다(목록·수정 응답은 null) — 이 공고를 지우면 직접 출처가 사라질 자소서 수. 삭제 확인창이 쓴다. */
+  linkedSelfIntroCount?: number | null
 }
 
 export interface JobPostingPayload {

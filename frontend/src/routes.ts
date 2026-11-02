@@ -44,6 +44,7 @@ export const API = {
   resumeCopy: (id: string) => `/api/resumes/${id}/copy`,
   selfIntroductions: '/api/self-introductions',
   selfIntroduction: (id: string) => `/api/self-introductions/${id}`,
+  selfIntroductionConfirm: (id: string) => `/api/self-introductions/${id}/confirm`,
   attachments: '/api/attachments',
   attachment: (id: string) => `/api/attachments/${id}`,
   attachmentMeta: (id: string) => `/api/attachments/${id}/meta`,

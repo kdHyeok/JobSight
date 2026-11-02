@@ -35,7 +35,8 @@ public record PositionResponse(
         List<String> techStack,
         List<ReferenceResponse> references,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long linkedSelfIntroCount
 ) {
     public static PositionResponse of(Position position, JobPosting posting, String companyName,
                                       List<ReferenceResponse> references) {
@@ -63,8 +64,19 @@ public record PositionResponse(
                 List.copyOf(position.getTechStack()),
                 references,
                 position.getCreatedAt(),
-                position.getUpdatedAt()
+                position.getUpdatedAt(),
+                null
         );
+    }
+
+    /**
+     * 상세 조회(GET·position_get)에서만 채운다 — 이 직무를 지우면 직접 출처(written_for) 연결이 CASCADE 로 사라지는
+     * 내 자소서 수. 삭제 확인창이 보여 준다(docs/self-introductions.md 함정). 목록·수정 응답은 null.
+     */
+    public PositionResponse withLinkedSelfIntroCount(long count) {
+        return new PositionResponse(id, postingId, postingTitle, companyId, companyName, deadlineAt, status, archived,
+                name, team, role, responsibilities, impact, growth, experience, requiredSkills, preferredSkills,
+                headcount, workLocation, memo, techStack, references, createdAt, updatedAt, count);
     }
 
     /** 검색어(소문자)가 이름·팀·회사·공고 제목·스택 어딘가에 들어 있나. */
