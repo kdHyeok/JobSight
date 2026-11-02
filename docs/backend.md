@@ -26,7 +26,7 @@ DB 연결 획득은 3초 안에 실패시킨다. PostgreSQL 행 잠금(직무 �
 - **`OwnerLock`**: `SET LOCAL lock_timeout = '3s'` **바로 다음 문장**에서 `pg_advisory_xact_lock(hashtextextended('exp-graph:' || owner, 0))`.
   순서를 바꾸면 권고 잠금 대기에 상한이 없어 연결 풀이 마를 수 있다. 대기 초과는 55P03 → 409 `BUSY`. `Propagation.MANDATORY` 라 트랜잭션 밖에서 부르면 실패한다.
   부르는 곳: 이력서 create·update·copy·delete·basic·행 도구·`addExperiences`, 경험 저장·검토·삭제·가져오기, 자소서 create·update.
-- **행 잠금 순서**: 권고 잠금 → 이력서(id 오름차순, `findOwnedForUpdate`·`findAllOwnedForUpdate`) → 경험. JPA `PESSIMISTIC_WRITE` 는 PostgreSQL 에서 `for no key update` 다.
+- **행 잠금 순서**: 권고 잠금 → 이력서(id 오름차순, `findOwnedForUpdate`·`findAllOwnedForUpdate`) → 경험. JPA `PESSIMISTIC_WRITE` 는 PostgreSQL 에서 `for no key update` 다. **예외는 첨부 삭제 하나**: `AttachmentService.delete` 는 네이티브 `for update` 로 첨부 행을 잡아, 첨부 id 를 새로 적는 쓰기의 `for key share`(규칙 B, `AttachmentRepository.lockForReference`)와 일부러 충돌시킨다. 삭제는 계정 잠금을 잡지 않고 첨부 행 하나만 잠근다 — docs/attachments.md 불변 조건 7·8.
 - **`ResumeWriter` 단일 관문**: `ResumeRepository.save*` 는 이 클래스 밖에서 부르지 않고 `Resume.update` 는 패키지 전용이다. `ResumeWriterGateTest` 가 소스를 검사한다
   (ArchUnit 을 들이지 않았다). JPA 엔티티 저장 뒤 같은 트랜잭션에서 `JdbcTemplate` 으로 `resume_experiences` 를 맞춘다 — 같은 연결이므로 저장을 먼저 flush 한다.
 - **`Persistable`**: 생성자에서 UUID 를 채우고 `@Version` 이 primitive 인 엔티티는 `save` 가 merge(+SELECT)가 된다. 대량 insert 하는 `Experience` 는 `isNew` 를 직접 답한다.

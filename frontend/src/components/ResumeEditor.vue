@@ -207,13 +207,26 @@ watch(positionMatches, () => {
   activePositionIndex.value = -1
   if (positionMenu.value) positionMenu.value.scrollTop = 0
 })
-const attachmentCandidates = computed(() => {
+function fileFields(value: ResumeContent) {
   const found: { id: string; label: string }[] = []
-  if (content.value.basic.portfolioFileId) found.push({ id: content.value.basic.portfolioFileId, label: '기본정보 · 포트폴리오 파일' })
-  for (const section of SECTIONS) content.value[section.key].forEach((row, index) => section.fields.filter((field) => field.kind === 'file').forEach((field) => {
+  if (value.basic.portfolioFileId) found.push({ id: value.basic.portfolioFileId, label: '기본정보 · 포트폴리오 파일' })
+  for (const section of SECTIONS) value[section.key].forEach((row, index) => section.fields.filter((field) => field.kind === 'file').forEach((field) => {
     const id = text(row, field.key)
     if (id) found.push({ id, label: `${section.label} ${index + 1} · ${field.label}` })
   }))
+  return found
+}
+/**
+ * 저장된 문서에 있는데 응답 attachments 에 메타가 없는 id 는 지워졌거나 남의 것이라 내려받을 수 없다(설계 6.9) — 체크 목록에서 뺀다.
+ * 저장 뒤에 새로 올린 파일은 아직 응답에 없으므로 남긴다. 메타 맵이 없는 응답이면 거르지 않는다.
+ */
+const missingAttachments = computed(() => {
+  const metas = props.resume.attachments
+  if (!metas) return new Set<string>()
+  return new Set(fileFields(fillContent(props.resume.content)).map((item) => item.id).filter((id) => !metas[id]))
+})
+const attachmentCandidates = computed(() => {
+  const found = fileFields(content.value).filter((item) => !missingAttachments.value.has(item.id))
   return found.filter((item, index) => found.findIndex((other) => other.id === item.id) === index)
 })
 

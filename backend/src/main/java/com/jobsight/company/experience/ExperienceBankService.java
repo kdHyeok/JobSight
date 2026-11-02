@@ -1,5 +1,6 @@
 package com.jobsight.company.experience;
 
+import com.jobsight.company.attachment.AttachmentService;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.LinkSource;
@@ -48,9 +49,11 @@ public class ExperienceBankService {
     private final JdbcTemplate jdbc;
     private final CurrentUser currentUser;
     private final ObjectMapper mapper;
+    private final AttachmentService attachments;
 
     public ExperienceBankService(ExperienceRepository repository, ExperienceRevisions revisions, ExperienceService views,
-                                 OwnerLock ownerLock, JdbcTemplate jdbc, CurrentUser currentUser, ObjectMapper mapper) {
+                                 OwnerLock ownerLock, JdbcTemplate jdbc, CurrentUser currentUser, ObjectMapper mapper,
+                                 AttachmentService attachments) {
         this.repository = repository;
         this.revisions = revisions;
         this.views = views;
@@ -58,6 +61,7 @@ public class ExperienceBankService {
         this.jdbc = jdbc;
         this.currentUser = currentUser;
         this.mapper = mapper;
+        this.attachments = attachments;
     }
 
     /**
@@ -86,6 +90,7 @@ public class ExperienceBankService {
         if (request.dossier() != null) experience.writeDossier(json(request.dossier()));
         if (source == LinkSource.USER) experience.markReviewed();
         Experience saved = repository.saveAndFlush(experience);
+        attachments.lockNewReferences(owner, List.of(), attachmentIds(facts));
         revisions.insert(saved, ChangeKind.INIT, hash(facts), source);
         return new ExperienceViews.Saved(saved.getId(), saved.getVersion(), saved.getRevision(), ChangeKind.INIT.name(),
                 List.of(), skills, List.of());
@@ -118,9 +123,13 @@ public class ExperienceBankService {
 
         ChangeKind change = ChangeKind.NONE;
         String hash = null;
+        List<String> attachmentsBefore = List.of();
+        List<String> attachmentsAfter = List.of();
         if (request.facts() != null) {
             ExperienceFacts previous = views.facts(experience);
             ExperienceFacts next = normalize(request.facts(), previous);
+            attachmentsBefore = attachmentIds(previous);
+            attachmentsAfter = attachmentIds(next);
             hash = hash(next);
             if (!hash.equals(revisions.latestHash(experience))) {
                 change = changeKind(previous, next);
@@ -132,6 +141,7 @@ public class ExperienceBankService {
         if (source == LinkSource.USER && request.facts() != null) experience.markReviewed();
         experience.touchSearchText();
         Experience saved = repository.saveAndFlush(experience);
+        attachments.lockNewReferences(owner, attachmentsBefore, attachmentsAfter);
         List<ExperienceViews.NeedsReview> needsReview = List.of();
         if (change != ChangeKind.NONE) {
             revisions.insert(saved, change, hash, source);
@@ -311,6 +321,15 @@ public class ExperienceBankService {
             throw new ApiRuleException(HttpStatus.BAD_REQUEST, "INVALID_EVIDENCE",
                     ev.sourceType() + " 근거에는 ref 가 필요합니다(RESUME_ROW: resumeId·section·index, ATTACHMENT: attachmentId, URL: https url).");
         }
+    }
+
+    /** ATTACHMENT 근거가 가리키는 첨부 id. 규칙 B(설계 6.9)의 비교 대상이다 — 새로 적는 것만 잠그고 확인한다. */
+    private static List<String> attachmentIds(ExperienceFacts facts) {
+        if (facts == null) return List.of();
+        return orEmpty(facts.evidence()).stream()
+                .filter(ev -> ev.sourceType() == ExperienceFacts.SourceType.ATTACHMENT && ev.ref() != null
+                        && ev.ref().attachmentId() != null)
+                .map(ev -> ev.ref().attachmentId().toString()).toList();
     }
 
     private static String trim(String value) {

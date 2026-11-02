@@ -1,5 +1,6 @@
 package com.jobsight.company.resume;
 
+import com.jobsight.company.attachment.AttachmentService;
 import com.jobsight.company.common.ApiRuleException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -32,14 +33,16 @@ public class ResumeWriter {
     private final Validator validator;
     private final ObjectMapper mapper;
     private final JdbcTemplate jdbc;
+    private final AttachmentService attachments;
 
     ResumeWriter(ResumeRepository repository, ResumeExperienceLinker linker, Validator validator, ObjectMapper mapper,
-                 JdbcTemplate jdbc) {
+                 JdbcTemplate jdbc, AttachmentService attachments) {
         this.repository = repository;
         this.linker = linker;
         this.validator = validator;
         this.mapper = mapper;
         this.jdbc = jdbc;
+        this.attachments = attachments;
     }
 
     /** removed 는 저장 전 문서에는 있었는데 이번 저장으로 사라진 경험 id — 웹 응답 unlinkedWarnings. */
@@ -72,6 +75,9 @@ public class ResumeWriter {
         ResumeContent stored = mapper.treeToValue(linked.root(), ResumeContent.class).normalized();
         resume.update(name, mapper.writeValueAsString(stored));
         Resume saved = repository.saveAndFlush(resume);
+        // 규칙 B(설계 6.9): 새로 적는 첨부 id 를 for key share 로 잡는다. 생성도 insert 를 먼저 flush 한 뒤다.
+        // 복제는 before 가 원본 문서라 잡을 것이 없다 — 원본을 잠그고 읽으므로(lockOwned) 원본이 든 첨부는 삭제 판정에 계속 보인다.
+        attachments.lockNewReferences(saved.getOwnerId(), before.normalized().attachmentIds(), stored.attachmentIds());
         sync(saved, linked.links());
         return new Saved(saved, stored, removed);
     }

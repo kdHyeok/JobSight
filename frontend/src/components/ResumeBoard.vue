@@ -11,11 +11,14 @@ import {
 } from '../api/resumes'
 import { listPositionOptions } from '../api/positions'
 import { listSelfIntroductions } from '../api/self-introductions'
+import { deleteAttachment } from '../api/attachments'
+import AttachmentDrawer from './AttachmentDrawer.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ResumeEditor from './ResumeEditor.vue'
 import type { Resume, ResumePayload, ResumeSummary } from '../types/resume'
 import type { PositionOption } from '../types/position'
 import type { SelfIntroduction } from '../types/self-introduction'
+import { removedAttachments, type AttachmentMeta } from '../types/attachment'
 
 /**
  * /resumes 는 카드 목록, /resumes?focus=<id> 는 그 버전의 편집기.
@@ -37,6 +40,10 @@ const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<Resume | null>(null)
 const deleting = ref(false)
 const leaveConfirm = ref(false)
+/** 방금 성공한 저장·삭제로 빠진 첨부(설계 6.9 길 1). 매번 묻고 답을 기억하지 않는다. 화면을 옮겨도 남는다. */
+const orphans = ref<AttachmentMeta[]>([])
+const removingOrphans = ref(false)
+const drawerOpen = ref(false)
 
 function fail(error: unknown, fallback: string) {
   if (error instanceof ApiClientError) {
@@ -116,6 +123,7 @@ async function save(payload: ResumePayload) {
     const saved = await updateResume(current.value.id, { ...payload, expectedVersion: current.value.version })
     // 저장 중에 다른 이력서로 옮겼으면 그 화면을 덮지 않는다. 저장은 서버에서 끝났고, 돌아오면 다시 불러온다.
     if (seq !== loadSeq) return
+    orphans.value = removedAttachments(current.value?.attachments, saved.attachments)
     current.value = saved
     notice.value = '저장했습니다.'
   } catch (error) {
@@ -145,6 +153,7 @@ async function remove() {
   deleting.value = true
   try {
     await deleteResume(deleteTarget.value.id)
+    orphans.value = removedAttachments(deleteTarget.value.attachments, undefined)
     deleteTarget.value = null
     emit('closeResume')
   } catch (error) {
@@ -153,6 +162,28 @@ async function remove() {
   } finally {
     deleting.value = false
   }
+}
+
+/** 하나씩 지운다. 다른 곳(복제본·경험·제출 기록)에서 쓰면 서버가 409 를 주고, 그 파일은 남겨 둔다고 알린다. */
+async function removeOrphans() {
+  removingOrphans.value = true
+  const removed: string[] = []
+  const kept: string[] = []
+  for (const meta of orphans.value) {
+    try {
+      await deleteAttachment(meta.id)
+      removed.push(meta.filename)
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 409) kept.push(meta.filename)
+      else loadError.value = error instanceof Error ? error.message : '첨부 파일을 지우지 못했습니다.'
+    }
+  }
+  orphans.value = []
+  removingOrphans.value = false
+  notice.value = [
+    removed.length ? `파일 ${removed.length}개를 지웠습니다.` : '',
+    kept.length ? `다른 곳에서 쓰고 있어 남겨 두었습니다: ${kept.join(', ')}` : '',
+  ].filter(Boolean).join(' ')
 }
 
 function back(dirty: boolean) {
@@ -204,7 +235,10 @@ onMounted(reload)
         <h1>이력서</h1>
         <span class="page-count">{{ resumes.length }}</span>
       </div>
-      <button type="button" class="button primary" @click="create">이력서 추가</button>
+      <div class="page-tools">
+        <button type="button" class="button secondary" @click="drawerOpen = true">첨부 파일</button>
+        <button type="button" class="button primary" @click="create">이력서 추가</button>
+      </div>
     </div>
 
     <div v-if="notice" class="notice success" role="status">{{ notice }}</div>
@@ -248,6 +282,19 @@ onMounted(reload)
     :busy="deleting"
     @confirm="remove"
     @cancel="deleteTarget = null"
+  />
+
+  <AttachmentDrawer v-if="drawerOpen" @close="drawerOpen = false" />
+
+  <ConfirmDialog
+    v-if="orphans.length"
+    title="빠진 첨부 파일도 지울까요?"
+    :subject="orphans.map((meta) => meta.filename).join(', ')"
+    detail=" 파일이 이 이력서에서 빠졌습니다. 다른 곳에서 쓰지 않으면 영구 삭제하고, 쓰고 있으면 남겨 둡니다."
+    aria-label="빠진 첨부 삭제 확인"
+    :busy="removingOrphans"
+    @confirm="removeOrphans"
+    @cancel="orphans = []"
   />
 
   <ConfirmDialog
