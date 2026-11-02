@@ -28,6 +28,11 @@
 - **목록은 핵심만, 나머지는 클릭.** 카드에 필드를 더하고 싶으면 드로어 상세에 넣는다 — design-system.md 규칙 3.
 - **더블클릭 편집은 기존 수정 진입점을 재사용한다.** 공고·기업·직무 상세, 이력서 카드, 자기소개 카드, 참고 정보 카드는 더블클릭으로 기존 편집 화면을 연다. 링크·버튼·입력과 다른 항목을 여는 행은 그 동작을 우선한다.
 - **에러 계약**: 백엔드 `ApiError.fieldErrors` → `ApiClientError.fieldErrors` → 폼 필드 메시지.
+- **늦은 응답은 요청 순번으로 버린다.** 겹칠 수 있는 조회는 `let seq` 를 두고 시작할 때 올린 번호가 마지막일 때만 반영한다(성공·실패 모두). 닫기·모드 전환도 번호를 올려 진행 중 응답이 드로어를 다시 열거나 폼을 덮지 않게 한다. 쓰는 곳: `SubmissionRecords`(목록·확인 폼), `ResumeQuestions`, `ExperienceBoard.open`, `ResumeEditor.loadExperiences`, `ResumeBoard`. 같은 GET 을 두 번 보낼 수 있는 펼침(`WritingGuideEditor`)은 진행 중 플래그로 한 번만 보낸다.
+- **삭제 확인창은 덧붙일 경고를 받기 전에 확정되지 않는다.** 직무·공고·기업 삭제는 `deleteNotice` 가 `null`(자소서 수를 받는 중)인 동안 `ConfirmDialog` 의 `pending` 으로 삭제 버튼만 막고 취소는 둔다. 수를 못 받으면 0 으로 치지 않고 "확인하지 못했습니다. 있다면 … 사라집니다" 를 붙인다(`utils/writtenFor.ts`).
+- **409 뒤 다시 읽기는 열 때의 version 을 바꾸지 않는다.** `ResumeQuestions` 수정은 편집을 시작할 때의 version(`editVersion`)으로 보낸다 — 목록을 다시 읽어도 열린 초안이 새 version 을 얻어 남의 저장을 덮지 않는다. 편집기를 다시 열어야 새 version 이다. 다시 읽기마저 실패하면(`WritingGuideEditor`) 입력을 남기고 이유를 보인다.
+- **행 번호로 결과를 다는 비동기 작업 중에는 행 순서를 잠근다.** 이력서 편집기 "경험으로 등록" 이 끝날 때까지 `ResumeSection` 의 `locked` 로 ↑↓×·다른 등록을 막는다. 칸 입력·행 추가(끝에 붙음)는 번호를 바꾸지 않아 막지 않는다.
+- **경험 목차는 `complete` 까지 다 받는다**(`api/experiences.ts listExperiences`, 쪽수 상한 없음). 커서가 앞으로 가지 않으면 잘린 목록을 돌려주지 않고 실패한다. 가져오기는 건너뛴 묶음을 보내지 않고, 나머지가 서버 상한(500)을 넘으면 보내지 않고 나눠 가져오라고 알린다. 제출 확인 폼의 처음 선택은 지금 목록에 있는 문서로만 고른다(지운 문서는 스냅샷에만 남는다).
 - 기업 상세의 `뉴스·유튜브` 탭은 `CompanyContentAlbum`이 상태를 가진다. `CompanyContentForm`은 탭 안에 인라인으로 열리고 별도 모달·드로어를 만들지 않는다.
 
 ## 테스트

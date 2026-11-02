@@ -163,7 +163,8 @@ class ResumeExperienceLinker {
             List<Row> same = storedByGroup.getOrDefault(row.groupKey(), List.of());
             UUID inherited = same.size() == 1 ? same.get(0).id() : null;
             if (inherited != null && heads.containsKey(inherited) && !links.containsKey(inherited)) {
-                Integer revision = same.get(0).revision();
+                // "원본으로 갱신"은 앵커를 이어받는 행에도 적용한다(refresh 를 무시하면 옛 개정이 그대로 남는다).
+                Integer revision = refresh.contains(inherited) ? heads.get(inherited).revision() : same.get(0).revision();
                 links.put(inherited, revision);
                 row.anchor(inherited, revision);
                 continue;

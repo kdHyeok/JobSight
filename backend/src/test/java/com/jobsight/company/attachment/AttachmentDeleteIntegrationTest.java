@@ -210,7 +210,42 @@ class AttachmentDeleteIntegrationTest {
         Throwable blocked = catchThrowable(() -> attachments.delete(file));
 
         assertThat(code(blocked)).isEqualTo("ATTACHMENT_IN_USE");
-        assertThat(blocked).hasMessageContaining("지난 개정");
+        assertThat(blocked).hasMessageContaining("개정 이력");
+        assertThat(exists(file)).isTrue();
+    }
+
+    /**
+     * 지금 근거와 개정이 함께 가리키면(근거를 저장한 직후가 늘 그렇다) 개정 사용처도 따로 보인다. 지금 근거만 보이면
+     * "근거를 빼고 저장"을 안내하는데, 그렇게 해도 개정이 남아 지울 수 없다(OCR 리뷰).
+     */
+    @Test
+    void currentEvidenceAlsoShowsRevisionRetention() {
+        UUID file = attachment(OWNER_ID, "증빙.pdf", 30);
+        ExperienceViews.Saved created = experiences.save(null, experience(null, evidenceOn(file), null));
+
+        Throwable blocked = catchThrowable(() -> attachments.delete(file));
+
+        assertThat(blocked).hasMessageContaining("개정 이력").hasMessageNotContaining("근거를 빼고 저장하면 됩니다");
+        assertThat(attachments.list()).filteredOn(item -> item.id().equals(file)).singleElement()
+                .satisfies(item -> assertThat(item.usedBy()).containsExactlyInAnyOrder(
+                        new AttachmentListItem.UsedBy("EXPERIENCE", created.id(), "데이터 교육"),
+                        new AttachmentListItem.UsedBy("EXPERIENCE_REVISION", created.id(), "데이터 교육")));
+    }
+
+    /**
+     * 규칙 B 이전에 저장된 대문자 UUID 첨부 칸도 사용처다. UUID.fromString 이 받아 주므로 이력서는 그 파일을 계속 보여 주는데,
+     * 대소문자를 가리는 판정이면 지워 버린다(OCR 리뷰).
+     */
+    @Test
+    void legacyUppercaseReferenceKeepsTheFile() {
+        UUID file = attachment(OWNER_ID, "옛 자격증.pdf", 30);
+        ResumeResponse legacy = resume("옛 이력서", file.toString());
+        jdbc.update("update resumes set content = jsonb_set(content, '{certificates,0,fileId}', to_jsonb(?::text)) where id = ?",
+                file.toString().toUpperCase(), legacy.id());
+
+        Throwable blocked = catchThrowable(() -> attachments.delete(file));
+
+        assertThat(code(blocked)).isEqualTo("ATTACHMENT_IN_USE");
         assertThat(exists(file)).isTrue();
     }
 

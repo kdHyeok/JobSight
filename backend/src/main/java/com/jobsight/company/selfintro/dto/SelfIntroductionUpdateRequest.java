@@ -17,9 +17,9 @@ import java.util.UUID;
  */
 public record SelfIntroductionUpdateRequest(
         @NotNull(message = "이력서 목록은 필수입니다(연결을 모두 끊으려면 []).")
-        @Size(max = 30, message = "이력서는 30개 이하여야 합니다.") List<UUID> resumeIds,
-        @Size(max = 10, message = "지원 직무는 10개 이하여야 합니다.") List<UUID> positionIds,
-        @Size(max = 3, message = "문항 유형은 3개 이하여야 합니다.") List<Competency> questionTypes,
+        @Size(max = 30, message = "이력서는 30개 이하여야 합니다.") List<@NotNull UUID> resumeIds,
+        @Size(max = 10, message = "지원 직무는 10개 이하여야 합니다.") List<@NotNull UUID> positionIds,
+        @Size(max = 3, message = "문항 유형은 3개 이하여야 합니다.") List<@NotNull Competency> questionTypes,
         @NotBlank(message = "질문은 필수입니다.")
         @Size(max = 1000, message = "질문은 1,000자 이하여야 합니다.") String question,
         @Size(max = 10000, message = "답변은 10,000자 이하여야 합니다.") String answer,

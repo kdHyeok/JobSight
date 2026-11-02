@@ -18,6 +18,8 @@ const query = ref('')
 const editingId = ref('')
 const editQuestion = ref('')
 const editAnswer = ref('')
+/** 수정을 시작할 때 읽은 version. 409 뒤 목록을 다시 읽어도 바꾸지 않는다 — 편집기를 다시 열어야 새 version 으로 저장된다. */
+let editVersion = 0
 const saving = ref(false)
 const errorMessage = ref('')
 const linkedIds = computed(() => new Set(items.value.map((item) => item.id)))
@@ -77,6 +79,7 @@ function startEdit(item: SelfIntroduction) {
   editingId.value = item.id
   editQuestion.value = item.question
   editAnswer.value = item.answer ?? ''
+  editVersion = item.version
 }
 
 async function saveEdit(item: SelfIntroduction) {
@@ -85,7 +88,7 @@ async function saveEdit(item: SelfIntroduction) {
   errorMessage.value = ''
   try {
     await updateSelfIntroduction(item.id, {
-      resumeIds: item.resumeIds, question: editQuestion.value.trim(), answer: editAnswer.value.trim(), expectedVersion: item.version,
+      resumeIds: item.resumeIds, question: editQuestion.value.trim(), answer: editAnswer.value.trim(), expectedVersion: editVersion,
     })
     editingId.value = ''
     await load()

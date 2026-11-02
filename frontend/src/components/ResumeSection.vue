@@ -23,6 +23,8 @@ const props = defineProps<{
   experiences?: ExperienceLine[]
   staleIds?: string[]
   refreshIds?: string[]
+  /** "경험으로 등록" 진행 중. 등록 결과가 행 번호로 붙으므로 행 이동·삭제·다른 등록을 막는다. */
+  locked?: boolean
 }>()
 const emit = defineEmits<{
   'update:rows': [Row[]]
@@ -109,7 +111,7 @@ function picked(event: Event) {
           </template>
           <template v-else>
             <span class="chip">경험 미연결</span>
-            <button type="button" class="button ghost compact" @click="emit('register', index)">경험으로 등록</button>
+            <button type="button" class="button ghost compact" :disabled="locked" @click="emit('register', index)">경험으로 등록</button>
           </template>
           <select class="resume-exp-select" :aria-label="`${index + 1}행 ${anchorOf(row) ? '다른 경험에 연결' : '경험에 연결'}`" :disabled="!experiences.length" @change="relink(index, picked($event))">
             <option value="">{{ anchorOf(row) ? '다른 경험에 연결…' : '경험에 연결…' }}</option>
@@ -117,9 +119,9 @@ function picked(event: Event) {
           </select>
         </span>
         <span class="repeater__move">
-          <button type="button" class="icon-button" aria-label="위로" :disabled="index === 0" @click="move(index, -1)">↑</button>
-          <button type="button" class="icon-button" aria-label="아래로" :disabled="index === rows.length - 1" @click="move(index, 1)">↓</button>
-          <button type="button" class="icon-button" aria-label="행 삭제" @click="remove(index)">×</button>
+          <button type="button" class="icon-button" aria-label="위로" :disabled="locked || index === 0" @click="move(index, -1)">↑</button>
+          <button type="button" class="icon-button" aria-label="아래로" :disabled="locked || index === rows.length - 1" @click="move(index, 1)">↓</button>
+          <button type="button" class="icon-button" aria-label="행 삭제" :disabled="locked" @click="remove(index)">×</button>
         </span>
       </div>
       <div class="form-grid">

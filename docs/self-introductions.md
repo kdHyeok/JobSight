@@ -51,6 +51,8 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
     - `expectedVersion`(수정 요청 본문): **웹 PUT 은 필수**. **MCP 는 `resumeIds`·`question`·`answer` 중 하나라도 바꾸면 필수**이고, 직무·문항 유형 연결만 더할 때는(불변 조건 8) 선택이다.
       판정은 요청 주체(`CurrentUser.viaMcp()`)와 저장된 값과의 비교다(질문은 trim, 답변은 빈 값 null, 이력서는 집합). 보내면 MCP 도 다를 때 409 다.
     - 없으면 400 `VERSION_REQUIRED`, 다르면 409 `SELF_INTRO_STALE`. 오류에 지금 version 을 싣지 않는다 — 다시 읽고 바뀐 답변을 확인하게 하려는 것이다.
+    - **확정도 `expectedVersion` 을 받는다**(`SelfIntroductionConfirmRequest`). 보내면 수정과 같이 확인해 다르면 409 `SELF_INTRO_STALE` 이다. 확인 없이 version 을 올려 주면 편집기가 그 값을 이어받아,
+      연 뒤에 AI 가 고친 답변을 옛 초안 저장이 409 없이 덮는다(OCR 리뷰). 웹 편집기는 `editingVersion` 을 보낸다(`SelfIntroductionSaveRace.spec.ts`). 서버에서는 아직 선택이다 — 배포 뒤 옛 화면이 사라지면 필수로 올린다.
     - 화면은 같은 문항의 수정·확정을 줄 세우고 앞 응답의 version 을 이어받는다(`api/self-introductions.ts`의 `queued`). 편집기는 연 때의 version 을 쓰고 확정 응답의 version 으로만 바꾼다.
       409 면 서버 안내를 띄우고 초안은 남긴 채 목록만 다시 읽는다. 편집기를 다시 열어야 새 version 으로 저장된다(확인하지 않은 초안으로 덮어쓰지 않게).
 13. **작성 근거는 `(경험 id, 개정)` 쌍 그대로다**(4단계, 설계 6.8). 생성·수정의 `experiences[{experienceId, experienceRevision}]`(10개 이하)는 두 키가 필수(없으면 400
@@ -60,10 +62,11 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
     (`experiences[{…, title, trust, needsReview}]`)에 실린다 — docs/experiences.md.
 14. **`alreadyUsedFor` 는 사용자가 확인한 제출본을 우선한다**(설계 6.6). 공고에 `USER_CONFIRMED` 이상 제출 기록이 있으면 그 최신 스냅샷에 든 답변만
     그 공고에 "낸 것"이다 — 직접 출처가 있어도 스냅샷에 없으면 빼고, 직접 출처가 없어도 스냅샷에 있으면 넣는다(그때의 written_for 직무, 없으면 공고 제목).
+    스냅샷이 있는 공고에서는 지금 연결을 보지 않는다 — 제출 뒤 같은 공고의 다른 직무로 연결을 바꿔도 사용처는 그때의 직무다.
     항목의 `submission` 은 `사용자가 확인한 제출본`·`접수 근거와 대조한 제출본`·`제출본 미확인`(확인 기록이 없어 지금 연결로 판단) 중 하나다.
     LINKED 기록은 제출본이 아니라서 쓰지 않는다. PAST_USE 신호는 아직 없다(6단계) — 들어오면 같은 규칙을 쓴다.
 15. **작성 기준과 재현 정보**(설계 6.7, V28). 계정당 Markdown 하나(`writing_guides`, 20,000자)를 웹 `/introductions` 맨 위 "작성 기준"에서
-    `expectedVersion`(처음 0)으로 고친다. 다르면 409 `WRITING_GUIDE_STALE`. MCP 는 `writing_guide_get` 으로 읽기만 한다.
+    `expectedVersion`(처음 0)으로 고친다. 다르면 409 `WRITING_GUIDE_STALE`. 처음 두 번이 동시에 와도 둘째는 같은 코드다(잠글 행이 없어 `insert … on conflict do nothing` 0행으로 판정). MCP 는 `writing_guide_get` 으로 읽기만 한다.
     MCP 로 자소서를 만들거나 고치면 `self_introductions.writing_context` 에 `{writingGuideVersion, experiences[{experienceId, experienceRevision}], searchContext}` 를 덮어쓴다.
     `searchContext` 는 클라이언트가 `request.searchContext` 로 넘긴 `experience_search` 의 `context` 다(선택). 웹 저장은 이 값을 바꾸지 않는다 — "AI 가 쓸 때" 본 기준이다.
 
@@ -75,7 +78,7 @@ GET    /api/self-introductions/{id}
 POST   /api/self-introductions                {resumeIds?, positionIds?, questionTypes?, question, answer?}  (이력서 또는 직무 1개 이상)
 PUT    /api/self-introductions/{id}           {resumeIds, positionIds?, questionTypes?, question, answer?, expectedVersion}
                                               없으면 400 VERSION_REQUIRED, 다르면 409 SELF_INTRO_STALE, 잠금 대기 초과 409 SELF_INTRO_BUSY
-POST   /api/self-introductions/{id}/confirm   {positionIds?, questionTypes?}  웹 전용. version 이 오른다
+POST   /api/self-introductions/{id}/confirm   {positionIds?, questionTypes?, expectedVersion?}  웹 전용. version 이 오른다
 DELETE /api/self-introductions/{id}
 ```
 
@@ -95,7 +98,7 @@ DELETE /api/self-introductions/{id}
 
 | 도구 | 연결 | 동작 |
 |---|---|---|
-| `self_intro_list` | `McpActions.listSelfIntros` → `SelfIntroductionAgentService.list` | 필터 `q`(100자, 넘으면 `QUERY_TOO_LONG`)·`resumeId`·`positionId`·`postingId`·`companyId`·`questionType`·`unlinked`, `limit`(기본 10, 1~50로 맞춤). 응답 `{fallback, total, complete, results[]}` |
+| `self_intro_list` | `McpActions.listSelfIntros` → `SelfIntroductionAgentService.list` | 필터 `q`(100자, 넘으면 `QUERY_TOO_LONG`)·`resumeId`·`positionId`·`postingId`·`companyId`·`questionType`·`unlinked`, `limit`(기본 10, 1~50로 맞춤). 응답 `{fallback, total, complete, results[]}`. `resumeId`·`positionId`·`postingId`·`companyId` 가 남의 것·없는 것이면 404 |
 | `self_intro_get` | `McpActions.getSelfIntro` | 같은 항목 모양에 `answer` 전문 |
 | `self_intro_create` / `_update` | `SelfIntroductionController` | 위 DTO 그대로. MCP 로 남긴 연결은 항상 `AI`. `_update` 의 연결은 더하기만(불변 조건 8). `_update` 의 `request.expectedVersion` 은 질문·답변·이력서를 바꿀 때 필수(불변 조건 12) |
 | `self_intro_delete` | `SelfIntroductionController` | — |

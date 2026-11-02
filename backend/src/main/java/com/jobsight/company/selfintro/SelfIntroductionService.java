@@ -223,14 +223,19 @@ public class SelfIntroductionService {
     @Transactional
     public SelfIntroductionResponse confirm(UUID id, SelfIntroductionConfirmRequest request) {
         SelfIntroduction value = lockOwned(id);
+        // 화면이 연 version 을 보내면 저장과 같이 확인한다. 확인 없이 올려 주면 화면이 새 version 을 이어받아
+        // 옛 초안 저장이 그사이 남이 고친 답변을 409 없이 덮는다(불변 조건 12). 보내지 않는 옛 화면은 확인하지 않는다.
+        checkVersion(value, request.expectedVersion(), false);
         if (!value.confirm(orEmpty(request.positionIds()), orEmpty(request.questionTypes()))) {
             throw new ApiRuleException(HttpStatus.NOT_FOUND, "LINK_NOT_FOUND", "연결되지 않은 직무나 문항 유형은 확정할 수 없습니다.");
         }
         return SelfIntroductionResponse.of(repository.saveAndFlush(value));
     }
 
+    /** 계정 잠금(T9) 아래에서 지운다 — 제출 확인이 소유 확인 뒤 스냅샷을 읽는 사이에 끼어들어 고른 답변이 조용히 빠지지 않게. */
     @Transactional
     public void delete(UUID id) {
+        ownerLock.acquire(currentUser.id());
         repository.delete(findOwned(id));
     }
 

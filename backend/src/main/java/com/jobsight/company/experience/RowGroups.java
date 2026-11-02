@@ -50,7 +50,10 @@ public final class RowGroups {
         }
     }
 
-    /** 이력서 하나의 경험 행(프로젝트·경력·대내외활동·교육이수). 제목이 빈 행과 null 행은 뺀다. */
+    /**
+     * 이력서 하나의 경험 행(프로젝트·경력·대내외활동·교육이수). null 행과, 앵커 없이 제목만 빈 행은 뺀다.
+     * 제목이 빈 행도 앵커가 있으면 남긴다 — 그 경험의 사용처다(상세 rows·목차·missing). 묶음(unlinked)에는 앵커가 없는 행만 들어간다.
+     */
     public static List<Row> rows(Doc doc) {
         ResumeContent c = doc.content();
         List<Row> rows = new ArrayList<>();
@@ -66,7 +69,7 @@ public final class RowGroups {
         each(c.trainings(), (row, i) -> rows.add(new Row(doc, "trainings", i, ExperienceKind.TRAINING, row.name(),
                 row.startYm(), row.endYm(), null, join(row.name(), row.institution(), row.description()),
                 row.experienceId(), row.experienceRevision())));
-        return rows.stream().filter(row -> !KeyNormalizer.key(row.title()).isEmpty()).toList();
+        return rows.stream().filter(row -> row.experienceId() != null || !KeyNormalizer.key(row.title()).isEmpty()).toList();
     }
 
     /**

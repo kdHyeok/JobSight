@@ -45,20 +45,24 @@ public class AttachmentService {
     /**
      * 사용처 판정(설계 6.9 체크리스트). 첫 인자는 소유자, %s 는 대상 첨부 조건이다(한 건이면 "and id = ?", 서랍이면 "").
      * 이력서·경험은 JSON 텍스트 포함 검사다 — 계정 이력서 몇 건이라 GIN 없이 한다(설계 1.5). 그래서 첨부 칸에는
-     * 정규형(소문자 36자) UUID 만 새로 적게 한다(lockNewReferences). 참조원이 늘면 여기에 UNION ALL 절을 더한다.
+     * 정규형(소문자 36자) UUID 만 새로 적게 한다(lockNewReferences). 이력서는 lower() 로 비교한다 — 규칙 B 이전에 저장된
+     * 대문자 값도 UUID.fromString 이 받아 화면에 보이므로 사용처다(축약형은 여전히 못 찾는다, docs/attachments.md 배포 전 점검).
+     * 경험의 지금 근거(EXPERIENCE)와 개정 이력(EXPERIENCE_REVISION)은 따로 낸다 — 지금 근거는 늘 마지막 개정에도 있어서,
+     * 근거를 빼고 저장해도 개정이 남는다. 참조원이 늘면 여기에 UNION ALL 절을 더한다.
      * submission_attachments 는 FK 가 삭제를 막지만(방어선) 판정에도 넣어 같은 409 문구를 준다.
      */
     private static final String USAGE = """
             with t as (select id, owner_id from attachments where owner_id = ? %s)
             select * from (
               select t.id, 'RESUME' as type, r.id as ref_id, r.name
-                from t join resumes r on r.owner_id = t.owner_id and strpos(r.content::text, t.id::text) > 0
+                from t join resumes r on r.owner_id = t.owner_id and strpos(lower(r.content::text), t.id::text) > 0
               union all
-              select t.id, case when strpos(e.facts::text, t.id::text) > 0 then 'EXPERIENCE' else 'EXPERIENCE_REVISION' end,
-                     e.id, e.title
+              select t.id, 'EXPERIENCE', e.id, e.title
+                from t join experiences e on e.owner_id = t.owner_id and strpos(e.facts::text, t.id::text) > 0
+              union all
+              select t.id, 'EXPERIENCE_REVISION', e.id, e.title
                 from t join experiences e on e.owner_id = t.owner_id
-               where strpos(e.facts::text, t.id::text) > 0
-                  or exists (select 1 from experience_revisions v
+               where exists (select 1 from experience_revisions v
                               where v.experience_id = e.id and v.owner_id = t.owner_id and strpos(v.facts::text, t.id::text) > 0)
               union all
               select t.id, 'SUBMISSION', s.id, p.title
@@ -193,15 +197,16 @@ public class AttachmentService {
             String label = switch (by.type()) {
                 case "RESUME" -> "이력서 '" + by.name() + "'";
                 case "EXPERIENCE" -> "경험 '" + by.name() + "'";
-                case "EXPERIENCE_REVISION" -> "경험 '" + by.name() + "'의 지난 개정";
+                case "EXPERIENCE_REVISION" -> "경험 '" + by.name() + "'의 개정 이력";
                 default -> "'" + by.name() + "' 제출 기록";
             };
             names.computeIfAbsent(by.type(), type -> new ArrayList<>()).add(label);
         }
         List<String> hints = new ArrayList<>();
         if (names.containsKey("RESUME")) hints.add("이력서는 그 첨부 칸을 비우고 저장하면 됩니다");
-        if (names.containsKey("EXPERIENCE")) hints.add("경험은 그 근거를 빼고 저장하면 됩니다");
-        if (names.containsKey("EXPERIENCE_REVISION")) hints.add("경험의 지난 개정이 가리키는 파일은 그 경험을 지워야 지울 수 있습니다");
+        // 지금 근거는 마지막 개정에도 있으므로 개정 이력 안내가 함께 나간다. 근거만 빼라고 하면 빼도 지울 수 없다.
+        if (names.containsKey("EXPERIENCE") && !names.containsKey("EXPERIENCE_REVISION")) hints.add("경험은 그 근거를 빼고 저장하면 됩니다");
+        if (names.containsKey("EXPERIENCE_REVISION")) hints.add("경험 근거로 적었던 파일은 개정 이력에 남아, 근거를 빼고 저장해도 그 경험을 지워야 지울 수 있습니다");
         if (names.containsKey("SUBMISSION")) hints.add("제출 기록이 가리키는 파일은 지울 수 없습니다");
         return "다른 곳에서 쓰고 있어 지울 수 없습니다: "
                 + names.values().stream().flatMap(List::stream).distinct().collect(Collectors.joining(", "))

@@ -44,7 +44,7 @@ def parse(body):
     if not isinstance(data, dict):
         raise BadRequest("객체여야 합니다")
     mode = data.get("mode")
-    if mode not in PREFIX:
+    if not isinstance(mode, str) or mode not in PREFIX:  # [] 같은 값은 dict 조회에서 TypeError 다
         raise BadRequest("mode 는 query 또는 passage")
     texts = data.get("texts")
     if not isinstance(texts, list) or not texts or len(texts) > MAX_TEXTS:
@@ -94,7 +94,8 @@ def handler(model):
         def do_POST(self):
             if self.path != "/embed":
                 return self.send(404, {"error": "NOT_FOUND"})
-            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.headers.get("Content-Length") or "0"
+            length = int(raw) if raw.isdigit() else -1
             if length <= 0 or length > MAX_BODY:
                 return self.send(400, {"error": "BAD_REQUEST", "message": "본문 크기"})
             try:
@@ -120,6 +121,7 @@ def self_check():
     assert parse(json.dumps({"mode": "passage", "texts": ["a"]}))[1] == ["passage: a"]
     for bad in ["[]", "{}", '{"mode":"x","texts":["a"]}', '{"mode":"query","texts":[]}',
                 '{"mode":"query","texts":[""]}', '{"mode":"query","texts":[1]}', "not json",
+                '{"mode":[],"texts":["a"]}', '{"mode":{},"texts":["a"]}',
                 json.dumps({"mode": "query", "texts": ["a"] * (MAX_TEXTS + 1)}),
                 json.dumps({"mode": "query", "texts": ["a" * (MAX_CHARS + 1)]})]:
         try:
@@ -157,11 +159,25 @@ def check_http():
         except urllib.error.HTTPError as error:
             return error.code, json.load(error)
 
+    def raw_post(length):
+        """숫자가 아닌 Content-Length 처럼 urllib 로 만들 수 없는 요청."""
+        import http.client
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        try:
+            connection.putrequest("POST", "/embed")
+            connection.putheader("Content-Length", length)
+            connection.endheaders()
+            return connection.getresponse().status
+        finally:
+            connection.close()
+
     try:
         status, body = call("/embed", json.dumps({"mode": "passage", "texts": ["a", "가나다라마바사아자차카"]}))
         assert status == 200 and body["vectors"] == [[0.6, 0.8]] * 2 and body["truncated"] == [False, True], body
         assert call("/embed", '{"mode":"x","texts":["a"]}')[0] == 400
         assert call("/embed", '{"mode":"query","texts":[]}')[0] == 400
+        assert call("/embed", '{"mode":[],"texts":["a"]}')[0] == 400
+        assert raw_post("abc") == 400
         assert call("/embed", json.dumps({"mode": "query", "texts": ["boom"]})) == (500, {"error": "INTERNAL"})
         status, body = call("/health")
         assert status == 200 and body["model"] == MODEL_NAME and body["dim"] == 2, body

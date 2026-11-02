@@ -267,7 +267,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     expect(wrapper.find('.link-candidates').exists()).toBe(false)
     await wrapper.get('[aria-label="에이회사 · 공채 · 백엔드 확정"]').trigger('click')
     await flushPromises()
-    expect(api.confirmSelfIntroduction).toHaveBeenCalledWith(item.id, { positionIds: ['p-backend'] })
+    expect(api.confirmSelfIntroduction).toHaveBeenCalledWith(item.id, { positionIds: ['p-backend'], expectedVersion: item.version })
     expect(wrapper.find('[aria-label="에이회사 · 공채 · 백엔드 확정"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="지원동기 확정"]').exists()).toBe(true)
     await wrapper.get('[aria-label="지원동기 연결 해제"]').trigger('click')

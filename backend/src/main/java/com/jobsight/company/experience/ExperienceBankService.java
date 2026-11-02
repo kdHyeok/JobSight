@@ -260,6 +260,10 @@ public class ExperienceBankService {
                     .filter(Objects::nonNull).flatMap(List::stream).map(ExperienceFacts.Item::id).forEach(used::add);
             if (previous.evidence() != null) previous.evidence().forEach(ev -> used.add(ev.id()));
         }
+        // 요청에 명시된 id 도 미리 비켜 둔다. 앞 항목에 a1 을 붙인 뒤 뒤 항목의 명시 id a1 을 중복으로 거절하면 안 된다.
+        Stream.of(value.actions(), value.results(), value.unverified(), value.conflicts()).filter(Objects::nonNull)
+                .flatMap(List::stream).map(ExperienceFacts.Item::id).forEach(used::add);
+        orEmpty(value.evidence()).forEach(ev -> used.add(ev.id()));
         Set<String> seen = new HashSet<>();
         List<ExperienceFacts.Evidence> evidence = new ArrayList<>();
         for (ExperienceFacts.Evidence ev : orEmpty(value.evidence())) {

@@ -38,7 +38,8 @@ const saving = ref(false)
 const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<Company | null>(null)
 /** 소속 공고 직무로 쓴 자소서의 직접 출처가 함께 사라진다는 안내. 보통 드로어가 이미 상세를 들고 있다. */
-const deleteNotice = ref('')
+/** 삭제 확인창 덧붙임 문구. null 이면 자소서 수를 받는 중이라 확정을 막는다. */
+const deleteNotice = ref<string | null>('')
 const deleting = ref(false)
 const industryOptions = computed(() => [...new Set(companies.value.flatMap((company) => company.industries))].sort())
 
@@ -109,7 +110,7 @@ async function save(payload: CompanyPayload) {
 
 async function askDelete(target: Company) {
   deleteTarget.value = target
-  deleteNotice.value = ''
+  deleteNotice.value = null
   const count = await linkedSelfIntroCount(target, () => getCompany(target.id))
   if (deleteTarget.value?.id === target.id) deleteNotice.value = writtenForNotice(count, '이 기업 공고의 직무로')
 }
@@ -223,9 +224,10 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="기업 정보를 삭제할까요?"
     :subject="deleteTarget.name"
-    :detail="`의 기록과 연결된 채용공고가 함께 삭제됩니다.${deleteNotice}`"
+    :detail="`의 기록과 연결된 채용공고가 함께 삭제됩니다.${deleteNotice ?? ''}`"
     aria-label="기업 삭제 확인"
     :busy="deleting"
+    :pending="deleteNotice === null"
     @confirm="remove"
     @cancel="deleteTarget = null"
   />

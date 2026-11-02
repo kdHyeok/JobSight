@@ -23,7 +23,7 @@ export interface AttachmentUse {
 export const USE_LABELS: Record<string, string> = {
   RESUME: '이력서',
   EXPERIENCE: '경험',
-  EXPERIENCE_REVISION: '경험 지난 개정',
+  EXPERIENCE_REVISION: '경험 개정 이력',
   SUBMISSION: '제출 기록',
 }
 

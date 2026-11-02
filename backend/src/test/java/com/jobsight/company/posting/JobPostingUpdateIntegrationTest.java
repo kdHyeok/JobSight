@@ -17,6 +17,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -56,6 +58,7 @@ class JobPostingUpdateIntegrationTest {
     @Autowired JobPostingService postings;
     @Autowired ResumeService resumes;
     @Autowired JdbcTemplate jdbc;
+    @Autowired PlatformTransactionManager transactions;
 
     @BeforeEach
     void owner() {
@@ -151,5 +154,50 @@ class JobPostingUpdateIntegrationTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /**
+     * SUBMITTED 를 떠나는 수정(행 잠금)이 커밋 전일 때 들어온 changeStatus(SUBMITTED) 는 그 행 잠금을 기다려야 한다(OCR 리뷰).
+     * 잠금 없이 읽으면 옛 SUBMITTED 를 보고 전이가 아니라고 판단해, 실제로는 DRAFTING → SUBMITTED 인데
+     * 지금 연결 자료로 LINKED 를 새로 남기지 않고 예전 기록을 돌려준다.
+     */
+    @Test
+    void changeStatusWaitsForAnUpdateLeavingSubmitted() throws Exception {
+        JobPostingResponse created = postings.create(new JobPostingRequest(null, "경합 회사", "경합 공채", null,
+                EmploymentType.FULL_TIME, null, ApplicationStatus.SUBMITTED, null, null, List.of(), List.of()));
+        // 첫 LINKED 뒤에 이력서를 연결한다. 다음 전이의 스냅샷은 내용이 달라 새 기록이어야 한다.
+        resumes.create(new ResumeRequest("지원용", null, List.of(created.positions().get(0).id()), null));
+        JobPostingRequest leave = new JobPostingRequest(null, "경합 회사", "경합 공채", null, EmploymentType.FULL_TIME, null,
+                ApplicationStatus.DRAFTING, null, null, null, null);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            Future<?> holder = pool.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                postings.update(created.id(), leave);
+                held.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            assertThat(held.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<JobPostingResponse> waiter = pool.submit(() -> postings.changeStatus(created.id(), ApplicationStatus.SUBMITTED));
+            long deadline = System.currentTimeMillis() + 1500;
+            while (!waiter.isDone() && System.currentTimeMillis() < deadline) Thread.onSpinWait();
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            JobPostingResponse resubmitted = waiter.get(10, TimeUnit.SECONDS);
+            assertThat(resubmitted.status()).isEqualTo(ApplicationStatus.SUBMITTED);
+            assertThat(resubmitted.submission().id()).isNotEqualTo(created.submission().id());
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+        assertThat(jdbc.queryForObject("select status from job_postings where id = ?", String.class, created.id()))
+                .isEqualTo("SUBMITTED");
+        assertThat(jdbc.queryForObject("select count(*) from submissions where posting_id = ?", Integer.class, created.id()))
+                .isEqualTo(2);
     }
 }

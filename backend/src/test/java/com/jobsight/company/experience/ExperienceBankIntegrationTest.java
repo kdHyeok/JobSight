@@ -982,4 +982,126 @@ class ExperienceBankIntegrationTest {
                 0, experience, next)))).isEqualTo("TARGET_REQUIRED");
         assertThat(links(resumeId)).isEmpty();
     }
+
+    // ── OCR 리뷰 반영 ───────────────────────────────────────────────────────
+
+    /** 서버가 붙이는 id 는 요청 뒤쪽에 명시된 id 와도 겹치지 않는다. 클라이언트가 겹치게 보내지 않았는데 400 이면 안 된다. */
+    @Test
+    void generatedFactIdsAvoidExplicitIdsLaterInTheRequest() {
+        signIn();
+        ExperienceViews.Saved saved = create(ExperienceKind.PROJECT, "정산 배치", null,
+                facts("백엔드", List.of(item(null, "첫 행동"), item("a1", "둘째 행동")), List.of(), List.of()), null);
+
+        assertThat(detail(saved.id()).facts().actions()).extracting(ExperienceFacts.Item::id, ExperienceFacts.Item::text)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("a2", "첫 행동"), org.assertj.core.groups.Tuple.tuple("a1", "둘째 행동"));
+        assertThat(code(catchThrowable(() -> create(ExperienceKind.PROJECT, "겹침", null,
+                facts(null, List.of(item("a1", "하나"), item("a1", "둘")), List.of(), List.of()), null))))
+                .isEqualTo("FACT_ID_DUPLICATE");
+    }
+
+    /** 두 키가 빠진 행이 저장된 앵커를 이어받을 때도 refreshExperienceIds 를 따른다(지금 개정으로 올린다). */
+    @Test
+    void inheritedAnchorHonorsRefresh() {
+        signIn();
+        ExperienceViews.Saved saved = create(ExperienceKind.PROJECT, "정산 배치", "2025.03",
+                facts("백엔드", List.of(item("a1", "배치 분할")), List.of(), List.of()), null);
+        UUID resumeId = resume("v1", Map.of("projects", List.of(Map.of("name", "정산 배치", "startYm", "2025.03",
+                "experienceId", saved.id().toString()))));
+        saveFacts(saved.id(), saved.version(), facts("백엔드", List.of(item("a1", "배치 3분할")), List.of(), List.of()));
+
+        ResumeContent bare = mapper.convertValue(Map.of("projects", List.of(Map.of("name", "정산 배치", "startYm", "2025.03"))),
+                ResumeContent.class);
+        ResumeContent.Project row = put(resumeId, bare, List.of(saved.id())).content().projects().get(0);
+
+        assertThat(row.experienceId()).isEqualTo(saved.id());
+        assertThat(row.experienceRevision()).isEqualTo(2);
+        assertThat(writer.mismatches(owner)).isZero();
+    }
+
+    /** 제목이 빈 행도 앵커가 있으면 사용처다: 상세 rows 에 나오고, 그 경험을 이 이력서의 missing 으로 보고하지 않는다. */
+    @Test
+    void blankTitleAnchoredRowStillCountsAsUsage() {
+        signIn();
+        UUID experience = create(ExperienceKind.PROJECT, "정산 배치", null, null, null).id();
+        UUID resumeId = resume("v1", Map.of("projects", List.of(Map.of("description", "제목을 지운 행",
+                "experienceId", experience.toString()))));
+
+        assertThat(detail(experience).rows()).singleElement().satisfies(row -> assertThat(row.resumeId()).isEqualTo(resumeId));
+        assertThat(views.missing(resumeId)).extracting(ExperienceViews.Missing::experienceId).doesNotContain(experience);
+        assertThat(views.index(null, null, null, null).importHint()).isNull();
+    }
+
+    /**
+     * 적용은 이력서를 id 순으로 잠그지만, 대표 행(제목·기간)은 계획과 같이 가장 최근에 고친 이력서의 행이어야 한다.
+     * 그렇지 않으면 바뀌지 않은 계획으로도 미리 보기와 다른 제목·기간의 경험이 생긴다.
+     */
+    @Test
+    void importDraftUsesThePlanRepresentativeRow() {
+        signIn();
+        UUID a = resume("v1", Map.of("trainings", List.of(Map.of("name", "데이터 교육", "startYm", "2024.01", "endYm", "2024.06"))));
+        UUID b = resume("v2", Map.of("trainings", List.of(Map.of("name", "데이터교육", "startYm", "2024.01", "endYm", "2024.12"))));
+        // id 순으로 앞선 이력서를 더 오래된 것으로 만든다 — 잠금 순서와 대표 순서가 갈린다.
+        UUID older = a.compareTo(b) < 0 ? a : b;
+        jdbc.update("update resumes set updated_at = now() - interval '1 day' where id = ?", older);
+        jdbc.update("update resumes set updated_at = now() where id = ?", older.equals(a) ? b : a);
+
+        ExperienceViews.ImportGroup group = imports.plan().groups().get(0);
+        UUID created = imports.apply(new ExperienceRequests.Import(imports.plan().resumeVersions(), List.of(
+                new ExperienceRequests.ImportDecision(group.key(), ExperienceRequests.ImportAction.CREATE, null))))
+                .experienceIds().get(0);
+
+        ExperienceViews.Detail detail = detail(created);
+        assertThat(detail.title()).isEqualTo(group.title());
+        assertThat(detail.facts().period()).isEqualTo(group.period());
+    }
+
+    /** 가져온 skills 도 저장 검증의 상한(50개·100자)을 지킨다. 넘친 것은 unverified 에 적는다 — 상세를 그대로 다시 저장할 수 있어야 한다. */
+    @Test
+    void importedSkillsFitSaveLimits() {
+        signIn();
+        String many = java.util.stream.IntStream.rangeClosed(1, 60).mapToObj(i -> "t" + i).collect(java.util.stream.Collectors.joining(", "));
+        resume("v1", Map.of("projects", List.of(Map.of("name", "기술 많은 프로젝트", "techStack", many + ", " + "x".repeat(101)))));
+        ExperienceViews.ImportPlan plan = imports.plan();
+        UUID id = imports.apply(new ExperienceRequests.Import(plan.resumeVersions(), List.of(new ExperienceRequests.ImportDecision(
+                plan.groups().get(0).key(), ExperienceRequests.ImportAction.CREATE, null)))).experienceIds().get(0);
+
+        ExperienceViews.Detail created = detail(id);
+        assertThat(created.skills()).hasSizeLessThanOrEqualTo(50).allSatisfy(skill -> assertThat(skill).hasSizeLessThanOrEqualTo(100));
+        assertThat(validator.validate(new ExperienceRequests.Save(null, null, null, null, created.facts(), null,
+                created.skills(), created.domains(), created.version()))).isEmpty();
+        assertThat(created.facts().unverified()).extracting(ExperienceFacts.Item::text).anySatisfy(text -> assertThat(text).contains("기술"));
+    }
+
+    /**
+     * 한 이력서의 두 행이 같은 묶음이면 같은 경험을 두 행에 걸 수 없다(EXPERIENCE_ROW_DUPLICATE). 계획이 경고를 싣고,
+     * 적용은 그 묶음을 링커까지 보내지 않고 무엇을 하면 되는지 담은 400 으로 거절한다. 아무것도 만들지 않는다.
+     */
+    @Test
+    void importGroupWithTwoRowsOfOneResumeIsFlagged() {
+        signIn();
+        resume("v1", Map.of("projects", List.of(Map.of("name", "정산 배치", "startYm", "2025.03", "description", "1차"),
+                Map.of("name", "정산 배치", "startYm", "2025.03", "description", "2차"))));
+        ExperienceViews.ImportPlan plan = imports.plan();
+        ExperienceViews.ImportGroup group = plan.groups().get(0);
+        assertThat(group.warning()).isNotBlank();
+
+        Throwable rejected = catchThrowable(() -> imports.apply(new ExperienceRequests.Import(plan.resumeVersions(), List.of(
+                new ExperienceRequests.ImportDecision(group.key(), ExperienceRequests.ImportAction.CREATE, null)))));
+
+        assertThat(code(rejected)).isEqualTo("IMPORT_GROUP_SAME_RESUME");
+        assertThat(jdbc.queryForObject("select count(*) from experiences where owner_id = ?", Integer.class, owner)).isZero();
+    }
+
+    /** 검색 결과의 기간은 경험 상세·목차와 같이 facts.period 를 우선한다. 시작 연월만 쓰면 끝난 경험이 "2023.01~" 로 나온다. */
+    @Test
+    void searchResultUsesFactsPeriod() {
+        signIn();
+        create(ExperienceKind.PROJECT, "정산 배치", "2023.01", new ExperienceFacts("2023.01~2023.06", null, null,
+                List.of(item(null, "Kafka 소비자 분할")), null, null, null, null), List.of("Kafka"));
+        ExperienceSearchResult result = search.search(new ExperienceSearchRequest(null, new ExperienceSearchRequest.Posting(
+                "B사", null, "서버", null, null, "Kafka 경험", null, List.of()), null, null));
+
+        assertThat(result.results()).filteredOn(r -> r.type().equals("EXPERIENCE")).singleElement()
+                .satisfies(r -> assertThat(r.period()).isEqualTo("2023.01~2023.06"));
+    }
 }

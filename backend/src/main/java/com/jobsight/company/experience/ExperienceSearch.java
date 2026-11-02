@@ -228,7 +228,7 @@ public class ExperienceSearch {
             if (experience != null) {
                 // 경험 원본: source 는 없고(원문 근거는 experience_index 상세의 facts.evidence), alsoIn 은 이 경험을 쓰는 이력서 행이다.
                 results.add(new ExperienceSearchResult.Result(results.size() + 1, "EXPERIENCE", experience.getKind(),
-                        experience.getTitle(), RowGroups.period(experience.getStartYm(), null), null,
+                        experience.getTitle(), experiences.period(experience), null,
                         linkedRows.getOrDefault(experience.getId(), List.of()), why, experience.getId(),
                         experience.getRevision(), experience.isReviewed()));
                 continue;

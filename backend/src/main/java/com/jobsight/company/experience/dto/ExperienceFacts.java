@@ -17,17 +17,17 @@ public record ExperienceFacts(
         @Size(max = 200) String period,
         @Size(max = 2000) String role,
         @Valid Measurement measurement,
-        @Size(max = 50) List<@Valid Item> actions,
-        @Size(max = 50) List<@Valid Item> results,
-        @Size(max = 50) List<@Valid Evidence> evidence,
-        @Size(max = 50) List<@Valid Item> unverified,
-        @Size(max = 50) List<@Valid Item> conflicts
+        @Size(max = 50) List<@NotNull @Valid Item> actions,
+        @Size(max = 50) List<@NotNull @Valid Item> results,
+        @Size(max = 50) List<@NotNull @Valid Evidence> evidence,
+        @Size(max = 50) List<@NotNull @Valid Item> unverified,
+        @Size(max = 50) List<@NotNull @Valid Item> conflicts
 ) {
     /** 주장 하나. evidenceIds 는 이 주장을 받치는 evidence[].id. */
     public record Item(
             @Size(max = 40) String id,
             @NotBlank @Size(max = 2000) String text,
-            @Size(max = 10) List<@Size(max = 40) String> evidenceIds
+            @Size(max = 10) List<@NotNull @Size(max = 40) String> evidenceIds
     ) {
     }
 

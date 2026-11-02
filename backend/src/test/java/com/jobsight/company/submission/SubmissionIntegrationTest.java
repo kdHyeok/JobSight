@@ -335,6 +335,128 @@ class SubmissionIntegrationTest {
     }
 
     /**
+     * 확인 제출본이 있는 공고에서는 "그때 낸 직무"가 사용처다. 제출 뒤 같은 공고의 다른 직무(B)로 연결을 바꿔도
+     * 확인 수준은 스냅샷의 직무(A)에 붙는다(OCR 리뷰 — 지금 직접 출처 B 에 붙이고 A 를 숨겼다).
+     */
+    @Test
+    void alreadyUsedForNamesTheSnapshotPositionNotTheCurrentLink() {
+        signIn();
+        JobPostingResponse created = postings.create(posting("차사", ApplicationStatus.INTERESTED, List.of(
+                new PositionNameRequest(null, "백엔드"), new PositionNameRequest(null, "데이터"))));
+        UUID backend = created.positions().stream().filter(p -> p.name().equals("백엔드")).findFirst().orElseThrow().id();
+        UUID data = created.positions().stream().filter(p -> p.name().equals("데이터")).findFirst().orElseThrow().id();
+        UUID answer = writtenFor(backend, "지원 동기");
+        submissions.confirm(created.id(), new SubmissionRequest(SubmissionService.Level.USER_CONFIRMED,
+                List.of(), List.of(answer), null, null, null));
+        selfIntros.update(answer, new com.jobsight.company.selfintro.dto.SelfIntroductionUpdateRequest(List.of(), List.of(data),
+                null, "지원 동기", "답변", selfIntros.findById(answer).version()));
+
+        assertThat(agent.get(answer).alreadyUsedFor()).singleElement().satisfies(used -> {
+            assertThat(used.position()).isEqualTo("백엔드");
+            assertThat(used.submission()).isEqualTo("사용자가 확인한 제출본");
+        });
+    }
+
+    /** resumeId 필터도 소유자 확인을 한다. 남의 것·없는 이력서는 빈 목록이 아니라 404 다(OCR 리뷰). */
+    @Test
+    void agentListRejectsUnknownResumeFilter() {
+        signIn();
+        UUID foreign = resumes.create(new ResumeRequest("남의 이력서", null, List.of(), null)).id();
+        signIn();
+
+        assertThatThrownBy(() -> agent.list(null, foreign, null, null, null, null, null, null))
+                .isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> agent.list(null, UUID.randomUUID(), null, null, null, null, null, null))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    /** 첫 일을 트랜잭션 안에서 하고 커밋을 미룬 채 둘째 일을 시작한다. 둘째가 잠금에서 기다렸는지와 그 결과(예외)를 돌려준다. */
+    private record Raced(boolean waited, Throwable failure) {}
+
+    private Raced race(Runnable first, Runnable second) throws Exception {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch held = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        try {
+            java.util.concurrent.Future<?> holder = pool.submit(() -> {
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                new TransactionTemplate(transactions).executeWithoutResult(status -> {
+                    first.run();
+                    held.countDown();
+                    try {
+                        release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            });
+            assertThat(held.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            java.util.concurrent.Future<?> waiter = pool.submit(() -> {
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                second.run();
+            });
+            long deadline = System.currentTimeMillis() + 2000;
+            boolean waited = false;
+            while (!waiter.isDone() && System.currentTimeMillis() < deadline) {
+                if (jdbc.queryForObject("select count(*) from pg_stat_activity where datname = current_database() "
+                        + "and wait_event_type = 'Lock'", Integer.class) > 0) {
+                    waited = true;
+                    break;
+                }
+                Thread.onSpinWait();
+            }
+            release.countDown();
+            holder.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            try {
+                waiter.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                return new Raced(waited, null);
+            } catch (java.util.concurrent.ExecutionException e) {
+                return new Raced(waited, e.getCause());
+            }
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    /**
+     * 자소서 삭제도 계정 잠금(T9)을 탄다. 제출 확인이 소유 확인 뒤 스냅샷을 읽는 사이에 삭제가 끼어들면 고른 답변이
+     * 스냅샷에서 조용히 빠진다(OCR 리뷰). 확인이 잠금을 쥔 동안 삭제는 기다린다.
+     */
+    @Test
+    void selfIntroDeleteWaitsForSubmissionSnapshot() throws Exception {
+        signIn();
+        JobPostingResponse created = postings.create(posting("카사", ApplicationStatus.INTERESTED,
+                List.of(new PositionNameRequest(null, "백엔드"))));
+        UUID answer = writtenFor(created.positions().get(0).id(), "협업 경험");
+
+        Raced raced = race(() -> submissions.confirm(created.id(), new SubmissionRequest(SubmissionService.Level.USER_CONFIRMED,
+                List.of(), List.of(answer), null, null, null)), () -> selfIntros.delete(answer));
+
+        assertThat(raced.waited()).as("삭제가 제출 확인의 계정 잠금을 기다린다").isTrue();
+        assertThat(raced.failure()).isNull();
+        assertThat(submissions.list(created.id())).singleElement()
+                .satisfies(record -> assertThat(record.selfIntros()).hasSize(1));
+    }
+
+    /**
+     * 작성 기준을 처음 두 번 동시에 저장하면 둘째는 없는 행을 잠그지 못한다. 둘째는 일반 CONFLICT 가 아니라
+     * WRITING_GUIDE_STALE 이어야 화면이 version 을 다시 읽는다(OCR 리뷰).
+     */
+    @Test
+    void concurrentFirstWritingGuideSaveIsStale() throws Exception {
+        signIn();
+
+        Raced raced = race(() -> guides.update(new WritingGuideService.UpdateRequest("먼저", 0)),
+                () -> guides.update(new WritingGuideService.UpdateRequest("나중", 0)));
+
+        assertThat(raced.failure()).isInstanceOfSatisfying(ApiRuleException.class,
+                e -> assertThat(e.getCode()).isEqualTo("WRITING_GUIDE_STALE"));
+        assertThat(guides.get().body()).isEqualTo("먼저");
+    }
+
+    /**
      * 작성 기준: 웹에서 version 을 확인하며 고치고, MCP 는 writing_guide_get 으로 읽는다. MCP 로 저장한 자소서는 writing_context 에
      * 작성 기준 version·쓴 경험 개정·검색 context 를 남기고, 웹 저장은 그 값을 바꾸지 않는다.
      */

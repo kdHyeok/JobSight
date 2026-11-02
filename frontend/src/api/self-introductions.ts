@@ -46,4 +46,5 @@ export const deleteSelfIntroduction = (id: string) =>
 
 /** 웹 전용 확정(✓). MCP 가 남긴 AI 기록을 사용자 확정으로 바꾼다. version 이 오르므로 같은 줄에 세운다. */
 export const confirmSelfIntroduction = (id: string, payload: SelfIntroductionConfirmPayload) =>
-  queued(id, () => request<SelfIntroduction>(API.selfIntroductionConfirm(id), { method: 'POST', body: JSON.stringify(payload) }))
+  queued(id, (expectedVersion = payload.expectedVersion) =>
+    request<SelfIntroduction>(API.selfIntroductionConfirm(id), { method: 'POST', body: JSON.stringify({ ...payload, expectedVersion }) }))

@@ -25,8 +25,8 @@ public final class ExperienceRequests {
             @Size(max = 2000) String memo,
             @Valid ExperienceFacts facts,
             @Valid ExperienceDossier dossier,
-            @Size(max = 50) List<@Size(max = 100) String> skills,
-            @Size(max = 20) List<@Size(max = 100) String> domains,
+            @Size(max = 50) List<@NotNull @Size(max = 100) String> skills,
+            @Size(max = 20) List<@NotNull @Size(max = 100) String> domains,
             Long expectedVersion
     ) {
     }
@@ -43,7 +43,7 @@ public final class ExperienceRequests {
 
     /** resumeVersions 는 계획에 실린 이력서 version 그대로. 하나라도 바뀌었으면 409 IMPORT_PLAN_STALE — 계획을 다시 만든다. */
     public record Import(@NotNull Map<UUID, Long> resumeVersions,
-                         @NotNull @Size(max = 500) List<@Valid ImportDecision> decisions) {
+                         @NotNull @Size(max = 500) List<@NotNull @Valid ImportDecision> decisions) {
     }
 
     /** resume_add_experiences 항목. 경험 원본의 사실로 중립 문구를 만든다(FACTS). */
@@ -51,6 +51,6 @@ public final class ExperienceRequests {
     }
 
     /** resume_add_experiences 입력. 전부 들어가거나 전부 실패한다(섹션 상한 T6). */
-    public record AddExperiences(@NotNull @Size(min = 1, max = 20) List<@Valid AddItem> items) {
+    public record AddExperiences(@NotNull @Size(min = 1, max = 20) List<@NotNull @Valid AddItem> items) {
     }
 }

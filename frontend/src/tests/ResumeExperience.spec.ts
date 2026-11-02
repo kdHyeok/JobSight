@@ -129,6 +129,39 @@ describe('이력서 편집기의 경험 연결', () => {
     expect(savedPayload(wrapper).content.projects[0]).toMatchObject({ name: '사내 위키', experienceId: 'e3' })
   })
 
+  it('"경험으로 등록"이 끝나기 전에는 행을 옮기거나 지우거나 다시 등록할 수 없다(다른 행에 앵커가 붙지 않게)', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof api.createExperience>>) => void
+    vi.mocked(api.createExperience).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const wrapper = await mountEditor(resume([bare, { ...bare, name: '사내 메신저' }]))
+    await projectRows(wrapper).findAll('.resume-row__exp .button')[0].trigger('click')
+
+    const rows = projectRows(wrapper).findAll('.resume-row')
+    expect(rows[1].get('[aria-label="위로"]').attributes('disabled')).toBeDefined()
+    expect(rows[0].get('[aria-label="행 삭제"]').attributes('disabled')).toBeDefined()
+    await rows[1].get('.resume-row__exp .button').trigger('click')
+    expect(api.createExperience).toHaveBeenCalledTimes(1)
+
+    finish({ id: 'e3', version: 0, revision: 1, changeKind: 'INIT', needsReview: [], normalizedSkills: [], warnings: [] })
+    await flushPromises()
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    expect(savedPayload(wrapper).content.projects.map((row) => row.experienceId)).toEqual(['e3', undefined])
+    expect(projectRows(wrapper).findAll('.resume-row')[1].get('[aria-label="위로"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('겹친 경험 목록 조회는 마지막 요청의 응답만 반영한다', async () => {
+    let finishOld!: (value: Awaited<ReturnType<typeof api.listExperiences>>) => void
+    vi.mocked(api.listExperiences).mockReset()
+      .mockReturnValueOnce(new Promise((resolve) => { finishOld = resolve }))
+      .mockResolvedValueOnce({ experiences: [line('e1', '검색 개선', 2), line('e2', '배치 이관', 1)], unlinked: [], index: {} as never })
+    const wrapper = await mountEditor(resume([anchored]))
+    await wrapper.setProps({ resume: resume([anchored], { version: 8 }) })
+    await flushPromises()
+    finishOld({ experiences: [line('e1', '검색 개선', 2)], unlinked: [], index: {} as never })
+    await flushPromises()
+    expect(projectRows(wrapper).findAll('select[aria-label="경험에서 불러오기"] option').map((o) => o.text()))
+      .toContain('배치 이관 (2024.03~2024.08)')
+  })
+
   it('저장 응답의 unlinkedWarnings 는 끊긴 경험 이름으로 알린다', async () => {
     const wrapper = await mountEditor(resume([anchored]))
     await wrapper.setProps({ resume: resume([], { version: 8, unlinkedWarnings: ['e1'] }) })

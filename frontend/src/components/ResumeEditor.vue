@@ -70,14 +70,21 @@ const anchoredIds = (value: ResumeContent) => [...new Set(SECTIONS
   .flatMap((section) => value[section.key].map(anchorOf))
   .filter((id): id is string => !!id))]
 
+/** 마지막으로 보낸 경험 조회의 순번. 겹친 조회 중 늦게 온 이전 응답(성공·실패 모두)은 버린다. */
+let experienceSeq = 0
+/** "경험으로 등록" 진행 중. 끝날 때까지 행 이동·삭제·다른 등록을 막는다 — 결과는 등록할 때의 행 번호에 단다. */
+const registering = ref(false)
+
 async function loadExperiences() {
+  const mine = ++experienceSeq
   try {
     const ids = anchoredIds(content.value)
     const [list, details] = await Promise.all([listExperiences(), ids.length ? getExperiences(ids) : Promise.resolve([])])
+    if (mine !== experienceSeq) return
     experienceLines.value = list.experiences
     experienceDetails.value = Object.fromEntries(details.map((detail) => [detail.id, detail]))
   } catch {
-    experienceLines.value = null
+    if (mine === experienceSeq) experienceLines.value = null
   }
 }
 
@@ -116,6 +123,7 @@ async function loadFromExperience(key: SectionKey, id: string) {
 
 /** "경험으로 등록": 미연결 행으로 경험 원본을 만들고 그 행에 앵커를 단다. 연결은 이력서를 저장할 때 확정된다. */
 async function registerExperience(key: SectionKey, index: number) {
+  if (registering.value) return
   const row = content.value[key][index]
   const payload = row && experienceFromRow(key, row)
   experienceError.value = ''
@@ -123,6 +131,7 @@ async function registerExperience(key: SectionKey, index: number) {
     experienceError.value = '제목(이름·기업명)을 먼저 입력해 주세요.'
     return
   }
+  registering.value = true
   try {
     const saved = await createExperience(payload)
     setRows(key, content.value[key].map((item, i) => (i === index ? { ...item, experienceId: saved.id } : item)))
@@ -130,6 +139,8 @@ async function registerExperience(key: SectionKey, index: number) {
     await loadExperiences()
   } catch (error) {
     experienceError.value = error instanceof Error ? error.message : '경험 원본을 만들지 못했습니다.'
+  } finally {
+    registering.value = false
   }
 }
 
@@ -398,6 +409,7 @@ async function exportPdf() {
       :experiences="sectionExperiences(section.key)"
       :stale-ids="staleIds"
       :refresh-ids="refreshIds"
+      :locked="registering"
       @update:rows="setRows(section.key, $event)"
       @load="loadFromExperience(section.key, $event)"
       @register="registerExperience(section.key, $event)"

@@ -47,22 +47,29 @@ public class WritingGuideService {
         return find(owner, false).version();
     }
 
-    /** 행을 잠근 뒤 version 을 확인한다. 같은 계정이 처음 두 번 동시에 쓰면 둘째는 PK 위반으로 409 CONFLICT 다. */
+    /**
+     * 행을 잠근 뒤 version 을 확인한다. 첫 저장은 잠글 행이 없어서, 같은 계정이 처음 두 번 동시에 쓰면 둘 다 version 0 을 본다.
+     * 둘째의 insert 는 on conflict do nothing 으로 0행이 되고 WRITING_GUIDE_STALE 이다 — 화면이 다시 읽게 하는 코드다(일반 CONFLICT 아님).
+     */
     @Transactional
     public Guide update(UpdateRequest request) {
         UUID owner = currentUser.id();
         Guide current = find(owner, true);
-        if (current.version() != request.expectedVersion()) {
-            throw new ApiRuleException(HttpStatus.CONFLICT, "WRITING_GUIDE_STALE",
-                    "다른 곳에서 작성 기준을 먼저 저장했습니다. 다시 읽고 고치세요.");
-        }
+        if (current.version() != request.expectedVersion()) throw stale();
         if (current.version() == 0) {
-            jdbc.update("insert into writing_guides (owner_id, body, version, updated_at) values (?, ?, 1, now())", owner, request.body());
+            if (jdbc.update("insert into writing_guides (owner_id, body, version, updated_at) values (?, ?, 1, now()) "
+                    + "on conflict (owner_id) do nothing", owner, request.body()) == 0) {
+                throw stale();
+            }
         } else {
             jdbc.update("update writing_guides set body = ?, version = version + 1, updated_at = now() where owner_id = ?",
                     request.body(), owner);
         }
         return find(owner, false);
+    }
+
+    private static ApiRuleException stale() {
+        return new ApiRuleException(HttpStatus.CONFLICT, "WRITING_GUIDE_STALE", "다른 곳에서 작성 기준을 먼저 저장했습니다. 다시 읽고 고치세요.");
     }
 
     private Guide find(UUID owner, boolean lock) {

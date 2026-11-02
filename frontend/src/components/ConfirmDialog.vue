@@ -9,6 +9,8 @@ withDefaults(
     confirmLabel?: string
     ariaLabel?: string
     busy: boolean
+    /** 확정 전에 알려야 할 내용을 아직 받는 중. 확정만 막고 취소는 둔다. */
+    pending?: boolean
   }>(),
   { confirmLabel: '삭제', ariaLabel: '삭제 확인' },
 )
@@ -23,7 +25,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
       <p><strong>{{ subject }}</strong>{{ detail }}</p>
       <div class="modal-actions">
         <button type="button" class="button secondary" :disabled="busy" @click="emit('cancel')">취소</button>
-        <button type="button" class="button danger solid" :disabled="busy" @click="emit('confirm')">
+        <button type="button" class="button danger solid" :disabled="busy || pending" @click="emit('confirm')">
           {{ busy ? `${confirmLabel} 중…` : confirmLabel }}
         </button>
       </div>

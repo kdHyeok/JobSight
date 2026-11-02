@@ -43,18 +43,28 @@ async function load(notice = '') {
   }
 }
 
+/** 서버 결정 상한(ExperienceRequests.Import 의 @Size(max = 500)). */
+const MAX_DECISIONS = 500
+
 async function apply() {
   if (!plan.value || !ready.value) return
+  // 건너뛰기는 보내지 않는다(빠진 묶음은 서버가 손대지 않는다). 그래야 묶음이 500개를 넘어도 나눠서 가져올 수 있다.
+  const chosen = plan.value.groups.filter((group) => decisions[group.key].action !== 'SKIP')
+  if (chosen.length > MAX_DECISIONS) {
+    message.value = `한 번에 ${MAX_DECISIONS}묶음까지 가져올 수 있습니다(지금 ${chosen.length}묶음). 나머지는 건너뛰기로 두고 적용한 뒤 다시 가져오세요.`
+    return
+  }
+  const skipped = plan.value.groups.length - chosen.length
   applying.value = true
   message.value = ''
   try {
-    const result = await applyImport(plan.value.resumeVersions, plan.value.groups.map((group) => {
+    const result = await applyImport(plan.value.resumeVersions, chosen.map((group) => {
       const decision = decisions[group.key]
       return decision.action === 'LINK_TO'
         ? { key: group.key, action: decision.action, experienceId: decision.experienceId }
         : { key: group.key, action: decision.action }
     }))
-    emit('done', result)
+    emit('done', { ...result, skipped: result.skipped + skipped })
   } catch (error) {
     if (error instanceof ApiClientError && error.status === 409) {
       // 계획 뒤에 이력서가 바뀌었다. 고른 결정은 새 계획과 맞지 않을 수 있어 다시 고르게 한다.

@@ -83,4 +83,6 @@ export interface SelfIntroductionUpdatePayload extends SelfIntroductionPayload {
 export interface SelfIntroductionConfirmPayload {
   positionIds?: string[]
   questionTypes?: Competency[]
+  /** 편집기가 읽은 version. 다르면 409 SELF_INTRO_STALE 이라 오래된 초안의 version 을 올리지 않는다. */
+  expectedVersion?: number
 }

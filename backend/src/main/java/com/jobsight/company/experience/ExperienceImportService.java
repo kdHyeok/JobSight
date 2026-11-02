@@ -23,6 +23,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -47,6 +48,9 @@ public class ExperienceImportService {
     private static final int TEXT = 2000;
     private static final int SHORT = 200;
     private static final int MAX_ITEMS = 50;
+    /** ExperienceRequests.Save 의 skills 상한: 50개, 각 100자. */
+    private static final int MAX_SKILLS = 50;
+    private static final int MAX_SKILL_CHARS = 100;
 
     private final ExperienceService views;
     private final ExperienceBankService bank;
@@ -86,9 +90,24 @@ public class ExperienceImportService {
             List<String> candidates = groups.stream().filter(other -> other != group && mayBeSame(group, other))
                     .map(RowGroups.Group::key).toList();
             planned.add(new ExperienceViews.ImportGroup(group.key(), group.kind(), group.title(), group.period(),
-                    group.rows().stream().map(ExperienceService::source).toList(), candidates));
+                    group.rows().stream().map(ExperienceService::source).toList(), candidates, sameResumeWarning(group)));
         }
         return new ExperienceViews.ImportPlan(planned, versions);
+    }
+
+    /**
+     * 한 이력서의 두 행이 같은 묶음이면 그 묶음은 CREATE·LINK_TO 할 수 없다 — 한 이력서에서 같은 경험을 두 행에 걸 수 없다
+     * (링커 EXPERIENCE_ROW_DUPLICATE, 설계 6.2-4). 행을 골라 잇는 기능은 없으므로 SKIP 하거나 이력서에서 행을 정리하게 안내한다.
+     */
+    private static String sameResumeWarning(RowGroups.Group group) {
+        Set<UUID> seen = new HashSet<>();
+        for (RowGroups.Row row : group.rows()) {
+            if (!seen.add(row.resume().id())) {
+                return "이력서 '" + row.resume().name() + "'에 이 묶음의 행이 둘 이상 있어 한 경험으로 이을 수 없습니다. "
+                        + "건너뛰거나(SKIP), 이력서에서 행을 합치거나 제목·시작 연월을 구분한 뒤 계획을 다시 만드세요.";
+            }
+        }
+        return null;
     }
 
     /** 제목 키가 서로 포함 관계이거나, 기간 숫자는 같은데 제목이 다르면 같은 경험일 수 있다. 자동으로 합치지 않는다. */
@@ -122,7 +141,9 @@ public class ExperienceImportService {
         List<Resume> locked = resumes.findAllOwnedForUpdate(owner);
         Map<UUID, Resume> byId = new LinkedHashMap<>();
         locked.forEach(resume -> byId.put(resume.getId(), resume));
-        List<RowGroups.Doc> docs = locked.stream().map(views::doc).toList();
+        // 잠금은 id 순, 묶음은 계획(views.docs)과 같은 순서 — 대표 행(제목·기간·50행 상한의 앞쪽)이 미리 보기와 같아야 한다.
+        List<RowGroups.Doc> docs = locked.stream().sorted(Comparator.comparing(Resume::getUpdatedAt).reversed())
+                .map(views::doc).toList();
         Map<String, RowGroups.Group> groups = new LinkedHashMap<>();
         RowGroups.unlinked(docs).forEach(group -> groups.put(group.key(), group));
 
@@ -136,6 +157,10 @@ public class ExperienceImportService {
                     request.resumeVersions().get(row.resume().id()), byId.get(row.resume().id()).getVersion()))) {
                 throw new ApiRuleException(HttpStatus.CONFLICT, "IMPORT_PLAN_STALE",
                         "계획 뒤에 이력서가 바뀌었습니다. 가져오기 계획을 다시 만들어 주세요.");
+            }
+            String warning = decision.action() == ExperienceRequests.ImportAction.SKIP ? null : sameResumeWarning(group);
+            if (warning != null) {
+                throw new ApiRuleException(HttpStatus.BAD_REQUEST, "IMPORT_GROUP_SAME_RESUME", warning);
             }
             UUID experienceId;
             int revision;
@@ -231,11 +256,18 @@ public class ExperienceImportService {
         List<ExperienceFacts.Item> unverified = new ArrayList<>();
         if (overflow) add(unverified, "u", "구성 행 " + rows.size() + "개의 내용이 초안 상한(배열 " + MAX_ITEMS
                 + "개)을 넘어 일부만 담았다. 빠진 내용은 이력서 행에서 확인한다.", null);
+        // skills 도 저장 검증(ExperienceRequests.Save: 50개·각 100자)을 지킨다. 넘으면 상세를 그대로 다시 저장할 수 없다.
+        List<String> keptSkills = skills.stream().filter(skill -> skill.length() <= MAX_SKILL_CHARS).limit(MAX_SKILLS).toList();
+        if (keptSkills.size() < skills.size()) {
+            List<String> dropped = skills.stream().filter(skill -> !keptSkills.contains(skill)).toList();
+            add(unverified, "u", clip("구성 행의 기술 " + dropped.size() + "개는 저장 상한(" + MAX_SKILLS + "개·" + MAX_SKILL_CHARS
+                    + "자)을 넘어 skills 에 담지 않았다: " + String.join(", ", dropped), TEXT), null);
+        }
         ExperienceFacts facts = bank.normalize(new ExperienceFacts(periods.stream().findFirst().orElse(null),
                 roles.stream().findFirst().orElse(null), null, actions, results, evidence, unverified, conflicts), null);
         RowGroups.Row first = rows.get(0);
         Experience experience = new Experience(owner, group.kind(), group.title(), first.startYm(), bank.json(facts));
-        experience.describe(null, List.copyOf(skills), List.of());
+        experience.describe(null, keptSkills, List.of());
         return experience;
     }
 

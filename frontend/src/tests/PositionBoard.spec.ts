@@ -111,4 +111,21 @@ describe('PositionBoard', () => {
     await flushPromises()
     expect(wrapper.get('.confirm-card').text()).not.toContain('자소서')
   })
+
+  /** 수를 받기 전에 확정하면 경고 없이 지워진다. 못 받으면 0 이 아니라 "확인하지 못했다"를 알린다. */
+  it('자소서 수를 받기 전에는 삭제를 확정할 수 없고, 못 받으면 일반 경고를 붙인다', async () => {
+    let fail!: (error: Error) => void
+    vi.mocked(api.getPosition).mockReset().mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    const wrapper = mount(PositionBoard, { props: { focus: '관심 백엔드' } })
+    await flushPromises()
+
+    await wrapper.get('.drawer__actions .danger').trigger('click')
+    expect(wrapper.get('.confirm-card .button.danger').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.confirm-card .button.secondary').attributes('disabled')).toBeUndefined()
+
+    fail(new Error('네트워크'))
+    await flushPromises()
+    expect(wrapper.get('.confirm-card .button.danger').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('.confirm-card').text()).toContain('이 직무로 쓴 자소서 수를 확인하지 못했습니다')
+  })
 })

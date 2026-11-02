@@ -98,6 +98,22 @@ describe('이력서 자기소개 문항', () => {
     })
   })
 
+  it('수정 저장이 409 면 초안은 남기되, 다시 저장해도 다시 읽은 version 으로 덮어쓰지 않는다', async () => {
+    vi.mocked(api.updateSelfIntroduction).mockRejectedValue(
+      new ApiClientError(409, 'SELF_INTRO_STALE', '다른 곳에서 먼저 저장했습니다.'))
+    const wrapper = mount(ResumeQuestions, { props: { resumeId: 'resume', questions: [item] } })
+    await wrapper.get('.question-list .button').trigger('click')
+    await wrapper.findAll('.question-edit textarea')[1].setValue('내 초안')
+    vi.mocked(api.listSelfIntroductions).mockResolvedValue([{ ...item, answer: '남이 고친 답변', version: 3 }])
+    await wrapper.get('.question-edit').trigger('submit')
+    await flushPromises()
+    expect(wrapper.findAll<HTMLTextAreaElement>('.question-edit textarea')[1].element.value).toBe('내 초안')
+
+    await wrapper.get('.question-edit').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(api.updateSelfIntroduction).mock.calls.map((call) => call[1].expectedVersion)).toEqual([2, 2])
+  })
+
   it('과거 문항 연결도 읽은 version 을 보내고, 409 면 안내를 띄우고 목록을 다시 부른다', async () => {
     const past = { ...item, id: 'past', resumeIds: ['other'], version: 7 }
     vi.mocked(api.listSelfIntroductions).mockImplementation(async (q = '') => (q ? [past] : [item]))

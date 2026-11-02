@@ -256,8 +256,8 @@ public class ExperienceService {
         return experience.getDossier() == null ? null : objectMapper.readValue(experience.getDossier(), ExperienceDossier.class);
     }
 
-    /** 사실의 기간을 우선하고, 없으면 시작 연월. */
-    private String period(Experience experience) {
+    /** 사실의 기간을 우선하고, 없으면 시작 연월. 목차·검색 결과가 같은 값을 쓴다. */
+    String period(Experience experience) {
         String period = facts(experience).period();
         return period != null && !period.isBlank() ? period : RowGroups.period(experience.getStartYm(), null);
     }
