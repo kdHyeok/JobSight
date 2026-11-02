@@ -99,7 +99,7 @@ describe('이력서 편집기의 경험 연결', () => {
     expect(row.description).toBe('기존 문구')
   })
 
-  it('"경험에서 불러오기"는 사실로 중립 행을 만들고 experienceId 만 단다', async () => {
+  it('"경험에서 불러오기"는 사실로 중립 행을 만들고 앵커에 불러온 상세의 개정을 단다', async () => {
     const wrapper = await mountEditor(resume([]))
     await projectRows(wrapper).get('select[aria-label="경험에서 불러오기"]').setValue('e2')
     await flushPromises()
@@ -107,9 +107,19 @@ describe('이력서 편집기의 경험 연결', () => {
     const row = savedPayload(wrapper).content.projects[0]
     expect(row).toMatchObject({
       name: '배치 이관', startYm: '2024.03', endYm: '2024.08', role: '백엔드 리드', techStack: 'Kafka, Spring',
-      description: '- 색인 파이프라인을 다시 짰다', outcome: '- p95 1.2초 → 0.4초', experienceId: 'e2',
+      description: '- 색인 파이프라인을 다시 짰다', outcome: '- p95 1.2초 → 0.4초', experienceId: 'e2', experienceRevision: 1,
     })
-    expect('experienceRevision' in row).toBe(false)
+  })
+
+  it('불러온 문구가 옛 개정이면 그 개정을 보내 "재검토 필요"가 남는다(편집기를 연 뒤 원본이 정정된 경우)', async () => {
+    // 편집기가 받아 둔 e1 상세는 개정 1 이다. 저장 전에 서버에서 개정 2 로 정정됐다.
+    const stale = detail('e1', '검색 개선', ['INIT'])
+    vi.mocked(api.getExperiences).mockImplementation(async (ids) => [stale, batch].filter((d) => ids.includes(d.id)))
+    const wrapper = await mountEditor(resume([]))
+    await projectRows(wrapper).get('select[aria-label="경험에서 불러오기"]').setValue('e1')
+    await flushPromises()
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    expect(savedPayload(wrapper).content.projects[0]).toMatchObject({ experienceId: 'e1', experienceRevision: 1 })
   })
 
   it('"경험으로 등록"은 행으로 경험 원본을 만들고 그 행에 앵커를 단다', async () => {
@@ -218,7 +228,7 @@ describe('경험 앵커 섹션 4개', () => {
     })
   })
 
-  it.each(cases)('$label: 이 섹션 종류의 경험만 고르고, 불러온 행은 제목·사실·experienceId 만 갖는다', async (item) => {
+  it.each(cases)('$label: 이 섹션 종류의 경험만 고르고, 불러온 행은 제목·사실·앵커(id·개정)를 갖는다', async (item) => {
     const wrapper = await mountEditor(resumeWith(item.key, []))
     const section = sectionOf(wrapper, item.label)
     const options = section.get('select[aria-label="경험에서 불러오기"]').findAll('option').map((option) => option.text())
@@ -229,7 +239,7 @@ describe('경험 앵커 섹션 4개', () => {
     const row = savedPayload(wrapper).content[item.key][0]
     expect(row[item.titleKey]).toBe(item.title)
     expect(row.experienceId).toBe(item.id)
-    expect('experienceRevision' in row).toBe(false)
+    expect(row.experienceRevision).toBe(1)
     expect(row.description).toContain('- 색인 파이프라인을 다시 짰다')
   })
 
