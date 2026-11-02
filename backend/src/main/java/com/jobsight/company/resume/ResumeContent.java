@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
@@ -24,9 +25,9 @@ public record ResumeContent(
         @Size(max = 50, message = "SW 역량은 50개 이하여야 합니다.") List<@Valid Skill> skills,
         @Size(max = 50, message = "프로젝트는 50개 이하여야 합니다.") List<@Valid Project> projects
 ) {
-    private static final int SHORT = 200;
-    private static final int URL = 500;
-    private static final int LONG = 5000;
+    static final int SHORT = 200;
+    static final int URL = 500;
+    static final int LONG = 5000;
 
     public static ResumeContent empty() {
         return new ResumeContent(BasicInfo.empty(),
@@ -163,7 +164,10 @@ public record ResumeContent(
             @Size(max = SHORT) String endYm,
             @Size(max = LONG) String description,
             /** 이수증. attachments 의 id 문자열. */
-            @Size(max = SHORT) String fileId
+            @Size(max = SHORT) String fileId,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 
@@ -173,7 +177,10 @@ public record ResumeContent(
             @Size(max = SHORT) String startYm,
             @Size(max = SHORT) String endYm,
             @Size(max = LONG) String description,
-            @Size(max = SHORT) String fileId
+            @Size(max = SHORT) String fileId,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 
@@ -181,7 +188,10 @@ public record ResumeContent(
             @Size(max = SHORT) String company,
             @Size(max = SHORT) String startYm,
             @Size(max = SHORT) String endYm,
-            @Size(max = LONG) String description
+            @Size(max = LONG) String description,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 
@@ -220,7 +230,10 @@ public record ResumeContent(
             @Size(max = URL) String role,
             @Size(max = LONG) String outcome,
             @Size(max = LONG) String description,
-            @Size(max = URL) String url
+            @Size(max = URL) String url,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 }

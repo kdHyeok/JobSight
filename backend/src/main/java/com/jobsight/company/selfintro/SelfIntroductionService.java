@@ -4,7 +4,12 @@ import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.Bm25;
 import com.jobsight.company.common.LinkSource;
+import com.jobsight.company.common.OwnerLock;
 import com.jobsight.company.common.ResourceNotFoundException;
+import com.jobsight.company.experience.Experience;
+import com.jobsight.company.experience.ExperienceRepository;
+import com.jobsight.company.selfintro.dto.ExperienceRef;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.jobsight.company.position.Position;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.resume.Resume;
@@ -21,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -36,18 +42,26 @@ public class SelfIntroductionService {
     /** 요청 DTO 의 @Size 상한과 같다. MCP 의 더하기 결과에도 적용한다. */
     private static final int MAX_POSITIONS = 10;
     private static final int MAX_TYPES = 3;
+    private static final int MAX_EXPERIENCES = 10;
 
     private final SelfIntroductionRepository repository;
     private final ResumeRepository resumeRepository;
     private final PositionRepository positionRepository;
     private final CurrentUser currentUser;
+    private final OwnerLock ownerLock;
+    private final ExperienceRepository experienceRepository;
+    private final JdbcTemplate jdbc;
 
     public SelfIntroductionService(SelfIntroductionRepository repository, ResumeRepository resumeRepository,
-                                   PositionRepository positionRepository, CurrentUser currentUser) {
+                                   PositionRepository positionRepository, CurrentUser currentUser, OwnerLock ownerLock,
+                                   ExperienceRepository experienceRepository, JdbcTemplate jdbc) {
         this.repository = repository;
         this.resumeRepository = resumeRepository;
         this.positionRepository = positionRepository;
         this.currentUser = currentUser;
+        this.ownerLock = ownerLock;
+        this.experienceRepository = experienceRepository;
+        this.jdbc = jdbc;
     }
 
     public List<SelfIntroductionResponse> findAll(String query, UUID resumeId) {
@@ -63,16 +77,20 @@ public class SelfIntroductionService {
 
     @Transactional
     public SelfIntroductionResponse create(SelfIntroductionCreateRequest request) {
+        // 작성 근거(경험 쌍)를 쓰는 쓰기는 계정 잠금(T9) 아래에서 한다 — 경험 삭제의 사용 중 확인과 엇갈리지 않게.
+        ownerLock.acquire(currentUser.id());
         Set<UUID> resumeIds = requireOwnedResumes(request.resumeIds());
+        Map<UUID, Integer> experiences = request.experiences() == null ? null : requireExperiences(request.experiences());
         Set<UUID> positionIds = requireOwnedPositions(request.positionIds());
         SelfIntroduction value = new SelfIntroduction(currentUser.id(), resumeIds, request.question().trim(),
                 normalize(request.answer()));
         LinkSource source = source();
         value.linkPositions(positionIds, source);
         value.linkQuestionTypes(codes(request.questionTypes()), source);
+        if (experiences != null) value.linkExperiences(experiences, source);
         // flush 뒤의 version 을 싣는다. id 를 미리 정한 엔티티라 save 가 merge 로 가고, 연결 컬렉션을 옮겨 담는 flush 에서
         // version 이 한 번 더 오른다 — flush 전에 응답을 만들면 MCP 가 생성 직후 수정할 때 거짓 409 를 받는다.
-        return SelfIntroductionResponse.of(repository.saveAndFlush(value));
+        return SelfIntroductionResponse.of(saveAndCheck(value, experiences != null));
     }
 
     /**
@@ -83,6 +101,7 @@ public class SelfIntroductionService {
      */
     @Transactional
     public SelfIntroductionResponse update(UUID id, SelfIntroductionUpdateRequest request) {
+        ownerLock.acquire(currentUser.id());
         SelfIntroduction value = lockOwned(id);
         LinkSource source = source();
         String question = request.question().trim();
@@ -95,10 +114,67 @@ public class SelfIntroductionService {
                 : addOnly(requireOwnedPositions(request.positionIds()), value.getPositionLinks(), source, MAX_POSITIONS, "지원 직무");
         Set<Competency> types = request.questionTypes() == null ? null
                 : addOnly(codes(request.questionTypes()), value.getQuestionTypes(), source, MAX_TYPES, "문항 유형");
+        Map<UUID, Integer> experiences = request.experiences() == null ? null
+                : addOnlyExperiences(requireExperiences(request.experiences()), value.getExperienceLinks(), source);
         value.update(resumeIds, question, answer);
         if (positionIds != null) value.linkPositions(positionIds, source);
         if (types != null) value.linkQuestionTypes(types, source);
-        return SelfIntroductionResponse.of(repository.saveAndFlush(value));
+        if (experiences != null) value.linkExperiences(experiences, source);
+        return SelfIntroductionResponse.of(saveAndCheck(value, experiences != null));
+    }
+
+    /**
+     * 작성 근거를 쓴 저장은 커밋 전에 지연 FK 위반을 당긴다(설계 2.3) — 확인 뒤 경험이 지워졌으면 이 문장에서 409 EXPERIENCE_CHANGED.
+     */
+    private SelfIntroduction saveAndCheck(SelfIntroduction value, boolean experiencesTouched) {
+        SelfIntroduction saved = repository.saveAndFlush(value);
+        if (experiencesTouched) jdbc.execute("set constraints all immediate");
+        return saved;
+    }
+
+    /**
+     * 작성 근거 쌍 검사(설계 6.8): 두 키 필수(개정 1 이상), 경험은 내 것(아니면 404), 그 개정이 있어야 한다
+     * (개정 이력은 1..지금 개정이라 지금 개정보다 크면 404 EXPERIENCE_REVISION_NOT_FOUND). 받은 쌍을 그대로 쓴다.
+     */
+    private Map<UUID, Integer> requireExperiences(List<ExperienceRef> refs) {
+        Map<UUID, Integer> wanted = new LinkedHashMap<>();
+        for (ExperienceRef ref : refs) {
+            if (ref == null || ref.experienceId() == null || ref.experienceRevision() == null || ref.experienceRevision() < 1) {
+                throw new ApiRuleException(HttpStatus.BAD_REQUEST, "EXPERIENCE_REFERENCE_REQUIRED",
+                        "작성 근거는 experienceId 와 experienceRevision(1 이상)을 함께 보내야 합니다. experience_index 상세에서 읽은 개정을 씁니다.");
+            }
+            Integer previous = wanted.putIfAbsent(ref.experienceId(), ref.experienceRevision());
+            if (previous != null && !previous.equals(ref.experienceRevision())) {
+                throw new ApiRuleException(HttpStatus.BAD_REQUEST, "EXPERIENCE_REFERENCE_REQUIRED",
+                        "같은 경험(" + ref.experienceId() + ")을 다른 개정으로 두 번 보냈습니다.");
+            }
+        }
+        if (wanted.isEmpty()) return wanted;
+        Map<UUID, Integer> current = experienceRepository.findAllByIdInAndOwnerId(wanted.keySet(), currentUser.id()).stream()
+                .collect(Collectors.toMap(Experience::getId, Experience::getRevision));
+        for (Map.Entry<UUID, Integer> entry : wanted.entrySet()) {
+            Integer revision = current.get(entry.getKey());
+            if (revision == null) throw new ResourceNotFoundException(entry.getKey());
+            if (entry.getValue() > revision) {
+                throw new ApiRuleException(HttpStatus.NOT_FOUND, "EXPERIENCE_REVISION_NOT_FOUND",
+                        "경험 " + entry.getKey() + " 에 개정 " + entry.getValue() + " 이 없습니다.");
+            }
+        }
+        return wanted;
+    }
+
+    /** MCP 는 더하기만 한다(6.8): 이미 연결된 경험은 저장된 개정을 그대로 두고 건너뛴다. 빼기와 개정 바꾸기는 웹에서. */
+    private static Map<UUID, Integer> addOnlyExperiences(Map<UUID, Integer> wanted, Set<SelfIntroduction.ExperienceLink> links,
+                                                         LinkSource source) {
+        if (source != LinkSource.AI) return wanted;
+        Map<UUID, Integer> merged = new LinkedHashMap<>();
+        links.forEach(link -> merged.put(link.experienceId(), link.experienceRevision()));
+        wanted.forEach(merged::putIfAbsent);
+        if (merged.size() > MAX_EXPERIENCES) {
+            throw new ApiRuleException(HttpStatus.BAD_REQUEST, "TOO_MANY_LINKS", "작성 근거 경험은 " + MAX_EXPERIENCES
+                    + "개 이하여야 합니다. MCP 는 연결을 더하기만 하므로 기존 연결을 빼는 것은 웹 자기소개 화면에서 합니다.");
+        }
+        return merged;
     }
 
     /**

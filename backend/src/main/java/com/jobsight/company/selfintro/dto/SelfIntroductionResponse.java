@@ -17,8 +17,10 @@ import java.util.UUID;
 public record SelfIntroductionResponse(UUID id, List<UUID> resumeIds, String question, String answer,
                                        Instant createdAt, Instant updatedAt,
                                        List<PositionLinkView> positionLinks, List<QuestionTypeView> questionTypes,
-                                       long version) {
+                                       long version, List<ExperienceLinkView> experiences) {
     public record PositionLinkView(UUID positionId, LinkSource source) {}
+    /** 작성 근거 (경험 id, 개정) 쌍과 출처. 저장된 쌍 그대로다(지금 개정으로 다시 계산하지 않는다, 설계 6.8). */
+    public record ExperienceLinkView(UUID experienceId, int experienceRevision, LinkSource source) {}
     public record QuestionTypeView(Competency code, LinkSource source) {}
 
     public static SelfIntroductionResponse of(SelfIntroduction value) {
@@ -28,6 +30,9 @@ public record SelfIntroductionResponse(UUID id, List<UUID> resumeIds, String que
                         .sorted(Comparator.comparing(PositionLinkView::positionId)).toList(),
                 value.getQuestionTypes().stream().map(link -> new QuestionTypeView(link.code(), link.source()))
                         .sorted(Comparator.comparing(QuestionTypeView::code)).toList(),
-                value.getVersion());
+                value.getVersion(),
+                value.getExperienceLinks().stream()
+                        .map(link -> new ExperienceLinkView(link.experienceId(), link.experienceRevision(), link.source()))
+                        .sorted(Comparator.comparing(ExperienceLinkView::experienceId)).toList());
     }
 }

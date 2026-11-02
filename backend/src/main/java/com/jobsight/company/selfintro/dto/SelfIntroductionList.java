@@ -21,7 +21,14 @@ public record SelfIntroductionList(String fallback, int total, boolean complete,
     public record Item(UUID id, String question, String answerPreview, String answer, int answerLength,
                        Instant updatedAt, Double score, List<String> matchedTerms, String sourceStatus,
                        Sources sources, List<QuestionType> questionTypes, List<UsedFor> alreadyUsedFor,
-                       long version) {}
+                       long version, List<ExperienceUse> experiences) {}
+
+    /**
+     * 작성 근거: 이 답변에 쓴 경험과 그때 본 개정(저장된 쌍 그대로, 설계 6.8). trust 는 '확정'·'AI 기록'.
+     * needsReview: 그 개정 뒤에 사실 정정(CORRECT) 개정이 있음 — 답변의 사실을 사용자에게 다시 확인받는다.
+     */
+    public record ExperienceUse(UUID experienceId, int experienceRevision, String title, String trust,
+                                boolean needsReview) {}
 
     /** direct: 이 답변을 어느 지원용으로 썼나(written_for). indirect: 연결 이력서가 지원하는 직무(추정). */
     public record Sources(List<Direct> direct, List<Indirect> indirect) {}

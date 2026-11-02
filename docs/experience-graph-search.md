@@ -4,6 +4,10 @@
 
 ## 지금 동작하는 것 — 3단계 경험 찾기 (2026-11-02)
 
+> **4단계(4a) 이후**: 자료원이 경험 원본으로 바뀌었다(응답 형식은 아래와 같다). 앵커가 있는 이력서 행은 경험 원본(`type:"EXPERIENCE"`, REQUIREMENT 정확 일치는
+> `experiences.skills`)이 대표하고, 앵커가 없는 행만 아래 RESUME_ROW 묶음이 된다. `experience_index.experiences` 는 경험 원본 목차, `missing` 에 은행 경험이 더해졌다.
+> `coverageIncomplete` 는 미연결 행이 남았거나 경험 원본이 없을 때만 true 다. 경험 원본·개정·링커는 [docs/experiences.md](experiences.md).
+
 **목적.** 공고를 저장하지 않고 평가하고, 내 경험의 원문 출처(이력서 행)를 돌려준다. 이력서를 새로 만들 때 다른 이력서에만 있는 경험을 빠뜨리지 않게 한다. 경험 원본 테이블(4단계)이 아직 없어 **자료원은 계정의 이력서 경험 행뿐**이다.
 
 **진입점** (`backend/.../company/experience/`, MCP 전용 — REST·화면 없음)

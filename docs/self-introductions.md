@@ -53,6 +53,11 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
     - 없으면 400 `VERSION_REQUIRED`, 다르면 409 `SELF_INTRO_STALE`. 오류에 지금 version 을 싣지 않는다 — 다시 읽고 바뀐 답변을 확인하게 하려는 것이다.
     - 화면은 같은 문항의 수정·확정을 줄 세우고 앞 응답의 version 을 이어받는다(`api/self-introductions.ts`의 `queued`). 편집기는 연 때의 version 을 쓰고 확정 응답의 version 으로만 바꾼다.
       409 면 서버 안내를 띄우고 초안은 남긴 채 목록만 다시 읽는다. 편집기를 다시 열어야 새 version 으로 저장된다(확인하지 않은 초안으로 덮어쓰지 않게).
+13. **작성 근거는 `(경험 id, 개정)` 쌍 그대로다**(4단계, 설계 6.8). 생성·수정의 `experiences[{experienceId, experienceRevision}]`(10개 이하)는 두 키가 필수(없으면 400
+    `EXPERIENCE_REFERENCE_REQUIRED`), 남의 경험은 404, 없는 개정은 404 `EXPERIENCE_REVISION_NOT_FOUND`. 받은 쌍을 그대로 저장·조회하고 지금 개정으로 다시 계산하지 않는다.
+    null 은 유지, 웹은 목록으로 맞추고(남는 쌍은 출처 유지), MCP 는 더하기만 한다(이미 연결된 경험은 건너뜀). 쓰기는 계정 잠금(`OwnerLock`) 아래에서 하고 저장 뒤
+    `SET CONSTRAINTS ALL IMMEDIATE` 로 지연 FK 위반을 당긴다. 응답(`experiences[{experienceId, experienceRevision, source}]`)과 MCP 항목
+    (`experiences[{…, title, trust, needsReview}]`)에 실린다 — docs/experiences.md.
 
 ## API (상세는 Swagger)
 

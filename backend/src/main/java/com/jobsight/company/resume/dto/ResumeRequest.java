@@ -20,6 +20,12 @@ public record ResumeRequest(
         @Valid ResumeContent content,
         @Size(max = 30, message = "연결 직무는 30개 이하여야 합니다.")
         List<UUID> positionIds,
-        Long expectedVersion
+        Long expectedVersion,
+        /** 웹 "원본으로 갱신": 이 경험 행의 개정을 지금 개정으로 올린다(설계 6.2). MCP resume_update 는 받지 않는다. */
+        @Size(max = 50, message = "갱신할 경험은 50개 이하여야 합니다.")
+        List<UUID> refreshExperienceIds
 ) {
+    public ResumeRequest(String name, ResumeContent content, List<UUID> positionIds, Long expectedVersion) {
+        this(name, content, positionIds, expectedVersion, null);
+    }
 }

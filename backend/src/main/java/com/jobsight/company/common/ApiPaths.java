@@ -39,6 +39,7 @@ public final class ApiPaths {
     public static final String REFERENCES = API + "/references";
     public static final String RESUMES = API + "/resumes";
     public static final String SELF_INTRODUCTIONS = API + "/self-introductions";
+    public static final String EXPERIENCES = API + "/experiences";
     public static final String ATTACHMENTS = API + "/attachments";
     public static final String REQUESTS = API + "/requests";
     public static final String ADMIN_REQUESTS = ADMIN + "/requests";

@@ -5,6 +5,8 @@ import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.Bm25;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.CompanyRepository;
+import com.jobsight.company.experience.dto.ExperienceDossier;
+import com.jobsight.company.experience.dto.ExperienceFacts;
 import com.jobsight.company.experience.dto.ExperienceSearchRequest;
 import com.jobsight.company.experience.dto.ExperienceSearchRequest.Field;
 import com.jobsight.company.experience.dto.ExperienceSearchResult;
@@ -20,7 +22,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -35,16 +36,16 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * experience_search 첫 판 — 설계 7절 3단계 ③, 4.1~4.3. 공고를 저장하지 않고 내 경험의 원문 출처를 찾는다.
- * 후보는 RESUME_ROW 묶음(RowGroups)뿐이고 신호는 LEXICAL·REQUIREMENT 둘, 융합은 가중 RRF(k=60)다.
- * 전환 경로: 4단계는 응답 형식을 그대로 두고 자료원만 경험 원본으로 바꾼다(REQUIREMENT 는 experiences.skills,
- * 연결된 행은 EXPERIENCE 후보, 미연결 행만 RESUME_ROW). 이력서 검색과 경험 검색을 따로 운영하지 않는다.
+ * experience_search — 설계 4.1~4.3. 공고를 저장하지 않고 내 경험과 그 출처를 찾는다. 신호는 LEXICAL·REQUIREMENT 둘,
+ * 융합은 가중 RRF(k=60)다. 4단계(전환 경로 완료): 응답 형식은 3단계 그대로이고 자료원이 경험 원본이다 —
+ * EXPERIENCE 후보는 경험 원본(REQUIREMENT 의 정확 일치는 experiences.skills, 본문은 사실·소재집·메모), RESUME_ROW 후보는
+ * 앵커가 없는 미연결 행 묶음뿐이다. 이력서 검색과 경험 검색을 따로 운영하지 않는다.
  * 쓰기는 없다. 트랜잭션은 readOnly 하나이고, 5단계에서 DENSE 를 더할 때 질의 벡터는 트랜잭션 밖에서 받는다(4.3 ⑥).
  */
 @Service
 public class ExperienceSearch {
     /** 신호 구성·가중값을 바꾸면 올린다 — 재현 정보 context.searchConfig(설계 6.7). */
-    static final String SEARCH_CONFIG = "search-v0-2026-11-lexical-requirement";
+    static final String SEARCH_CONFIG = "search-v1-2026-11-experience-bank";
     private static final int RRF_K = 60;
     private static final int DEFAULT_LIMIT = 8;
     private static final int MAX_LIMIT = 20;
@@ -53,14 +54,16 @@ public class ExperienceSearch {
     private static final double PARTIAL = 0.5;
 
     private final ExperienceService experiences;
+    private final ExperienceRepository bank;
     private final PositionRepository positions;
     private final JobPostingRepository postings;
     private final CompanyRepository companies;
     private final CurrentUser currentUser;
 
-    public ExperienceSearch(ExperienceService experiences, PositionRepository positions, JobPostingRepository postings,
-                            CompanyRepository companies, CurrentUser currentUser) {
+    public ExperienceSearch(ExperienceService experiences, ExperienceRepository bank, PositionRepository positions,
+                            JobPostingRepository postings, CompanyRepository companies, CurrentUser currentUser) {
         this.experiences = experiences;
+        this.bank = bank;
         this.positions = positions;
         this.postings = postings;
         this.companies = companies;
@@ -75,9 +78,12 @@ public class ExperienceSearch {
     private record Need(String key, Field field, String quote) {
     }
 
-    /** 묶음 하나의 대조 자료: techStack 키(정확 일치), 언급 키(포함 일치), 평문 키(TAG_MISMATCH 판정), BM25 단어. */
-    private record Candidate(RowGroups.Group group, Set<String> tags, Set<String> mentions, String flat,
-                             List<String> words) {
+    /**
+     * 후보 하나의 대조 자료: 기술 태그(정확 일치 — 행 techStack 또는 경험 skills), 언급 키(포함 일치), 평문 키(TAG_MISMATCH 판정),
+     * BM25 단어. group(RESUME_ROW)과 experience(EXPERIENCE) 중 하나만 있다.
+     */
+    private record Candidate(String key, RowGroups.Group group, Experience experience, Set<String> tags,
+                             Set<String> mentions, String flat, List<String> words) {
         double match(String key) {
             if (tags.contains(key)) return 1;
             return mentions.contains(key) ? PARTIAL : 0;
@@ -86,12 +92,12 @@ public class ExperienceSearch {
         /** 맵 키로 쓴다. 묶음 키가 정체성이다 — 기본 record 동등성은 이력서 문서 전체를 해시한다. */
         @Override
         public boolean equals(Object other) {
-            return other instanceof Candidate that && group.key().equals(that.group.key());
+            return other instanceof Candidate that && key.equals(that.key);
         }
 
         @Override
         public int hashCode() {
-            return group.key().hashCode();
+            return key.hashCode();
         }
     }
 
@@ -103,7 +109,13 @@ public class ExperienceSearch {
         }
         Target target = request.positionId() != null ? saved(request.positionId()) : unsaved(request.posting());
         List<RowGroups.Doc> docs = experiences.docs();
-        List<Candidate> candidates = RowGroups.of(docs).stream().map(ExperienceSearch::candidate).toList();
+        List<RowGroups.Group> unlinked = RowGroups.unlinked(docs);
+        List<Experience> bank = this.bank.findAllByOwnerIdOrderByKindAscTitleKeyAscIdAsc(currentUser.id());
+        List<Candidate> candidates = Stream.concat(bank.stream().map(this::candidate),
+                unlinked.stream().map(ExperienceSearch::candidate)).toList();
+        Map<UUID, List<ExperienceSearchResult.Source>> linkedRows = new HashMap<>();
+        docs.forEach(doc -> RowGroups.rows(doc).stream().filter(row -> row.experienceId() != null)
+                .forEach(row -> linkedRows.computeIfAbsent(row.experienceId(), id -> new ArrayList<>()).add(source(row))));
 
         // 요구: 클라이언트가 공고에서 뽑은 것을 우선한다. 없으면 기술 환경 목록과 일반 사전으로 뽑는다(4.2 ①).
         boolean fromClient = request.requirements() != null && !request.requirements().isEmpty();
@@ -161,7 +173,7 @@ public class ExperienceSearch {
         int limit = Math.min(Math.max(request.limit() == null ? DEFAULT_LIMIT : request.limit(), 1), MAX_LIMIT);
         List<Candidate> ordered = fused.entrySet().stream()
                 .sorted(Map.Entry.<Candidate, Double>comparingByValue().reversed()
-                        .thenComparing(entry -> entry.getKey().group().key()))
+                        .thenComparing(entry -> entry.getKey().key()))
                 .limit(limit).map(Map.Entry::getKey).toList();
         List<ExperienceSearchResult.Result> results = new ArrayList<>();
         for (Candidate candidate : ordered) {
@@ -170,10 +182,19 @@ public class ExperienceSearch {
                 why.add(new ExperienceSearchResult.Why("LEXICAL", lexicalRank.get(candidate),
                         matchedTerms(candidate.words(), terms), null, null));
             }
+            Experience experience = candidate.experience();
+            if (experience != null) {
+                // 경험 원본: source 는 없고(원문 근거는 experience_index 상세의 facts.evidence), alsoIn 은 이 경험을 쓰는 이력서 행이다.
+                results.add(new ExperienceSearchResult.Result(results.size() + 1, "EXPERIENCE", experience.getKind(),
+                        experience.getTitle(), RowGroups.period(experience.getStartYm(), null), null,
+                        linkedRows.getOrDefault(experience.getId(), List.of()), why, experience.getId(),
+                        experience.getRevision(), experience.isReviewed()));
+                continue;
+            }
             RowGroups.Group group = candidate.group();
             List<ExperienceSearchResult.Source> sources = group.rows().stream().map(ExperienceSearch::source).toList();
             results.add(new ExperienceSearchResult.Result(results.size() + 1, "RESUME_ROW", group.kind(), group.title(),
-                    group.period(), sources.get(0), sources.subList(1, sources.size()), why));
+                    group.period(), sources.get(0), sources.subList(1, sources.size()), why, null, null, null));
         }
 
         // uncovered: 지원자격·요구 역량 칸의 키 중 받쳐 줄 묶음이 없는 것. 우대·기술 환경 나열은 결핍이 아니다.
@@ -189,9 +210,10 @@ public class ExperienceSearch {
                 fromClient ? "CLIENT" : "SERVER_DICTIONARY",
                 needs.values().stream().map(need -> new ExperienceSearchResult.RequirementKey(need.key(), need.field()))
                         .toList());
-        // 3단계는 모든 행이 은행에 없는 미등록 행이다(counts.unlinkedRows > 0 이거나 자료가 없음) — 결핍을 단정하지 않게 늘 true.
-        return new ExperienceSearchResult(query, new ExperienceSearchResult.Context(dataVersion(docs), SEARCH_CONFIG),
-                true, fromClient ? List.of() : List.of("REQUIREMENTS_PARTIAL"), List.of(),
+        // 미등록 행이 남아 있거나 경험 원본이 없으면 커버리지가 불완전하다 — 결핍을 단정하지 않게 한다(5.5).
+        boolean coverageIncomplete = !unlinked.isEmpty() || bank.isEmpty();
+        return new ExperienceSearchResult(query, new ExperienceSearchResult.Context(dataVersion(docs, bank), SEARCH_CONFIG),
+                coverageIncomplete, fromClient ? List.of() : List.of("REQUIREMENTS_PARTIAL"), List.of(),
                 List.copyOf(uncovered.values()), qualifications, results);
     }
 
@@ -233,6 +255,26 @@ public class ExperienceSearch {
         if (!key.isEmpty()) needs.putIfAbsent(key + "|" + field, new Need(key, field, quote));
     }
 
+    /** 경험 원본 후보. 검색 텍스트는 제목·메모·사실(주장·근거 인용)·소재집이다. unverified·cautions 는 넣지 않는다(6.5). */
+    private Candidate candidate(Experience experience) {
+        ExperienceFacts facts = experiences.facts(experience);
+        ExperienceDossier dossier = experiences.dossier(experience);
+        StringBuilder text = new StringBuilder();
+        Stream.of(experience.getTitle(), experience.getMemo(), facts.period(), facts.role(),
+                        dossier == null ? null : dossier.narrative())
+                .filter(Objects::nonNull).forEach(part -> text.append(part).append('\n'));
+        Stream.of(facts.actions(), facts.results()).filter(Objects::nonNull).flatMap(List::stream)
+                .forEach(item -> text.append(item.text()).append('\n'));
+        if (facts.evidence() != null) facts.evidence().forEach(ev -> text.append(ev.quote()).append('\n'));
+        if (dossier != null && dossier.phrasings() != null) dossier.phrasings().forEach(p -> text.append(p).append('\n'));
+        String body = text.toString();
+        Set<String> mentions = new LinkedHashSet<>(KeyNormalizer.mentions(body));
+        experience.getDomains().forEach(mentions::add);
+        return new Candidate(experience.getKind() + "|" + experience.getTitleKey() + "|~" + experience.getId(), null,
+                experience, new LinkedHashSet<>(experience.getSkills()), mentions, KeyNormalizer.key(body),
+                Bm25.tokenize(body + "\n" + String.join(" ", experience.getSkills())));
+    }
+
     private static Candidate candidate(RowGroups.Group group) {
         Set<String> tags = new LinkedHashSet<>();
         Set<String> mentions = new LinkedHashSet<>();
@@ -242,14 +284,15 @@ public class ExperienceSearch {
             mentions.addAll(KeyNormalizer.mentions(row.text()));
             text.append(row.text()).append('\n');
         }
-        return new Candidate(group, tags, mentions, KeyNormalizer.key(text.toString()), Bm25.tokenize(text.toString()));
+        return new Candidate(group.key(), group, null, tags, mentions, KeyNormalizer.key(text.toString()),
+                Bm25.tokenize(text.toString()));
     }
 
     /** 점수 내림차순, 같으면 묶음 키. 1부터. */
     private static Map<Candidate, Integer> ranks(Map<Candidate, Double> scores) {
         List<Candidate> sorted = scores.entrySet().stream()
                 .sorted(Map.Entry.<Candidate, Double>comparingByValue().reversed()
-                        .thenComparing(entry -> entry.getKey().group().key()))
+                        .thenComparing(entry -> entry.getKey().key()))
                 .map(Map.Entry::getKey).toList();
         Map<Candidate, Integer> ranks = new HashMap<>();
         for (int i = 0; i < sorted.size(); i++) ranks.put(sorted.get(i), i + 1);
@@ -267,10 +310,11 @@ public class ExperienceSearch {
                 text.length() <= EXCERPT ? text : text.substring(0, EXCERPT) + "…");
     }
 
-    /** 후보로 쓴 이력서 (id, version) 목록의 해시. 같은 dataVersion·searchConfig·질의면 같은 결과다(동점은 키 정렬). */
-    private static String dataVersion(List<RowGroups.Doc> docs) {
-        String joined = docs.stream().sorted(Comparator.comparing(RowGroups.Doc::id))
-                .map(doc -> doc.id() + ":" + doc.version()).collect(Collectors.joining(","));
+    /** 후보로 쓴 이력서·경험 (id, version) 목록의 해시. 같은 dataVersion·searchConfig·질의면 같은 결과다(동점은 키 정렬). */
+    private static String dataVersion(List<RowGroups.Doc> docs, List<Experience> bank) {
+        String joined = Stream.concat(docs.stream().map(doc -> doc.id() + ":" + doc.version()),
+                        bank.stream().map(experience -> experience.getId() + ":" + experience.getVersion()))
+                .sorted().collect(Collectors.joining(","));
         return sha256(joined).substring(0, 16);
     }
 

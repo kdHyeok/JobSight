@@ -66,14 +66,21 @@ public class Resume {
         this.content = contentJson;
     }
 
-    public void update(String name, String contentJson) {
+    /** 패키지 밖에서 content 를 바꾸지 못하게 한다 — 쓰기는 ResumeWriter 하나로(설계 6.2). */
+    void update(String name, String contentJson) {
         this.name = name;
         this.content = contentJson;
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * 같은 컬렉션을 비우고 채운다. 새 Set 을 대입하면 Hibernate 가 저장마다 resume_positions 전부를 DELETE·INSERT 해서
+     * 직무 삭제 cascade 와 같은 행을 다른 순서로 잡아 교착할 수 있다(설계 1.3 P8, 10.7 R47).
+     */
     public void replacePositions(Set<UUID> positionIds) {
-        this.positionIds = new LinkedHashSet<>(positionIds);
+        Set<UUID> next = new LinkedHashSet<>(positionIds);
+        this.positionIds.retainAll(next);
+        this.positionIds.addAll(next);
         this.updatedAt = Instant.now();
     }
 

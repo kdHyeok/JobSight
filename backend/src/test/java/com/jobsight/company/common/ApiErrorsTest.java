@@ -10,7 +10,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.orm.jpa.JpaSystemException;
@@ -77,7 +80,31 @@ class ApiErrorsTest {
                 arguments(new JpaSystemException(
                         new RuntimeException(new SQLException("deadlock detected", "40P01"))), 409, "BUSY"),
                 arguments(new AccessDeniedException("scope"), 403, "FORBIDDEN"),
+                // FK 위반(23503)은 제약 이름과 오류의 테이블 필드로 나눈다. 삭제 쪽이면 참조되는 테이블, 삽입 쪽이면 참조하는 테이블이 실린다.
+                arguments(new TransactionSystemException("commit failed", new RuntimeException(
+                        pg("23503", DELETE_SIDE, "resume_experiences_revision_fk"))), 409, "EXPERIENCE_IN_USE"),
+                arguments(new DataIntegrityViolationException("fk", pg("23503", DELETE_SIDE,
+                        "self_introduction_experiences_revision_fk")), 409, "EXPERIENCE_IN_USE"),
+                arguments(new DataIntegrityViolationException("fk", pg("23503", INSERT_SIDE,
+                        "resume_experiences_experience_fk")), 409, "EXPERIENCE_CHANGED"),
+                arguments(new DataIntegrityViolationException("fk", pg("23503", INSERT_SIDE,
+                        "self_introduction_experiences_revision_fk")), 409, "EXPERIENCE_CHANGED"),
+                arguments(new DataIntegrityViolationException("fk", pg("23503", INSERT_SIDE,
+                        "self_introduction_positions_position_id_owner_id_fkey")), 404, "NOT_FOUND"),
+                arguments(new DataIntegrityViolationException("fk", pg("23503", DELETE_SIDE, "job_postings_company_id_fkey")),
+                        409, "CONFLICT"),
+                arguments(new JpaSystemException(new RuntimeException(pg("23505", "duplicate key value", "experiences_pkey"))),
+                        409, "CONFLICT"),
                 arguments(new IllegalStateException("boom"), 500, "INTERNAL_ERROR"));
+    }
+
+    /** PostgreSQL 의 실제 메시지 머리. 테이블 필드는 양쪽 모두 참조하는 테이블이라 쪽은 메시지로 가른다. */
+    private static final String DELETE_SIDE = "update or delete on table \"experiences\" violates foreign key constraint";
+    private static final String INSERT_SIDE = "insert or update on table \"resume_experiences\" violates foreign key constraint";
+
+    /** 서버 오류 메시지 필드: S 심각도, C SQLState, M 메시지, n 제약 이름. */
+    private static PSQLException pg(String state, String message, String constraint) {
+        return new PSQLException(new ServerErrorMessage("SERROR\0C" + state + "\0M" + message + "\0n" + constraint + "\0"));
     }
 
     @ParameterizedTest

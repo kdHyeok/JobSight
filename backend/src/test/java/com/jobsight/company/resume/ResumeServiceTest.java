@@ -4,7 +4,13 @@ import com.jobsight.company.attachment.AttachmentRepository;
 import com.jobsight.company.attachment.dto.AttachmentResponse;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
+import com.jobsight.company.common.OwnerLock;
 import com.jobsight.company.common.ResourceNotFoundException;
+import com.jobsight.company.experience.ExperienceHead;
+import com.jobsight.company.experience.ExperienceKind;
+import com.jobsight.company.experience.ExperienceRepository;
+import com.jobsight.company.experience.KeyNormalizer;
+import org.springframework.jdbc.core.JdbcTemplate;
 import com.jobsight.company.position.Position;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.resume.dto.ResumeCopyRequest;
@@ -48,14 +54,20 @@ class ResumeServiceTest {
     @Mock private CurrentUser currentUser;
     @Mock private PositionRepository positionRepository;
     @Mock private AttachmentRepository attachmentRepository;
+    @Mock private ExperienceRepository experienceRepository;
+    @Mock private OwnerLock ownerLock;
+    @Mock private JdbcTemplate jdbc;
 
     private final JsonMapper mapper = JsonMapper.builder().build();
     private ResumeService service;
 
     @BeforeEach
     void setUp() {
-        service = new ResumeService(repository, currentUser, mapper,
-                Validation.buildDefaultValidatorFactory().getValidator(), positionRepository, attachmentRepository);
+        var validator = Validation.buildDefaultValidatorFactory().getValidator();
+        ResumeWriter writer = new ResumeWriter(repository, new ResumeExperienceLinker(experienceRepository, mapper), validator,
+                mapper, jdbc);
+        service = new ResumeService(repository, currentUser, mapper, validator, positionRepository, attachmentRepository,
+                writer, ownerLock, experienceRepository);
         given(currentUser.id()).willReturn(OWNER_ID);
     }
 
@@ -98,7 +110,7 @@ class ResumeServiceTest {
         ResumeResponse created = service.create(new ResumeRequest("  새 이력서 ", null, List.of(), null));
 
         ArgumentCaptor<Resume> saved = ArgumentCaptor.forClass(Resume.class);
-        verify(repository).save(saved.capture());
+        verify(repository).saveAndFlush(saved.capture());
         assertThat(saved.getValue().getName()).isEqualTo("새 이력서");
         assertThat(saved.getValue().getContent()).contains("\"educations\":[]").contains("\"projects\":[]");
         assertThat(created.content().basic()).isNotNull();
@@ -133,7 +145,7 @@ class ResumeServiceTest {
         source.onCreate();
         UUID positionId = UUID.randomUUID();
         source.replacePositions(Set.of(positionId));
-        given(repository.findByIdAndOwnerId(source.getId(), OWNER_ID)).willReturn(Optional.of(source));
+        given(repository.findOwnedForUpdate(source.getId(), OWNER_ID)).willReturn(Optional.of(source));
 
         ResumeResponse copy = service.copy(source.getId(), new ResumeCopyRequest("v2"));
 
@@ -263,6 +275,79 @@ class ResumeServiceTest {
                 .isEqualTo(3);
     }
 
+    /**
+     * 경험 앵커(experienceId·experienceRevision)는 4개 경험 섹션 행에 실려 PUT→GET 왕복과 행 수정에서 살아남는다(설계 6.1).
+     * Jackson 은 모르는 키를 조용히 버리므로, record 에 키가 없으면 저장은 성공하고 앵커만 사라진다.
+     */
+    @Test
+    void experienceAnchorsSurviveSaveAndRowEdit() {
+        saveReturnsArgument();
+        UUID experienceId = UUID.randomUUID();
+        UUID activityId = UUID.randomUUID();
+        UUID careerId = UUID.randomUUID();
+        UUID trainingId = UUID.randomUUID();
+        given(experienceRepository.findHeads(OWNER_ID)).willReturn(List.of(
+                head(experienceId, ExperienceKind.PROJECT, "Planetory"), head(activityId, ExperienceKind.ACTIVITY, "동아리"),
+                head(careerId, ExperienceKind.CAREER, "A사"), head(trainingId, ExperienceKind.TRAINING, "교육")));
+        Resume resume = lockedResume("{\"projects\":[{\"name\":\"Planetory\"," + anchor(experienceId) + "}],"
+                + "\"activities\":[{\"name\":\"동아리\"," + anchor(activityId) + "}],"
+                + "\"experiences\":[{\"company\":\"A사\"," + anchor(careerId) + "}],"
+                + "\"trainings\":[{\"name\":\"교육\"," + anchor(trainingId) + "}]}");
+
+        ResumeResponse read = service.update(resume.getId(), new ResumeRequest("v1", null, null, 0L));
+        assertThat(read.content().projects().get(0).experienceId()).isEqualTo(experienceId);
+        assertThat(read.content().projects().get(0).experienceRevision()).isEqualTo(2);
+        assertThat(read.content().activities().get(0).experienceRevision()).isEqualTo(2);
+        assertThat(read.content().experiences().get(0).experienceId()).isEqualTo(careerId);
+        assertThat(read.content().trainings().get(0).experienceId()).isEqualTo(trainingId);
+
+        // PUT 으로 받은 문서를 그대로 돌려보내도(웹 저장) 두 키가 남는다.
+        service.update(resume.getId(), new ResumeRequest("v1", read.content(), null, 0L));
+        assertThat(stored(resume).projects().get(0).experienceRevision()).isEqualTo(2);
+
+        // 행 도구로 다른 칸을 고쳐도 앵커는 그대로다(병합 갱신).
+        ResumeRowResult edited = service.updateRow(resume.getId(), ResumeSection.projects, 0, row(Map.of("role", "백엔드")), 0L);
+        assertThat(edited.row()).containsEntry("experienceId", experienceId.toString()).containsEntry("experienceRevision", 2);
+    }
+
+    private static String anchor(UUID experienceId) {
+        return "\"experienceId\":\"" + experienceId + "\",\"experienceRevision\":2";
+    }
+
+    private static ExperienceHead head(UUID id, ExperienceKind kind, String title) {
+        return new ExperienceHead(id, kind, title, KeyNormalizer.key(title), null, 3, 3);
+    }
+
+    /** 행 요청은 experienceId 만 받는다. 경험 섹션이 아니면 그 필드도 다른 섹션 필드처럼 거부된다. */
+    @Test
+    void rowRequestCarriesOnlyExperienceId() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{}");
+        UUID experienceId = UUID.randomUUID();
+        given(experienceRepository.findHeads(OWNER_ID)).willReturn(List.of(head(experienceId, ExperienceKind.PROJECT, "JOBIS")));
+
+        ResumeRowResult added = service.addRow(resume.getId(), ResumeSection.projects,
+                mapper.convertValue(Map.of("name", "JOBIS", "experienceId", experienceId.toString()), ResumeRowRequest.class), null);
+        assertThat(added.row()).containsEntry("experienceId", experienceId.toString());
+        assertThat(ResumeRowRequest.class.getRecordComponents()).extracting(c -> c.getName())
+                .contains("experienceId").doesNotContain("experienceRevision");
+        assertCode(catchThrown(() -> service.addRow(resume.getId(), ResumeSection.certificates,
+                mapper.convertValue(Map.of("name", "SQLD", "experienceId", experienceId.toString()), ResumeRowRequest.class),
+                null)), "UNKNOWN_ROW_FIELD");
+    }
+
+    /** 직무 연결은 같은 Set 을 비우고 채운다. 새 Set 을 대입하면 저장마다 resume_positions 전부를 DELETE·INSERT 한다(설계 1.3 P8). */
+    @Test
+    void replacePositionsKeepsTheSameCollection() {
+        Resume resume = new Resume(currentUser.id(), "v1", "{}");
+        Set<UUID> collection = resume.getPositionIds();
+        UUID positionId = UUID.randomUUID();
+
+        resume.replacePositions(Set.of(positionId));
+
+        assertThat(resume.getPositionIds()).isSameAs(collection).containsExactly(positionId);
+    }
+
     @Test
     void updateBasicKeepsOtherSections() {
         saveReturnsArgument();
@@ -361,7 +446,7 @@ class ResumeServiceTest {
         assertThat(service.findById(resume.getId()).attachments()).containsExactly(Map.entry(fileId, meta));
 
         ResumeContent withNullRows = new ResumeContent(null, null,
-                Arrays.asList(null, new ResumeContent.Training("교육", null, null, null, null, fileId.toString())),
+                Arrays.asList(null, new ResumeContent.Training("교육", null, null, null, null, fileId.toString(), null, null)),
                 Collections.singletonList(null), null, Collections.singletonList(null),
                 Collections.singletonList(null), null, null);
         ResumeResponse created = service.create(new ResumeRequest("v2", withNullRows, List.of(), null));

@@ -160,7 +160,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 ## 도구 계약과 검증 범위
 
-도구는 56개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 48개)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
+도구는 58개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 50개)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
 도구명·동작별 사용법은 스킬에 있다. `/mcp`의 `tools/list`는 연결 계정의 scope/역할에 따라 목록을 줄인다.
 관리자 도구 8개는 일반 사용자에게 노출하지 않으며 직접 이름을 호출해도 거부한다.
 **MCP 전용 모양은 `McpActions` 의 별도 메서드로 만든다.** 도구가 REST 컨트롤러를 감싸므로 응답 모양을 바꾸면 웹에도 그대로 적용되기 때문이다
@@ -181,6 +181,14 @@ MCP용 `position_create`는 기존 `PositionService` 트랜잭션에서 공고 �
 `missing`(다른 이력서에만 있는 경험 묶음)을 붙이고, `resume_get({id, view:"outline"})` 은 `{id, name, version, sections, missing, unlinkedRows}` 개요다.
 웹 REST 이력서 응답은 그대로다. `experience_search` 입력은 `request` 로 감싼다(`McpTools` 가 record 인자만 검증하기 때문). 계약과 함정은
 docs/experience-graph-search.md "지금 동작하는 것".
+**경험 원본(4단계, docs/experiences.md)**: 자료원이 경험 원본으로 바뀌었다(형식 유지). `experience_index` 는 경험 한 줄(`experiences[]`)
+뒤에 미연결 행 묶음(`unlinkedRows`)이 이어지고 `ids`(10개 이하)면 상세(사실·소재집·연결 행·작성 근거 자소서·재검토 필요)다.
+`experience_save`(`McpActions.saveExperience` → `ExperienceBankService`)는 출처 AI('AI 기록')로 만들거나 고친다 — facts·dossier 를 고치면
+`expectedVersion` 필수, 개정 종류는 서버 판정. `resume_add_experiences` 는 경험 원본의 사실로 중립 행을 만들어 지금 개정으로 붙인다.
+`resume_update` 는 `McpActions.updateResume` 래퍼로 옮겼다: 입력이 `ResumeAgentUpdateRequest`(웹의 `refreshExperienceIds` 대신
+`removedExperienceIds`)이고, 연결 행이 빠지면 409 `LINKED_ROWS_MISSING` 이다. `resume_row_update/delete` 는 `index` 대신 `experienceId` 로도
+행을 지목한다(둘 중 하나, 아니면 400 `TARGET_REQUIRED`). `self_intro_create/update` 의 `experiences[{experienceId, experienceRevision}]` 는
+작성 근거이고 MCP 수정은 더하기만 한다. 검토 확정·경험 삭제·가져오기는 웹 전용이라 도구가 없다.
 **호출 로그**: `tools/call` 마다 `McpController` 가 `mcp tool=<이름> target=<첫 UUID 인자|-> ms=<n> result=<OK|오류 코드>` 를 INFO 한 줄로 남긴다.
 인자·응답 본문은 남기지 않는다(개인 자료). 설계 0단계 측정과 쓰이지 않는 도구 정리(6단계)의 근거다. `docker compose logs backend | grep "mcp tool="` 로 본다.
 자기소개 생성은 이력서 또는 직무 1개 이상, 수정은 0개 허용이고, 수정의 `positionIds`·`questionTypes` 는 null=유지다. **MCP 요청은 이 두 목록을
@@ -201,7 +209,10 @@ MCP 는 문서 전체를 되돌려 보내기 어려워 서버가 조회→한 �
 **오류 코드는 REST 와 MCP 가 한 변환을 쓴다** — `common/ApiErrors.translate`. `McpController` 의 마지막 `RuntimeException` 분기와 `GlobalExceptionHandler` 의 `Exception` 분기가 같은 함수를 부른다:
 `ResourceNotFoundException` → `NOT_FOUND`, `ApiRuleException` → 그 코드, `@Version` 충돌 → `STALE_WRITE`, 잠금 대기 초과·교착 → `BUSY`, `AccessDeniedException` → `FORBIDDEN`, 나머지 → `INTERNAL_ERROR`(ERROR 로그를 남긴다).
 MCP 전용은 `IllegalArgumentException`·Jackson 변환 실패 → `INVALID_ARGUMENT` 와 JSON-RPC 오류뿐이다. 도구 오류는 `isError:true` 와 `content[0].text = "<코드>: <메시지>"` 다(`structuredContent` 오류 형식은 아직 없다).
-`ApiErrorsTest` 가 같은 예외 8가지(커밋 시점에 감싸진 55P03·40P01 포함)를 REST 와 MCP 에 함께 던져 상태·코드가 같은지 본다.
+무결성 위반도 같은 변환이다(4단계): 23505 → 409 `CONFLICT`, 23503 은 경험 쪽 지연 FK 셋이면 삭제 쪽 409 `EXPERIENCE_IN_USE`·삽입 쪽 409
+`EXPERIENCE_CHANGED`, 그 밖 소유자 복합 FK 의 삽입 쪽은 404 `NOT_FOUND`, 이름을 모르는 FK 는 409 `CONFLICT` 다(원인 체인 탐색, docs/experiences.md 함정).
+경험 쪽 지연 FK 셋이 아닌 무결성 위반은 응답과 별개로 SQLState·제약 이름을 WARN 로그로 남긴다(코드 버그 추적용).
+`ApiErrorsTest` 가 같은 예외 15가지(커밋 시점에 감싸진 55P03·40P01·23503 포함)를 REST 와 MCP 에 함께 던져 상태·코드가 같은지 본다.
 
 인증 테스트는 외부 Google 자격증명 없이 인증된 세션을 주입하고 실제 Spring OAuth 필터의 코드 발급/교환을 검증한다.
 실제 Google 왕복 및 ChatGPT 서비스 연결과 같다고 간주하지 않는다.

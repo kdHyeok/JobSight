@@ -29,6 +29,43 @@ describe('이력서 문서 모양', () => {
   })
 })
 
+/**
+ * 경험 앵커(experienceId·experienceRevision)는 화면에 칸이 없지만 저장 payload 로 그대로 돌아가야 한다(설계 6.1).
+ * fillRow 가 SECTIONS 의 칸만 복사하면 웹 저장마다 앵커가 지워져 서버 링커가 연결을 잃는다.
+ */
+describe('경험 앵커 통과', () => {
+  const anchored = {
+    ...emptyContent(),
+    projects: [{ name: 'Planetory', role: '', experienceId: 'exp-1', experienceRevision: 3 }],
+    experiences: [{ company: 'A사', experienceId: 'exp-2', experienceRevision: 1 }],
+  } as unknown as ResumeContent
+
+  it('fillContent 가 앵커 키를 그대로 남기고 앵커가 없는 행에는 키를 만들지 않는다', () => {
+    const filled = fillContent(anchored)
+    expect(filled.projects[0]).toMatchObject({ experienceId: 'exp-1', experienceRevision: 3 })
+    expect(filled.experiences[0]).toMatchObject({ experienceId: 'exp-2', experienceRevision: 1 })
+    expect(fillContent({ ...emptyContent(), projects: [{ name: 'x' }] }).projects[0]).not.toHaveProperty('experienceId')
+  })
+
+  it('로드 → 다른 칸 수정 → 저장 payload 에 두 키가 그대로 실린다', async () => {
+    const wrapper = shallowMount(ResumeEditor, {
+      props: {
+        resume: { id: 'resume', name: '이력서', content: anchored, positionIds: [], createdAt: '', updatedAt: '' } as unknown as Resume,
+        positions: [], saving: false, apiFieldErrors: {},
+      },
+    })
+    const projects = wrapper.findAllComponents(ResumeSection).find((section) => section.props('section').key === 'projects')!
+    const rows = projects.props('rows') as Record<string, unknown>[]
+    projects.vm.$emit('update:rows', rows.map((row) => ({ ...row, role: '백엔드' })))
+    await wrapper.vm.$nextTick()
+    await wrapper.get('.page-tools .button.primary').trigger('click')
+
+    const saved = wrapper.emitted('save')?.[0]?.[0] as { content: ResumeContent }
+    expect(saved.content.projects[0]).toMatchObject({ role: '백엔드', experienceId: 'exp-1', experienceRevision: 3 })
+    expect(saved.content.experiences[0]).toMatchObject({ experienceId: 'exp-2', experienceRevision: 1 })
+  })
+})
+
 describe('지원 직무 선택', () => {
   const positions = [
     { id: 'old', name: '이전 직무', companyName: 'A기업', postingTitle: '백엔드 공고', updatedAt: '2026-09-01T00:00:00Z' },
