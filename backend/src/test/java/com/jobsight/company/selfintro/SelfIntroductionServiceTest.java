@@ -79,7 +79,7 @@ class SelfIntroductionServiceTest {
     @Test
     void createRequiresOwnedResumeAndNormalizesAnswer() {
         Resume resume = new Resume(OWNER_ID, "지원용", "{}");
-        given(resumeRepository.findAllByIdInAndOwnerId(anyList(), eq(OWNER_ID))).willReturn(List.of(resume));
+        given(resumeRepository.findOwnedIds(anyList(), eq(OWNER_ID))).willReturn(List.of(resume.getId()));
 
         var created = service.create(new SelfIntroductionCreateRequest(List.of(resume.getId()), null, null,
                 "  지원 동기는? ", "  답변  "));
@@ -106,7 +106,7 @@ class SelfIntroductionServiceTest {
     @Test
     void webCreateWithPositionOnlyRecordsUserLinks() {
         Position position = position("백엔드");
-        given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(position));
+        given(positionRepository.findOwnedIds(anyCollection(), eq(OWNER_ID))).willReturn(List.of(position.getId()));
 
         var created = service.create(new SelfIntroductionCreateRequest(null, List.of(position.getId()),
                 List.of(Competency.MOTIVATION), "지원 동기", null));
@@ -123,7 +123,7 @@ class SelfIntroductionServiceTest {
     void mcpCreateRecordsAiLinks() {
         Position position = position("백엔드");
         given(currentUser.viaMcp()).willReturn(true);
-        given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(position));
+        given(positionRepository.findOwnedIds(anyCollection(), eq(OWNER_ID))).willReturn(List.of(position.getId()));
 
         var created = service.create(new SelfIntroductionCreateRequest(null, List.of(position.getId()),
                 List.of(Competency.ASPIRATION), "입사 후 포부", null));
@@ -138,7 +138,7 @@ class SelfIntroductionServiceTest {
     @Test
     void foreignPositionIsNotFound() {
         UUID foreign = UUID.randomUUID();
-        given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of());
+        given(positionRepository.findOwnedIds(anyCollection(), eq(OWNER_ID))).willReturn(List.of());
 
         assertThatThrownBy(() -> service.create(new SelfIntroductionCreateRequest(null, List.of(foreign), null, "질문", null)))
                 .isInstanceOf(ResourceNotFoundException.class).hasMessageContaining(foreign.toString());
@@ -156,7 +156,7 @@ class SelfIntroductionServiceTest {
         SelfIntroduction value = value("지원 동기", "답변");
         value.linkPositions(Set.of(aiLinked.getId()), LinkSource.AI);
         given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
-        given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(aiLinked, added));
+        given(positionRepository.findOwnedIds(anyCollection(), eq(OWNER_ID))).willReturn(List.of(aiLinked.getId(), added.getId()));
 
         var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
                 List.of(aiLinked.getId(), added.getId()), null, "지원 동기", "고친 답변", 0L));
@@ -165,7 +165,7 @@ class SelfIntroductionServiceTest {
         assertThat(updated.positionLinks()).containsExactlyInAnyOrder(
                 new SelfIntroductionResponse.PositionLinkView(aiLinked.getId(), LinkSource.AI),
                 new SelfIntroductionResponse.PositionLinkView(added.getId(), LinkSource.USER));
-        verify(resumeRepository, never()).findAllByIdInAndOwnerId(anyList(), any());
+        verify(resumeRepository, never()).findOwnedIds(anyList(), any());
     }
 
     /** positionIds·questionTypes 를 보내지 않는 기존 웹 경로(null)는 연결을 그대로 둔다. */
@@ -177,7 +177,7 @@ class SelfIntroductionServiceTest {
         value.linkQuestionTypes(Set.of(Competency.MOTIVATION), LinkSource.AI);
         Resume resume = new Resume(OWNER_ID, "지원용", "{}");
         given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
-        given(resumeRepository.findAllByIdInAndOwnerId(anyList(), eq(OWNER_ID))).willReturn(List.of(resume));
+        given(resumeRepository.findOwnedIds(anyList(), eq(OWNER_ID))).willReturn(List.of(resume.getId()));
 
         var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(resume.getId()),
                 null, null, "지원 동기", "답변", 0L));
@@ -186,7 +186,7 @@ class SelfIntroductionServiceTest {
                 new SelfIntroductionResponse.PositionLinkView(positionId, LinkSource.AI));
         assertThat(updated.questionTypes()).containsExactly(
                 new SelfIntroductionResponse.QuestionTypeView(Competency.MOTIVATION, LinkSource.AI));
-        verify(positionRepository, never()).findAllByIdInAndOwnerId(anyCollection(), any());
+        verify(positionRepository, never()).findOwnedIds(anyCollection(), any());
     }
 
     /**
@@ -202,7 +202,7 @@ class SelfIntroductionServiceTest {
         value.linkQuestionTypes(Set.of(Competency.MOTIVATION), LinkSource.USER);
         given(currentUser.viaMcp()).willReturn(true);
         given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
-        given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(added));
+        given(positionRepository.findOwnedIds(anyCollection(), eq(OWNER_ID))).willReturn(List.of(added.getId()));
 
         var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
                 List.of(added.getId()), List.of(Competency.COLLABORATION), "지원 동기", "답변", 0L));
@@ -287,8 +287,8 @@ class SelfIntroductionServiceTest {
         value.onCreate();
         given(currentUser.viaMcp()).willReturn(true);
         given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
-        lenient().when(resumeRepository.findAllByIdInAndOwnerId(anyList(), eq(OWNER_ID))).thenReturn(List.of(resume));
-        lenient().when(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).thenReturn(List.of(added));
+        lenient().when(resumeRepository.findOwnedIds(anyList(), eq(OWNER_ID))).thenReturn(List.of(resume.getId()));
+        lenient().when(positionRepository.findOwnedIds(anyCollection(), eq(OWNER_ID))).thenReturn(List.of(added.getId()));
 
         var linked = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(resume.getId()),
                 List.of(added.getId()), List.of(Competency.COLLABORATION), " 지원 동기 ", "답변 ", null));

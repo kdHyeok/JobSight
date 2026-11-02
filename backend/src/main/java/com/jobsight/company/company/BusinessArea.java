@@ -22,4 +22,16 @@ public class BusinessArea {
 
     public String getName() { return name; }
     public String getDescription() { return description; }
+
+    /** 값 객체. Company 가 바뀐 칸만 고칠 때 비교한다(설계 1.3 P8). */
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof BusinessArea that
+                && java.util.Objects.equals(name, that.name) && java.util.Objects.equals(description, that.description);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(name, description);
+    }
 }

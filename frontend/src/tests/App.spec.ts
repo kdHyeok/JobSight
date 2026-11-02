@@ -57,6 +57,7 @@ vi.mock('../api/positions', () => {
   return {
     ApiClientError,
     listPositions: vi.fn(() => Promise.resolve([])),
+    listPositionOptions: vi.fn(() => Promise.resolve([])),
     getPosition: vi.fn(),
     updatePosition: vi.fn(),
     replacePositionReferences: vi.fn(),

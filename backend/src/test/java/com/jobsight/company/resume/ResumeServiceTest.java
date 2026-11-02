@@ -11,7 +11,6 @@ import com.jobsight.company.experience.ExperienceKind;
 import com.jobsight.company.experience.ExperienceRepository;
 import com.jobsight.company.experience.KeyNormalizer;
 import org.springframework.jdbc.core.JdbcTemplate;
-import com.jobsight.company.position.Position;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.resume.dto.ResumeCopyRequest;
 import com.jobsight.company.resume.dto.ResumeRequest;
@@ -161,12 +160,8 @@ class ResumeServiceTest {
         saveReturnsArgument();
         UUID positionId = UUID.randomUUID();
         UUID secondPositionId = UUID.randomUUID();
-        Position position = mock(Position.class);
-        Position secondPosition = mock(Position.class);
-        given(position.getId()).willReturn(positionId);
-        given(secondPosition.getId()).willReturn(secondPositionId);
-        given(positionRepository.findAllByIdInAndOwnerId(Set.of(positionId, secondPositionId), OWNER_ID))
-                .willReturn(List.of(position, secondPosition));
+        given(positionRepository.findOwnedIds(Set.of(positionId, secondPositionId), OWNER_ID))
+                .willReturn(List.of(positionId, secondPositionId));
 
         ResumeResponse created = service.create(new ResumeRequest("지원용", null,
                 List.of(positionId, secondPositionId), null));

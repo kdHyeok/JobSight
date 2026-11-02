@@ -105,8 +105,17 @@ public class Company {
     private void apply(CompanyAttributes attributes) {
         this.name = attributes.name();
         this.websiteUrl = attributes.websiteUrl();
-        this.industries = new LinkedHashSet<>(attributes.industries());
-        this.businesses = new ArrayList<>(attributes.businesses());
+        // 새 컬렉션을 대입하지 않는다 — 저장마다 컬렉션 표 전체를 DELETE·INSERT 하게 된다(설계 1.3 P8).
+        // 업종은 빠진 것만 빼고 새것만 더한다. 주요 사업은 순서(seq)가 의미라 자리별로 바뀐 칸만 고치고 끝에서 늘이거나 줄인다.
+        Set<String> industries = new LinkedHashSet<>(attributes.industries());
+        this.industries.retainAll(industries);
+        this.industries.addAll(industries);
+        List<BusinessArea> businesses = attributes.businesses();
+        while (this.businesses.size() > businesses.size()) this.businesses.remove(this.businesses.size() - 1);
+        for (int i = 0; i < businesses.size(); i++) {
+            if (i >= this.businesses.size()) this.businesses.add(businesses.get(i));
+            else if (!this.businesses.get(i).equals(businesses.get(i))) this.businesses.set(i, businesses.get(i));
+        }
         this.companySize = attributes.companySize();
         this.annualRevenue = attributes.annualRevenue();
         this.revenueUnit = attributes.annualRevenue() == null ? null : attributes.revenueUnit();

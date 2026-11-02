@@ -21,7 +21,7 @@ vi.mock('../api/resumes', () => {
     deleteResume: vi.fn(),
   }
 })
-vi.mock('../api/positions', () => ({ listPositions: vi.fn() }))
+vi.mock('../api/positions', () => ({ listPositions: vi.fn(), listPositionOptions: vi.fn() }))
 vi.mock('../api/self-introductions', () => ({ listSelfIntroductions: vi.fn() }))
 
 const resume = { id: 'resume', name: '이력서', content: {}, positionIds: [], createdAt: '', updatedAt: '' } as unknown as Resume
@@ -30,7 +30,22 @@ const linked = [{ id: 'intro', resumeIds: ['resume'], question: '지원 동기',
 describe('이력서 편집기 열기', () => {
   beforeEach(() => {
     vi.mocked(positions.listPositions).mockReset().mockResolvedValue([])
+    vi.mocked(positions.listPositionOptions).mockReset().mockResolvedValue([])
     vi.mocked(introductions.listSelfIntroductions).mockReset().mockResolvedValue(linked)
+  })
+
+  it('직무 선택지는 전체 목록이 아니라 요약(view=summary)으로 받아 편집기에 넘긴다', async () => {
+    // 설계 1.3 P6: 편집기는 이름·기업·공고·수정 시각만 쓴다. 전체 목록은 상세·스택·참고 정보까지 SQL 9회다.
+    const options = [{ id: 'p', name: '백엔드', postingId: 'j', postingTitle: '공채', companyId: 'c', companyName: '회사', updatedAt: '' }]
+    vi.mocked(positions.listPositionOptions).mockResolvedValue(options)
+    vi.mocked(resumes.getResume).mockReset().mockResolvedValue(resume)
+
+    const wrapper = shallowMount(ResumeBoard, { props: { focus: 'resume' } })
+    await flushPromises()
+
+    expect(positions.listPositionOptions).toHaveBeenCalledTimes(1)
+    expect(positions.listPositions).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(ResumeEditor).props('positions')).toEqual(options)
   })
 
   it('연결 문항 요청이 이력서 응답을 기다리지 않고 함께 나가 편집기에 넘겨진다', async () => {

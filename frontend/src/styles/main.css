@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap');
+/* 웹폰트(Figtree, IBM Plex Sans KR)는 index.html 의 <link> 로 받는다 — @import 는 직렬 로딩이다(설계 1.3 P9). */
 
 /* 토큰 정의는 여기 한 곳뿐이다 — docs/design-system.md */
 :root {

@@ -9,12 +9,12 @@ import {
   listResumes,
   updateResume,
 } from '../api/resumes'
-import { listPositions } from '../api/positions'
+import { listPositionOptions } from '../api/positions'
 import { listSelfIntroductions } from '../api/self-introductions'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ResumeEditor from './ResumeEditor.vue'
 import type { Resume, ResumePayload, ResumeSummary } from '../types/resume'
-import type { Position } from '../types/position'
+import type { PositionOption } from '../types/position'
 import type { SelfIntroduction } from '../types/self-introduction'
 
 /**
@@ -26,7 +26,7 @@ const emit = defineEmits<{ openResume: [id: string]; closeResume: []; openIntrod
 
 const resumes = ref<ResumeSummary[]>([])
 const current = ref<Resume | null>(null)
-const positions = ref<Position[]>([])
+const positions = ref<PositionOption[]>([])
 /** 편집기를 열 때 이력서와 함께 받은 연결 문항. null 이면 문항 칸이 직접 불러온다. */
 const questions = ref<SelfIntroduction[] | null>(null)
 const loading = ref(true)
@@ -73,7 +73,7 @@ async function loadCurrent(id: string) {
     // 스스로 다시 불러 오류를 보여 준다.
     const [resume, availablePositions, linkedQuestions] = await Promise.all([
       getResume(id),
-      listPositions(),
+      listPositionOptions(),
       listSelfIntroductions('', id).catch(() => null),
     ])
     // A 를 연 뒤 B 를 열면 A 응답이 B 보다 늦게 올 수 있다. 그때 A 로 덮지 않는다.

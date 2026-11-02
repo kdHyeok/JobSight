@@ -16,6 +16,7 @@ import com.jobsight.company.resume.dto.ResumeCopyRequest;
 import com.jobsight.company.resume.dto.ResumeRequest;
 import com.jobsight.company.resume.dto.ResumeResponse;
 import com.jobsight.company.resume.dto.ResumeRowRequest;
+import com.jobsight.company.resume.dto.ResumeListRow;
 import com.jobsight.company.resume.dto.ResumeRowResult;
 import com.jobsight.company.resume.dto.ResumeSummary;
 import jakarta.validation.ConstraintViolation;
@@ -31,6 +32,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -75,11 +77,18 @@ public class ResumeService {
         this.experiences = experiences;
     }
 
-    /** 목록엔 content 를 싣지 않는다. 카드는 이름·수정일만 그린다. */
+    /**
+     * 목록엔 content 를 싣지 않는다. 카드는 이름·수정일만 그린다. 엔티티를 읽으면 content JSONB 까지 오므로
+     * 이력서×직무 projection 한 번으로 읽고 여기서 묶는다(설계 1.3 P4). 순서는 쿼리의 updatedAt 내림차순 그대로다.
+     */
     public List<ResumeSummary> findAll() {
-        return repository.findAllByOwnerIdOrderByUpdatedAtDesc(currentUser.id()).stream()
-                .map(ResumeSummary::of)
-                .toList();
+        Map<UUID, List<ResumeListRow>> byResume = repository.findListRows(currentUser.id()).stream()
+                .collect(Collectors.groupingBy(ResumeListRow::id, LinkedHashMap::new, Collectors.toList()));
+        return byResume.values().stream().map(rows -> {
+            ResumeListRow head = rows.get(0);
+            List<UUID> positionIds = rows.stream().map(ResumeListRow::positionId).filter(Objects::nonNull).sorted().toList();
+            return new ResumeSummary(head.id(), head.name(), head.createdAt(), head.updatedAt(), positionIds);
+        }).toList();
     }
 
     public ResumeResponse findById(UUID id) {
@@ -451,8 +460,8 @@ public class ResumeService {
     private Set<UUID> ownedPositionIds(List<UUID> rawIds) {
         Set<UUID> ids = new LinkedHashSet<>(rawIds == null ? List.of() : rawIds);
         if (ids.isEmpty()) return ids;
-        Set<UUID> owned = new LinkedHashSet<>();
-        positionRepository.findAllByIdInAndOwnerId(ids, currentUser.id()).forEach(position -> owned.add(position.getId()));
+        // id 만 읽는다. 직무 엔티티와 EAGER 컬렉션(스택·참고 정보)을 로드하지 않는다 — 설계 1.3 P7.
+        Set<UUID> owned = new HashSet<>(positionRepository.findOwnedIds(ids, currentUser.id()));
         for (UUID id : ids) {
             if (!owned.contains(id)) throw new ResourceNotFoundException(id);
         }

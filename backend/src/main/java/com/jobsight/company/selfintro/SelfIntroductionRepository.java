@@ -15,6 +15,17 @@ public interface SelfIntroductionRepository extends JpaRepository<SelfIntroducti
     Optional<SelfIntroduction> findByIdAndOwnerId(UUID id, UUID ownerId);
     List<SelfIntroduction> findAllByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
+    /**
+     * 이 이력서에 연결된 내 자소서만 — 설계 1.3 P3. 소유자 전체를 읽고 자바에서 거르지 않는다.
+     * 연결 표의 idx_self_introduction_resumes_resume(V20)을 쓸 수 있다. 문항당 같은 이력서는 한 번뿐이라 중복이 없다.
+     */
+    @Query("""
+            select s from SelfIntroduction s join s.resumeIds r
+             where s.ownerId = :ownerId and r = :resumeId
+             order by s.updatedAt desc
+            """)
+    List<SelfIntroduction> findAllLinkedToResume(@Param("ownerId") UUID ownerId, @Param("resumeId") UUID resumeId);
+
     /** 직접 출처(written_for)가 없는 내 문항 수 — experience_index counts(설계 5.2). 소유자 조건을 양쪽에 건다. */
     @Query(value = """
             select count(*) from self_introductions s

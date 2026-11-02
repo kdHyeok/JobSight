@@ -19,6 +19,13 @@
 
 경로를 추가하면 `nginx.conf` 표 · `ApiPaths.java` · `routes.ts` 를 함께 갱신한다.
 
+정적 자산 캐시(설계 1.3 P9):
+- `/assets/` 는 Vite 해시 파일이라 `Cache-Control: public, max-age=31536000, immutable` 이다. 없는 파일은 `index.html` 로 떨어뜨리지 않고 404 다 — 옛 해시 이름에 HTML 이 1년 캐시되는 일을 막는다.
+- `index.html` 에는 캐시 헤더를 붙이지 않는다. 새 배포의 해시 이름을 바로 받아야 해서다. 공개 도메인에서는 Cloudflare 가 따로 엣지 캐시를 한다(설계 1.0).
+- gzip 은 넣지 않았다. 공개 도메인은 Cloudflare 가 br 압축을 하고, 직결(N1-(B))로 갈 때만 의미가 있다.
+- 스모크가 해시 자산 하나의 `Cache-Control` 과 없는 자산의 404 를 본다.
+- 웹폰트는 `index.html` 의 `<link rel=preconnect>` + `<link>` 로 받는다. `main.css` 의 `@import` 로 두면 CSS 를 받은 뒤에야 폰트 CSS 요청이 나간다.
+
 ## Compose
 
 백엔드 빌드의 `plugin` named context는 `plugins/jobsight`만 포함한다. `.env`·`.secrets`는 전달하지 않는다.

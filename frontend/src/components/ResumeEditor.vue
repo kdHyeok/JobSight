@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
-import type { Position } from '../types/position'
+import type { PositionOption } from '../types/position'
 import type { SelfIntroduction } from '../types/self-introduction'
 import AttachmentField from './AttachmentField.vue'
 import ResumeSection from './ResumeSection.vue'
@@ -27,7 +27,7 @@ const props = defineProps<{
   resume: Resume
   saving: boolean
   apiFieldErrors: Record<string, string>
-  positions: Position[]
+  positions: PositionOption[]
   /** 이력서와 함께 받아 둔 연결 문항. 없으면 문항 칸이 직접 불러온다. */
   questions?: SelfIntroduction[] | null
 }>()
@@ -148,12 +148,17 @@ watch(() => props.resume, (resume) => {
   loadExperiences()
 })
 
-/** 저장한 시점의 문서와 깊은 비교. 입력마다 새 객체를 만드니 JSON 비교가 정직하다. */
+/**
+ * 저장한 시점의 문서와 깊은 비교. 입력마다 새 객체를 만드니 JSON 비교가 정직하다.
+ * 저장본 쪽은 resume prop 이 바뀔 때만 한 번 직렬화한다 — 키 입력마다 직렬화하는 것은 편집 중인 문서 하나뿐이다(설계 1.3 P11).
+ */
+const savedContent = computed(() => JSON.stringify(fillContent(props.resume.content)))
+const savedPositionIds = computed(() => [...props.resume.positionIds].sort().join(','))
 const dirty = computed(() =>
   name.value !== props.resume.name
   || refreshIds.value.length > 0
-  || JSON.stringify(content.value) !== JSON.stringify(fillContent(props.resume.content))
-  || JSON.stringify([...positionIds.value].sort()) !== JSON.stringify([...props.resume.positionIds].sort()),
+  || [...positionIds.value].sort().join(',') !== savedPositionIds.value
+  || JSON.stringify(content.value) !== savedContent.value,
 )
 
 // 저장 안 한 변경이 있으면 탭 닫기·새로고침에 경고. 한 줄이면 되는 일을 라이브러리로 하지 않는다.

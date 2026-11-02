@@ -4,6 +4,7 @@ import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.CompanyRepository;
+import com.jobsight.company.position.dto.PositionOption;
 import com.jobsight.company.position.dto.PositionReferencesRequest;
 import com.jobsight.company.position.dto.PositionRequest;
 import com.jobsight.company.position.dto.PositionResponse;
@@ -57,6 +58,11 @@ public class PositionService {
             return all;
         }
         return all.stream().filter(p -> p.matches(needle)).toList();
+    }
+
+    /** 편집기 선택지 요약(설계 1.3 P6). 엔티티를 읽지 않는 projection 한 번. MCP position_list 는 이 메서드를 쓰지 않는다. */
+    public List<PositionOption> findOptions() {
+        return repository.findOptions(currentUser.id());
     }
 
     /** 상세에는 이 직무를 지우면 직접 출처가 사라질 자소서 수를 싣는다(삭제 확인창용, count 한 문장). */

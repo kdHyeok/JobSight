@@ -12,7 +12,7 @@
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
 | 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
-| 스키마 | `resources/db/migration/V1~V28` — Flyway, `ddl-auto: validate` |
+| 스키마 | `resources/db/migration/V1~V29` — Flyway, `ddl-auto: validate` |
 | 의미 검색(5단계) | `embedding/` — `EmbedderClient`(embedder 호출), `EmbeddingSweeper`(dirty 스위퍼, 유일한 `@Scheduled`), `SystemEmbeddingSweepRepository`(소유자 조건 없는 유일한 저장소, 패키지 전용), `DenseIndex`(소유자로 거른 벡터·cosine) — docs/experience-graph-search.md |
 | 계정 단위 직렬화(T9) | `common/OwnerLock.acquire(owner)` — 경험 관계를 바꾸는 쓰기의 맨 앞. 아래 「경험 관계 쓰기의 잠금과 관문」 |
 | 이력서 content 쓰기 관문 | `resume/ResumeWriter` — 이력서 JSON 을 쓰는 유일한 곳(검증 → 링커 → 저장 → `resume_experiences` → `SET CONSTRAINTS ALL IMMEDIATE`) — docs/experiences.md |
@@ -54,6 +54,33 @@ EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, 
   `Resume`·`Position`·`JobPosting`·`Company` 엔티티 로드 0을 단언한다. 공고·기업 소유 확인은 `existsByIdAndOwnerId` 다.
   함정: 이 상한은 Hibernate 통계(`getPrepareStatementCount`)라 `JdbcTemplate` 문장은 세지 않는다. 제출·작성 기준 트랙에서 쪽이 비어 있지 않으면
   `SubmissionService.confirmedByPosting` 의 JDBC 1회(사용자 확인 제출 기록, alreadyUsedFor)가 더 돈다 — 실제 SQL 은 상한보다 1 많다.
+
+## 조회 정리 (성능 트랙, 설계 1.3 P3·P4·P6~P11, 1.5)
+
+회귀 방지는 `common/QueryCleanupIntegrationTest`(Testcontainers, 통계는 이 테스트에서만 켠다)다. 응답 내용과 함께 읽은 엔티티 수·SQL 수·컬렉션 재생성 수를 단언한다.
+전·후 값은 같은 테스트를 고치기 전 코드와 고친 뒤 코드에서 돌려 읽은 것이다(`MEASURE` 출력, Hibernate `getPrepareStatementCount` 라 `JdbcTemplate` 문장은 세지 않는다).
+
+| # | 무엇 | 바꾼 것 | 전 → 후 (실측) |
+|---|---|---|---|
+| P3 | `GET /api/self-introductions?resumeId=` | `SelfIntroductionRepository.findAllLinkedToResume`(연결 표 조인). 소유자 전체를 읽고 자바에서 거르지 않는다 | 자소서 6 중 2 연결: 읽은 자소서 엔티티 **6 → 2**, SQL 5 → 5(1d 배치 페치로 이미 묶여 있었다) |
+| P4 | `GET /api/resumes`(`resume_list`) | `ResumeRepository.findListRows` — 이력서×직무 constructor projection 한 번, 서비스가 묶는다 | SQL **2 → 1**, 이력서 엔티티(content JSONB) 로드 4 → **0** |
+| P6 | `GET /api/positions?view=summary` (새 쿼리 파라미터, 경로 표는 그대로) | `PositionRepository.findOptions` → `PositionOption`(id·이름·공고·기업·`updatedAt`). 이력서 편집기(`ResumeBoard`)만 쓴다 | SQL **9 → 1**(9 는 전체 목록 `PositionListQueryCountIntegrationTest`), 엔티티 로드 0 |
+| P7 | 이력서 저장·자소서 생성/수정의 소유 확인 | `ResumeRepository.findOwnedIds`·`PositionRepository.findOwnedIds` — id 만 읽는다. 없거나 남의 id 는 그대로 404 | `resume.update`(직무 3): SQL **10 → 8**, 엔티티 로드 4 → 1(이력서 자신). 자소서 생성(이력서 1·직무 3): 직무·이력서 엔티티 로드 0(후 SQL 9) |
+| P8 | 기업·직무 저장 | `Company` 업종은 빠진 것만 빼고 새것만 더하고, 주요 사업(`@OrderColumn`)은 자리별로 바뀐 칸만 고친다(`BusinessArea` 에 값 `equals`). `Position` 스택·참고 정보도 같은 방식. `Resume` 은 4a 에서 했다 | 같은 값으로 기업+직무 저장: SQL **28 → 19**, 컬렉션 재생성(전체 DELETE·INSERT) 1 → **0** |
+| P10 | MCP 토큰 조회 `findByToken(…, ACCESS_TOKEN)` | `V29__indexes` 의 hash 인덱스 2개 | 아래 |
+| 1.5 | ON DELETE 참조 쪽 | `V29__indexes`: `job_postings(target_position_id)`·`reference_items(related_position_id)` 부분 인덱스, `position_references(reference_id)` | 테스트가 인덱스 5개와 토큰 둘의 `USING hash` 를 확인 |
+
+P10 실측: 워크트리 스택(`jobsite-wt-graph`)의 `oauth2_authorization` 은 0행이었다. 그래서 트랜잭션 안에 합성 5,000행을 넣고 `ANALYZE` 뒤 `EXPLAIN ANALYZE` 를 보고 ROLLBACK 했다.
+access 조회 Seq Scan 0.358ms(4,999행 버림) → Index Scan 0.031ms, refresh 조회 0.535ms → 0.017ms. **배포 서버의 행 수와 만료 행 누적은 보지 못했다**(접근 경로 없음).
+만료 행이 쌓여 있으면 정리 작업이 먼저인지 판단해야 한다는 설계 1.3 P10 의 조건은 배포 서버에서 `select count(*), count(*) filter (where access_token_expires_at < now()) from oauth2_authorization` 으로 확인한다.
+
+함정:
+- hash 인덱스인 이유: 토큰 문자열이 btree 행 크기 상한(약 2.7KB)을 넘을 수 있고, 조회는 등호뿐이다. 타입 없는 revoke·introspect 는 여러 컬럼을 OR 로 묶어 seq scan 이 남을 수 있다(빈도가 낮아 허용, 설계 1.5).
+- P3 의 인덱스 사용(`idx_self_introduction_resumes_resume`)은 EXPLAIN 으로 확인하지 않았다. 계정당 수백 행이면 플래너가 seq scan 을 고를 수 있고, 이득은 읽는 행 수다.
+- P6 의 `view=summary` 는 `position_list` MCP 에 노출되지 않는다. MCP 는 `PositionService.findAll` 을 이름으로 등록하고, 요약은 별도 메서드(`findOptions`)·별도 핸들러(`@GetMapping(params = "view=summary")`)다. 그래서 MCP 도구 설명은 바꾸지 않았다.
+- 자소서 화면(`SelfIntroductionBoard`)과 직무 화면은 여전히 전체 목록을 받는다. 직무 화면은 스택·참고 정보가 필요하고, 자소서 화면은 이번 범위 밖이다.
+- P8: 컬렉션 필드에 새 컬렉션을 대입하면 Hibernate 는 통째 재생성(전체 DELETE·INSERT)한다. 같은 인스턴스를 고친다. `@OrderColumn` 목록은 자리별로 비교해 바뀐 칸만 `set` 하는데, 원소에 값 `equals` 가 없으면 같은 값도 바뀐 것으로 본다. 새 `@Embeddable` 목록 원소에는 `equals`·`hashCode` 를 둔다.
+- `ResumeSummary.of(Resume)` 는 지웠다. 목록을 엔티티에서 만들면 content 를 다시 읽는다.
 
 ## 요청 한 번의 흐름
 
