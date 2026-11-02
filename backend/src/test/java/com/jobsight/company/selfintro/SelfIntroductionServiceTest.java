@@ -55,7 +55,9 @@ class SelfIntroductionServiceTest {
         service = new SelfIntroductionService(repository, resumeRepository, positionRepository, currentUser,
                 mock(com.jobsight.company.common.OwnerLock.class),
                 mock(com.jobsight.company.experience.ExperienceRepository.class),
-                mock(org.springframework.jdbc.core.JdbcTemplate.class));
+                mock(org.springframework.jdbc.core.JdbcTemplate.class),
+                mock(com.jobsight.company.writingguide.WritingGuideService.class),
+                tools.jackson.databind.json.JsonMapper.builder().build());
         lenient().when(currentUser.id()).thenReturn(OWNER_ID);
         lenient().when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
             SelfIntroduction value = invocation.getArgument(0);

@@ -36,6 +36,8 @@ export const API = {
   postingStatus: (id: string) => `/api/postings/${id}/status`,
   postingStep: (id: string, seq: number) => `/api/postings/${id}/steps/${seq}`,
   postingArchive: (id: string) => `/api/postings/${id}/archive`,
+  /** 공고별 제출 기록(설계 6.6). */
+  postingSubmissions: (id: string) => `/api/postings/${id}/submissions`,
   positions: '/api/positions',
   position: (id: string) => `/api/positions/${id}`,
   positionReferences: (id: string) => `/api/positions/${id}/references`,
@@ -47,6 +49,8 @@ export const API = {
   selfIntroductions: '/api/self-introductions',
   selfIntroduction: (id: string) => `/api/self-introductions/${id}`,
   selfIntroductionConfirm: (id: string) => `/api/self-introductions/${id}/confirm`,
+  /** 계정당 작성 기준 하나(설계 6.7). */
+  writingGuide: '/api/writing-guide',
   experiences: '/api/experiences',
   experience: (id: string) => `/api/experiences/${id}`,
   experienceReview: (id: string) => `/api/experiences/${id}/review`,

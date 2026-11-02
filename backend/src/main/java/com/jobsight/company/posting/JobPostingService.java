@@ -2,6 +2,8 @@ package com.jobsight.company.posting;
 
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
+import com.jobsight.company.common.OwnerLock;
+import com.jobsight.company.submission.SubmissionService;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.Company;
 import com.jobsight.company.company.CompanyAttributes;
@@ -37,15 +39,21 @@ public class JobPostingService {
     private final CompanyRepository companyRepository;
     private final PositionRepository positionRepository;
     private final CurrentUser currentUser;
+    private final OwnerLock ownerLock;
+    private final SubmissionService submissions;
 
     public JobPostingService(JobPostingRepository repository,
                              CompanyRepository companyRepository,
                              PositionRepository positionRepository,
-                             CurrentUser currentUser) {
+                             CurrentUser currentUser,
+                             OwnerLock ownerLock,
+                             SubmissionService submissions) {
         this.repository = repository;
         this.companyRepository = companyRepository;
         this.positionRepository = positionRepository;
         this.currentUser = currentUser;
+        this.ownerLock = ownerLock;
+        this.submissions = submissions;
     }
 
     /**
@@ -79,10 +87,11 @@ public class JobPostingService {
 
     @Transactional
     public JobPostingResponse create(JobPostingRequest request) {
+        lockIfSubmitting(request.status());
         JobPosting posting = new JobPosting(currentUser.id(), toAttributes(request));
         JobPosting saved = repository.save(posting);
         syncPositions(saved, request.positions());
-        return toResponses(List.of(saved)).get(0);
+        return withSubmission(saved, null);
     }
 
     /**
@@ -91,20 +100,43 @@ public class JobPostingService {
      */
     @Transactional
     public JobPostingResponse update(UUID id, JobPostingRequest request) {
+        lockIfSubmitting(request.status());
         repository.setLocalLockTimeout();
         JobPosting posting = repository.findOwnedForUpdate(id, currentUser.id())
                 .orElseThrow(() -> new ResourceNotFoundException(id));
+        ApplicationStatus before = posting.getStatus();
         posting.update(toAttributes(request));
         JobPosting saved = repository.save(posting);
         syncPositions(saved, request.positions());
-        return toResponses(List.of(saved)).get(0);
+        return withSubmission(saved, before);
     }
 
     @Transactional
     public JobPostingResponse changeStatus(UUID id, ApplicationStatus status) {
+        lockIfSubmitting(status);
         JobPosting posting = findOwned(id);
+        ApplicationStatus before = posting.getStatus();
         posting.changeStatus(status);
-        return toResponses(List.of(repository.save(posting))).get(0);
+        return withSubmission(repository.save(posting), before);
+    }
+
+    /**
+     * SUBMITTED 로 가는 쓰기는 제출 기록 스냅샷을 읽으므로 트랜잭션 맨 앞에서 계정 잠금(T9)을 잡는다 — 공고 행 잠금보다 먼저
+     * (설계 1.4 잠금 규약 1·3). 그 밖의 상태 변경은 잡지 않는다.
+     */
+    private void lockIfSubmitting(ApplicationStatus status) {
+        if (status == ApplicationStatus.SUBMITTED) ownerLock.acquire(currentUser.id());
+    }
+
+    /**
+     * 상태 전이 한 곳(설계 6.6, 10.7 R53): 결과가 SUBMITTED 면 제출 기록(LINKED)을 남기고 응답에 {id, level} 을 싣는다.
+     * 웹 드래그(changeStatus)·공고 수정·공고 생성이 모두 여기를 지난다. 직무 동기화를 flush 한 뒤 JDBC 스냅샷을 읽는다.
+     */
+    private JobPostingResponse withSubmission(JobPosting saved, ApplicationStatus before) {
+        JobPostingResponse response = toResponses(List.of(saved)).get(0);
+        if (saved.getStatus() != ApplicationStatus.SUBMITTED) return response;
+        repository.flush();
+        return response.withSubmission(submissions.recordLinked(saved.getId(), before != ApplicationStatus.SUBMITTED));
     }
 
     @Transactional

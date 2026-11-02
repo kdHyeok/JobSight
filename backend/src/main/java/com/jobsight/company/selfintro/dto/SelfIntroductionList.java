@@ -1,5 +1,6 @@
 package com.jobsight.company.selfintro.dto;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import com.jobsight.company.selfintro.Competency;
 
 import java.time.Instant;
@@ -22,7 +23,9 @@ public record SelfIntroductionList(String fallback, int total, boolean complete,
     public record Item(UUID id, String question, String answerPreview, String answer, int answerLength,
                        Instant updatedAt, Double score, List<String> matchedTerms, String sourceStatus,
                        Sources sources, List<QuestionType> questionTypes, List<UsedFor> alreadyUsedFor,
-                       long version, List<ExperienceUse> experiences) {}
+                       long version, List<ExperienceUse> experiences,
+                       /** 재현 정보(설계 6.7): {writingGuideVersion, experiences, searchContext}. self_intro_get 에서만, MCP 로 저장한 적 없으면 null. */
+                       @JsonRawValue String writingContext) {}
 
     /**
      * 작성 근거: 이 답변에 쓴 경험과 그때 본 개정(저장된 쌍 그대로, 설계 6.8). trust 는 '확정'·'AI 기록'.
@@ -45,6 +48,9 @@ public record SelfIntroductionList(String fallback, int total, boolean complete,
     /**
      * 이 답변을 이미 낸 회사·직무. sameCompany 는 필터로 회사가 정해졌을 때만 true/false 다.
      * otherCompanySpecific 이 true 면 다른 회사용 지원동기·포부·직무 이해 답변이다 — 본문을 재사용하지 않는다.
+     * submission(설계 6.6): 그 공고에 사용자가 확인한 제출 기록이 있으면 "사용자가 확인한 제출본"·"접수 근거와 대조한 제출본"
+     * (그 스냅샷에 든 답변만 싣는다), 없으면 지금 연결로 판단한 "제출본 미확인"이다.
      */
-    public record UsedFor(UUID companyId, String company, String position, Boolean sameCompany, boolean otherCompanySpecific) {}
+    public record UsedFor(UUID companyId, String company, String position, Boolean sameCompany, boolean otherCompanySpecific,
+                          String submission) {}
 }

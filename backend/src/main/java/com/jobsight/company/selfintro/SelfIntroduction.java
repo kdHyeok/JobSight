@@ -115,6 +115,14 @@ public class SelfIntroduction {
     @Column(name = "source_revision", nullable = false)
     private long sourceRevision;
 
+    /**
+     * MCP 로 저장할 때의 재현 정보(설계 6.7): 작성 기준 version, 쓴 경험 개정, 클라이언트가 넘긴 검색 context. JSON 문자열.
+     * 웹 저장은 건드리지 않는다 — "작성 당시" AI 가 본 기준이다.
+     */
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "writing_context", columnDefinition = "jsonb")
+    private String writingContext;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -213,4 +221,6 @@ public class SelfIntroduction {
     public long getSourceRevision() { return sourceRevision; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public String getWritingContext() { return writingContext; }
+    public void recordWritingContext(String json) { this.writingContext = json; }
 }

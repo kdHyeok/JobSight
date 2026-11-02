@@ -160,7 +160,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 ## 도구 계약과 검증 범위
 
-도구는 58개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 50개)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
+도구는 59개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 51개. 제출·작성 기준 트랙의 `writing_guide_get` 이 더해졌다)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
 도구명·동작별 사용법은 스킬에 있다. `/mcp`의 `tools/list`는 연결 계정의 scope/역할에 따라 목록을 줄인다.
 관리자 도구 8개는 일반 사용자에게 노출하지 않으며 직접 이름을 호출해도 거부한다.
 **MCP 전용 모양은 `McpActions` 의 별도 메서드로 만든다.** 도구가 REST 컨트롤러를 감싸므로 응답 모양을 바꾸면 웹에도 그대로 적용되기 때문이다

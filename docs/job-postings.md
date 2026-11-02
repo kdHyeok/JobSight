@@ -58,6 +58,9 @@ app_users
    직무는 id 로 먼저, id 가 없으면 이름(`Company.nameKey`: 공백 제거·소문자)으로 남은 기존 직무와 맞춘다. **같은 직무를 지웠다 다시 만들지 않는다** — 직무 행이 바뀌면 `resume_positions`(와 2단계의 자소서 직무 연결)가 `ON DELETE CASCADE` 로 끊긴다. 어느 항목과도 맞지 않은 기존 직무만 삭제한다. — `JobPostingService.syncPositions`, 설계 1.4 T3
 10. **공고 수정은 공고 행을 잠근다.** `JobPostingService.update` 는 `findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽은 뒤 직무를 맞춘다. 잠금이 없으면 병렬 수정 두 건이 같은 기존 직무 목록을 읽고 같은 새 직무를 두 행으로 만든다. 직무 id 에 걸린 연결(이력서, 2단계 자소서 written_for)이 중복·삭제 경쟁으로 오염된다. 3초 안에 잠금을 못 얻으면 409 `BUSY`(docs/backend.md).
 
+11. **제출 기록은 상태 전이 한 곳에서 남긴다**(설계 6.6). 쓰기의 결과가 `SUBMITTED` 면 `JobPostingService.withSubmission` 이 `SubmissionService.recordLinked` 를 부른다 — 웹 드래그(`changeStatus`)·공고 수정·공고 생성(MCP `posting_set_status`·`posting_update`·`posting_create` 포함) 셋 모두다. 응답의 `submission{id, level}` 로 돌려준다. `SUBMITTED` 로 가는 쓰기는 트랜잭션 맨 앞에서 `OwnerLock`(T9)을 잡고, 스냅샷은 직무 동기화를 flush 한 뒤 JDBC 로 읽는다.
+12. **LINKED 는 제출본이 아니다.** 상태 변경 때 남는 기록은 "기록 당시 연결 자료"(그 공고 직무에 연결된 이력서 `resume_positions` 와 그 직무용 자소서 written_for)다. 실제로 낸 것은 웹 공고 상세의 "실제로 낸 것 확인"으로 사용자가 고른다(`USER_CONFIRMED`, 접수 메일 발췌·번호·근거 파일을 붙이면 `RECEIPT_VERIFIED`). 기록은 고치지 않고 쌓으며, 같은 공고·수준에서 스냅샷 내용의 SHA-256(`content_hash`)이 같으면 새로 쓰지 않고 기존 기록을 돌려준다.
+
 ## 진입점
 
 | 무엇 | 어디 |
@@ -67,6 +70,7 @@ app_users
 | 절차 | `posting/RecruitmentStep` (공고에 임베드, cascade) · `PATCH /postings/{id}/steps/{seq}` |
 | 직무 | `position/Position` `PositionService` `PositionController` — `ApiPaths.POSITIONS` |
 | 참고 정보 | `reference/ReferenceItem` `ReferenceService` `ReferenceController` — `ApiPaths.REFERENCES` · 연결은 `PUT /positions/{id}/references` |
+| 제출 기록 | `V28__submissions_and_guides.sql` · `submission/SubmissionService` `SubmissionController` — `ApiPaths.POSTING_SUBMISSIONS` · 화면 `SubmissionRecords.vue`(공고 상세, 관심·작성 중에는 숨김) |
 | 기업 자동 생성 | `JobPostingService.resolveCompany()` + `CompanyRepository.findByOwnerIdAndNameKey()` |
 | 화면 | `PostingBoard`(홈 `/`, 관심 공고/진행 중/보관함 칸반) · `PositionBoard`(`/positions`) · `CompanyWorkspace`(`/companies`) |
 | Markdown 메모 | `MarkdownTextarea.vue`(Tab·들여쓰기) · `MarkdownMemo.vue`(안전한 렌더링) · `utils/markdown.ts`(지원 문법 파서) |
@@ -82,7 +86,9 @@ app_users
 GET/POST        /api/postings              ?archived=
 GET/PUT/DELETE  /api/postings/{id}         PUT 의 positions·steps 는 null=유지, 배열=그 목록으로 맞춤(불변 조건 9)
                                            GET 상세만 linkedSelfIntroCount(소속 직무 전부, 함정 참고)
-PATCH           /api/postings/{id}/status  {status}
+PATCH           /api/postings/{id}/status  {status}   결과가 SUBMITTED 면 응답에 submission{id, level}(PUT·POST 도 같다)
+GET/POST        /api/postings/{id}/submissions  제출 기록 최신순 / 제출본 확인 {level USER_CONFIRMED|RECEIPT_VERIFIED,
+                                           resumeIds, selfIntroIds, receiptExcerpt?, receiptNumber?, receiptAttachmentIds?}
 PATCH           /api/postings/{id}/steps/{seq}  {result}
 PATCH           /api/postings/{id}/archive ?archived=
 GET             /api/positions             ?q=  (이름·팀·회사·스택 부분 일치)
@@ -102,6 +108,7 @@ cd frontend && npm run type-check && npm test
 ```
 
 자동 검증(불변 조건 9): `JobPostingServiceTest` 의 null 유지·이름 맞춤·`[]` 비움 3건과 id 경로 4건(id 우선 맞춤, id 로 이름 변경·빠진 직무 삭제·지원 직무 비움, 이름 맞춤 시 지원 직무 유지, 같은 id 반복·남의 id), `JobPostingUpdateIntegrationTest`(Testcontainers — 이름만 보낸 수정과 웹 폼처럼 id 를 담은 수정 뒤에도 직무 id 와 `resume_positions` 행이 맞는 이름에 남는다. 불변 조건 10: 같은 새 직무를 담은 병렬 수정 두 건 뒤에도 그 직무 행은 하나다), `McpToolsTest.postingUpdateKeepsOmittedListsAsNull`(MCP 가 빠진 배열을 null 로 넘기고 "전체 교체" 문구를 붙이지 않는다), `PostingForm.spec.ts`(폼은 다 지운 직무·절차를 `[]` 로 보낸다).
+제출 기록(불변 조건 11·12): `SubmissionIntegrationTest`(Testcontainers — 같은 상태 변경 두 번·SUBMITTED→DRAFTING→SUBMITTED 에도 기록 하나, 웹 드래그·공고 수정·공고 생성·MCP `posting_set_status` 모두 LINKED, 뒤늦게 SUBMITTED 로 만든 공고는 빈 LINKED, 사용자 확인·접수 근거 첨부와 그 첨부의 삭제 409, 계정 삭제 cascade, 남의 공고·이력서·파일 404·400, alreadyUsedFor 의 제출본 우선), `Submission.spec.ts`(LINKED 는 "미확인"으로 보이고, 확인 폼은 최근 기록 문서를 처음 선택으로 둔다). 변형 확인: `changeStatus` 가 기록을 부르지 않게 하면 3건이 실패한다.
 삭제 전 자소서 안내: `SelfIntroductionRelationsIntegrationTest.detailCountsSelfIntrosWhoseDirectSourceADeleteWouldDrop`(Testcontainers — 직무 1·2, 공고 2(두 직무에 연결한 문항은 한 번), 기업 3, 목록 null, MCP `*_get` 같은 값, 남의 직무·공고·기업 id 로 세면 0), `PositionBoard.spec.ts`(목록에서 고른 직무는 상세를 불러 N 개 안내, 0 이면 문구 없음), `CompanyWorkspace.spec.ts`(상세에 실린 수를 다시 부르지 않음).
 
 로그인 뒤 브라우저에서:
@@ -149,6 +156,10 @@ cd frontend && npm run type-check && npm test
 - **웹 공고 폼은 직무·절차를 항상 배열로 보낸다**(행을 다 지우면 `[]`). 필드를 빼면 서버가 "유지"로 읽어 지운 행이 조용히 남는다. `PostingForm.spec.ts` 가 이것을 지킨다. 전에는 폼이 지웠다 같은 이름으로 다시 추가한 직무가 새 행이 됐지만, 이제는 기존 행을 다시 쓴다.
 - 공고 PUT의 절차 목록은 배열이면 값 기준 통째 교체(null 이면 유지)지만, 영속화할 때는 같은 순번의 엔티티를 갱신하고 끝에서만 추가·삭제한다. 전부 지운 뒤 다시 넣으면 Hibernate flush 순서에 따라 `(posting_id, seq)` 고유키가 충돌한다.
 - 절차 `seq` 는 재정렬하면 바뀐다. step 을 밖에서 id 로 참조하지 않는다.
+- **이미 SUBMITTED 인 공고에 SUBMITTED 를 다시 보내면 새 기록을 만들지 않고 최신 LINKED 를 돌려준다.** 제출 뒤 고친 이력서가 "기록 당시"로 섞이지 않게 하려는 것이다. 이 기능 전부터 SUBMITTED 였던 공고는 LINKED 가 없으므로 그때 한 번 남는다. SUBMITTED → 다른 상태 → SUBMITTED 는 전이라 다시 찍지만, 내용이 같으면 `content_hash` 로 같은 기록이다.
+- **`submissions.recorded_at` 은 `clock_timestamp()` 다(`now()` 금지).** `now()` 는 트랜잭션 시작 시각이라 `OwnerLock` 을 기다린 트랜잭션의 기록이 먼저 커밋된 기록보다 이르게 찍혀, 최신 LINKED·최신 확인 제출본(alreadyUsedFor)·목록 최신순이 직렬 순서와 뒤집힌다. 잠금 아래에서 쓴 시각이면 순서가 맞다. `SubmissionIntegrationTest.recordedAtIsWriteTimeNotTransactionStart` 가 지킨다.
+- `SubmissionRecords.vue` 는 공고 서랍에서 다른 공고로 바뀌어도 같은 인스턴스다. 목록 요청은 번호로 늦게 온 이전 응답을 버리고, `postingId` 가 바뀌면 "실제로 낸 것 확인" 편집을 닫는다(이전 공고용 선택이 새 공고의 확인 기록으로 저장되지 않게).
+- 공고를 지우면 제출 기록도 CASCADE 로 사라진다(`submissions` → `job_postings (id, owner_id)`). 기록은 공고에 딸린 자료다.
 - **`?focus=` 는 먼저 이미 불러온 목록에서 찾는다.** 기업·직무는 전체 목록을 받으므로 항상 찾힌다. 공고만 진행 중/보관함으로 나뉘어 있어, 목록에 없으면 `getPosting(id)` 로 한 번 더 읽는다 — 보관된 공고로도 건너뛸 수 있다. 지워졌거나 남의 것이면 조용히 넘어간다.
 - `reference_items.related_position_id` 는 직무를 지우면 NULL 이 된다(ON DELETE SET NULL). 카드는 제목으로 남는다.
 - **‘떼기’ 와 ‘삭제’ 는 다르다.** 떼기는 `PUT /positions/{id}/references` 로 이 직무의 연결만 끊고, 삭제는 `DELETE /references/{id}` 로 참고 정보 자체를 지워 **붙어 있던 모든 직무에서 사라진다**(`position_references` ON DELETE CASCADE). 삭제만 확인 대화상자를 받는다.

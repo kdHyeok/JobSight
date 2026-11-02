@@ -9,6 +9,7 @@ import com.jobsight.company.posting.JobPostingController;
 import com.jobsight.company.reference.ReferenceController;
 import com.jobsight.company.resume.ResumeController;
 import com.jobsight.company.selfintro.SelfIntroductionController;
+import com.jobsight.company.writingguide.WritingGuideController;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Validator;
 import org.springframework.http.ResponseEntity;
@@ -37,7 +38,7 @@ public class McpTools {
     public McpTools(CompanyController companies, JobPostingController postings, PositionController positions,
                     ReferenceController references, CompanyContentController contents, ResumeController resumes,
                     SelfIntroductionController selfIntroductions, AdminController admin, AuthController auth,
-                    McpActions actions, ObjectMapper mapper, Validator validator) {
+                    WritingGuideController writingGuide, McpActions actions, ObjectMapper mapper, Validator validator) {
         this.mapper = mapper; this.validator = validator;
         register("company_list", companies, "findAll", true, false);
         register("company_get", companies, "findById", true, false);
@@ -94,6 +95,8 @@ public class McpTools {
         register("experience_index", actions, "indexExperiences", true, false);
         register("experience_search", actions, "searchExperiences", true, false);
         register("experience_save", actions, "saveExperience", false, false);
+        // 작성 기준은 읽기만 한다(설계 6.7). 수정은 웹에서.
+        register("writing_guide_get", writingGuide, "get", true, false);
         register("account_get", actions, "me", true, false);
         register("account_update", auth, "updateMe", false, true);
         register("admin_users_list", admin, "findUsers", true, false);

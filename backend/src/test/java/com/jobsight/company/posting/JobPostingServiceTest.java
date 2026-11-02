@@ -40,12 +40,14 @@ class JobPostingServiceTest {
     @Mock private CompanyRepository companyRepository;
     @Mock private PositionRepository positionRepository;
     @Mock private CurrentUser currentUser;
+    @Mock private com.jobsight.company.common.OwnerLock ownerLock;
+    @Mock private com.jobsight.company.submission.SubmissionService submissions;
 
     private JobPostingService service;
 
     @BeforeEach
     void setUp() {
-        service = new JobPostingService(repository, companyRepository, positionRepository, currentUser);
+        service = new JobPostingService(repository, companyRepository, positionRepository, currentUser, ownerLock, submissions);
     }
 
     private static JobPosting posting(Instant deadline, ApplicationStatus status) {

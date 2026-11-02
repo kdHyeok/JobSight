@@ -4,6 +4,7 @@ import com.jobsight.company.posting.ApplicationStatus;
 import com.jobsight.company.posting.EmploymentType;
 import com.jobsight.company.posting.JobPosting;
 import com.jobsight.company.position.dto.PositionSummary;
+import com.jobsight.company.submission.SubmissionService;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,7 +32,12 @@ public record JobPostingResponse(
         boolean archived,
         Instant createdAt,
         Instant updatedAt,
-        Long linkedSelfIntroCount
+        Long linkedSelfIntroCount,
+        /**
+         * 이 응답을 만든 쓰기(상태 변경·생성·수정)의 결과가 SUBMITTED 일 때만 채운다 — 그때 남긴(또는 이미 있던) 제출 기록
+         * {id, level}. LINKED 는 "기록 당시 연결 자료"이지 제출본이 아니다(설계 6.6). 그 밖의 응답은 null.
+         */
+        SubmissionService.Ref submission
 ) {
     public static JobPostingResponse of(JobPosting posting, String companyName, List<PositionSummary> positions) {
         List<StepResponse> steps = IntStream.range(0, posting.getSteps().size())
@@ -54,6 +60,7 @@ public record JobPostingResponse(
                 posting.isArchived(),
                 posting.getCreatedAt(),
                 posting.getUpdatedAt(),
+                null,
                 null
         );
     }
@@ -64,6 +71,11 @@ public record JobPostingResponse(
      */
     public JobPostingResponse withLinkedSelfIntroCount(long count) {
         return new JobPostingResponse(id, companyId, companyName, title, postingUrl, employmentType, deadlineAt, status,
-                qualifications, memo, targetPositionId, steps, positions, archived, createdAt, updatedAt, count);
+                qualifications, memo, targetPositionId, steps, positions, archived, createdAt, updatedAt, count, submission);
+    }
+
+    public JobPostingResponse withSubmission(SubmissionService.Ref value) {
+        return new JobPostingResponse(id, companyId, companyName, title, postingUrl, employmentType, deadlineAt, status,
+                qualifications, memo, targetPositionId, steps, positions, archived, createdAt, updatedAt, linkedSelfIntroCount, value);
     }
 }

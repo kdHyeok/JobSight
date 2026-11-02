@@ -58,7 +58,7 @@ public record ResumeContent(
     }
 
     /** 첨부 id 가 들어가는 칸 전부. 프런트 SECTIONS 의 kind 'file' 필드와 같은 목록이다 — docs/attachments.md. */
-    List<String> attachmentIds() {
+    public List<String> attachmentIds() {
         List<String> ids = new ArrayList<>();
         if (basic != null) ids.add(basic.portfolioFileId());
         rows(educations).forEach(row -> { ids.add(row.diplomaId()); ids.add(row.transcriptId()); });

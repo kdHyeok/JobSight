@@ -25,10 +25,10 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx + 임베딩 �
 | `backend/**` | [docs/backend.md](docs/backend.md) — 버전 함정 포함 |
 | `frontend/src/**` | [docs/frontend.md](docs/frontend.md) |
 | 로그인 세션·리프레시 토큰 | [docs/auth-session.md](docs/auth-session.md) |
-| 기업 정보·채용공고 도메인 | [docs/job-postings.md](docs/job-postings.md) |
+| 기업 정보·채용공고 도메인, 제출 기록 | [docs/job-postings.md](docs/job-postings.md) |
 | 기업 뉴스·유튜브 자료 | [docs/company-content.md](docs/company-content.md) |
 | 이력서(버전·섹션 JSON) | [docs/resumes.md](docs/resumes.md) |
-| 이력서 연결 직무·자기소개 문항 | [docs/self-introductions.md](docs/self-introductions.md) |
+| 이력서 연결 직무·자기소개 문항, 작성 기준 | [docs/self-introductions.md](docs/self-introductions.md) |
 | 이력서 증빙 파일 첨부 | [docs/attachments.md](docs/attachments.md) |
 | 경험 원본·개정·이력서 행 앵커·가져오기(`/api/experiences`, `experience_save`, 웹 `/experiences`) | [docs/experiences.md](docs/experiences.md) |
 | 경험 찾기·목차·missing(3단계), 의미 검색·`embedder/`·임베딩 스위퍼(5단계), 이력서 조회 지연 | [구현·모델·실측](docs/experience-graph-search.md) · [설계(5단계까지 적용)](docs/02-design/features/experience-graph.design.md) |
