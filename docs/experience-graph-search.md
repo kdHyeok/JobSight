@@ -1,6 +1,33 @@
 # 경험 그래프 검색 (첫 구상 — 저장·검색 부분은 폐기, 모델 실측만 유효)
 
-> **폐기 안내 (2026-11-02)**: 저장 구조와 검색은 [설계](02-design/features/experience-graph.design.md) 가 대체했다. 제목에 **(폐기)** 가 붙은 절 — `stories` 정본, `links` 다형 간선, `pgvector` 컬럼, V22 예약, 단계 — 은 그 설계의 D3·D11 로 폐기됐으니 구현 근거로 쓰지 않는다. pgvector 사용 여부는 설계 5단계에서 `REAL[]` 과 다시 비교한다. **지금도 유효한 절**: 모델 선택 근거, 실측, 함정(512토큰 잘림·배칭). 착수할 때 이 문서를 그 설계 기준의 한 화면 문서로 다시 쓴다.
+> **폐기 안내 (2026-11-02)**: 저장 구조와 검색은 [설계](02-design/features/experience-graph.design.md) 가 대체했다. 제목에 **(폐기)** 가 붙은 절 — `stories` 정본, `links` 다형 간선, `pgvector` 컬럼, V22 예약, 단계 — 은 그 설계의 D3·D11 로 폐기됐으니 구현 근거로 쓰지 않는다. pgvector 사용 여부는 설계 5단계에서 `REAL[]` 과 다시 비교한다. **지금도 유효한 절**: 바로 아래 "지금 동작하는 것"(3단계 구현), 모델 선택 근거, 실측, 함정(512토큰 잘림·배칭). 착수할 때 이 문서를 그 설계 기준의 한 화면 문서로 다시 쓴다.
+
+## 지금 동작하는 것 — 3단계 경험 찾기 (2026-11-02)
+
+**목적.** 공고를 저장하지 않고 평가하고, 내 경험의 원문 출처(이력서 행)를 돌려준다. 이력서를 새로 만들 때 다른 이력서에만 있는 경험을 빠뜨리지 않게 한다. 경험 원본 테이블(4단계)이 아직 없어 **자료원은 계정의 이력서 경험 행뿐**이다.
+
+**진입점** (`backend/.../company/experience/`, MCP 전용 — REST·화면 없음)
+- `KeyNormalizer`: NFKC·소문자·기호 제거 키, 별칭 시드 사전(`k8s→kubernetes`, `자바→java` …), 본문 언급 추출, 연월 숫자. 4단계가 `title_key`·`skills` 를 채울 때 그대로 쓴다.
+- `RowGroups`: 묶음 함수 `(kind, key(제목), 시작 연월 숫자)`. 목차·missing·검색이 모두 이것 하나를 쓴다.
+- `ExperienceService`: `experience_index`(`{counts, complete, nextCursor, experiences: [], unlinkedRows}`), `resume_get(view=outline)`, `missing`.
+- `ExperienceSearch`: `experience_search`. 신호 LEXICAL(`common/Bm25`)·REQUIREMENT(다섯 칸 가중 × `ln(1+N/df)`), 가중 RRF(k=60), `uncovered`·`qualifications`·`context`.
+- 등록은 `McpTools`(`experience_index`·`experience_search`, `resume_get`·`resume_create` 는 `McpActions` 래퍼).
+
+**불변 조건**
+1. 검색은 아무것도 저장하지 않는다(`job_postings`·`positions` 행 수 그대로). 고른 공고만 `posting_create` 한다.
+2. 모든 조회는 현재 계정으로 한정한다. 남의 직무·이력서 id 는 404, 남의 이력서 행은 후보가 아니다.
+3. `uncovered` 는 지원자격·요구 역량 칸의 요구만. 우대·기술 환경 나열은 결핍이 아니다. `QUALIFICATION` 요구는 점수에 넣지 않고 `qualifications[]` 로만 돌려준다.
+4. 응답 모양은 4단계와 같다. 4단계는 `experiences[]`·`experienceId` 를 채우고 자료원만 바꾼다(형식 유지, 전환 경로).
+5. 같은 `context`(dataVersion·searchConfig)와 같은 질의면 같은 결과다. 동점은 묶음 키 순. 신호·가중을 바꾸면 `ExperienceSearch.SEARCH_CONFIG` 를 올린다.
+
+**실행·검증**: `KeyNormalizerTest`(별칭·대소문자·공백·기호·연월), `ExperienceSearchIntegrationTest`(Testcontainers — 저장 안 함, 기술 환경만 있는 키 제외, 없는 필수 기술 포함, 지원 자격 분리, `missing`·outline·목차·쪽 나누기, 소유자 격리), `McpCallLogTest`(호출 로그 한 줄).
+
+**함정**
+- 요구 `text` 는 기술 이름("Kafka")이다. 문장을 넣으면 키가 `kafka사용경험` 이 되어 아무것도 맞지 않는다. 문장은 `quote` 에 둔다.
+- 제목이 빈 행은 묶지 않는다 — 목차·missing·검색 어디에도 안 나온다.
+- 한글 별칭은 본문 부분 문자열로 찾는다. 흔한 단어와 겹치는 별칭(예: "뷰", "노드")은 넣지 않았다. 사전에 넣기 전에 오탐을 생각한다.
+- `coverageIncomplete` 는 3단계에서 늘 true 다. AI 는 결핍을 단정하지 않는다.
+- 묶음은 이력서 JSON 을 매번 전부 읽는다(계정당 이력서 수십 개 규모 가정). 느려지면 4단계 `resume_experiences` 표로 옮긴다.
 
 ## 목적 (폐기 — 첫 구상)
 

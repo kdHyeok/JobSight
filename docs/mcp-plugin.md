@@ -160,7 +160,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 ## 도구 계약과 검증 범위
 
-도구는 54개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 46개)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
+도구는 56개(`McpTools` 의 `register` 수, 일반 사용자에게 보이는 것은 48개)이며 입력은 `id`, `companyId`, `postingId`, `q`, `archived`, `seq`, `section`, `index`, `request`처럼 실제 메서드 인자를 사용한다.
 도구명·동작별 사용법은 스킬에 있다. `/mcp`의 `tools/list`는 연결 계정의 scope/역할에 따라 목록을 줄인다.
 관리자 도구 8개는 일반 사용자에게 노출하지 않으며 직접 이름을 호출해도 거부한다.
 **MCP 전용 모양은 `McpActions` 의 별도 메서드로 만든다.** 도구가 REST 컨트롤러를 감싸므로 응답 모양을 바꾸면 웹에도 그대로 적용되기 때문이다
@@ -174,6 +174,15 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 뉴스/유튜브·참고 상세 조회는 소유자 필터된 목록에서 ID를 찾는다.
 MCP용 `position_create`는 기존 `PositionService` 트랜잭션에서 공고 소유권을 검증하고 직무를 추가한다.
 이력서는 `resume_list/get/create/update/copy/delete`, 자기소개는 `self_intro_list/get/create/update/delete`로 전체 CRUD를 제공한다.
+**경험 찾기(설계 3단계)**: `experience_index`(경험 목차)와 `experience_search`(공고를 저장하지 않는 경험 찾기)는 읽기 전용 `McpActions` 도구다
+(`McpActions.indexExperiences`·`searchExperiences` → `experience/ExperienceService`·`ExperienceSearch`). 자료원은 계정의 이력서 경험 행을
+`(종류, 제목 키, 시작 연월 숫자)` 로 묶은 것뿐이라 `experience_index.experiences` 는 늘 `[]` 다. 4단계는 같은 응답 형식에 경험 원본을 자료원으로
+더한다(형식 유지, 전환 경로). `resume_get` 과 `resume_create` 도 `McpActions` 래퍼(`getResume`·`createResume`)로 옮겼다: 응답 맨 앞에
+`missing`(다른 이력서에만 있는 경험 묶음)을 붙이고, `resume_get({id, view:"outline"})` 은 `{id, name, version, sections, missing, unlinkedRows}` 개요다.
+웹 REST 이력서 응답은 그대로다. `experience_search` 입력은 `request` 로 감싼다(`McpTools` 가 record 인자만 검증하기 때문). 계약과 함정은
+docs/experience-graph-search.md "지금 동작하는 것".
+**호출 로그**: `tools/call` 마다 `McpController` 가 `mcp tool=<이름> target=<첫 UUID 인자|-> ms=<n> result=<OK|오류 코드>` 를 INFO 한 줄로 남긴다.
+인자·응답 본문은 남기지 않는다(개인 자료). 설계 0단계 측정과 쓰이지 않는 도구 정리(6단계)의 근거다. `docker compose logs backend | grep "mcp tool="` 로 본다.
 자기소개 생성은 이력서 또는 직무 1개 이상, 수정은 0개 허용이고, 수정의 `positionIds`·`questionTypes` 는 null=유지다. **MCP 요청은 이 두 목록을
 기존 연결에 더하기만 한다**(사용자가 확정한 연결·AI 기록을 지우지 못함, 빼기는 웹 전용 — `docs/decisions.md` D4). `self_intro_update` 에는
 다른 update 도구처럼 "전체 교체" 문구가 붙지만 이 두 필드의 규칙은 도구 설명(`SelfIntroductionController`)에 있다.

@@ -5,6 +5,12 @@ import com.jobsight.company.auth.dto.MeResponse;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.companycontent.CompanyContentService;
 import com.jobsight.company.companycontent.dto.CompanyContentResponse;
+import com.jobsight.company.experience.ExperienceKind;
+import com.jobsight.company.experience.ExperienceSearch;
+import com.jobsight.company.experience.ExperienceService;
+import com.jobsight.company.experience.dto.ExperienceSearchRequest;
+import com.jobsight.company.experience.dto.ExperienceSearchResult;
+import com.jobsight.company.experience.dto.ExperienceViews;
 import com.jobsight.company.position.PositionService;
 import com.jobsight.company.position.dto.PositionRequest;
 import com.jobsight.company.position.dto.PositionResponse;
@@ -13,6 +19,7 @@ import com.jobsight.company.reference.dto.ReferenceResponse;
 import com.jobsight.company.resume.ResumeContent;
 import com.jobsight.company.resume.ResumeSection;
 import com.jobsight.company.resume.ResumeService;
+import com.jobsight.company.resume.dto.ResumeRequest;
 import com.jobsight.company.resume.dto.ResumeResponse;
 import com.jobsight.company.resume.dto.ResumeRowRequest;
 import com.jobsight.company.resume.dto.ResumeRowResult;
@@ -25,6 +32,10 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.*;
+import tools.jackson.databind.ObjectMapper;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Only the small operations that do not have an existing REST controller method. */
@@ -37,11 +48,77 @@ public class McpActions {
     private final CompanyContentService contents;
     private final ResumeService resumes;
     private final SelfIntroductionAgentService selfIntros;
+    private final ExperienceService experiences;
+    private final ExperienceSearch experienceSearch;
+    private final ObjectMapper mapper;
     public McpActions(CurrentUser current, AppUserService users, PositionService positions,
                       ReferenceService references, CompanyContentService contents, ResumeService resumes,
-                      SelfIntroductionAgentService selfIntros) {
+                      SelfIntroductionAgentService selfIntros, ExperienceService experiences,
+                      ExperienceSearch experienceSearch, ObjectMapper mapper) {
         this.current = current; this.users = users; this.positions = positions;
         this.references = references; this.contents = contents; this.resumes = resumes; this.selfIntros = selfIntros;
+        this.experiences = experiences; this.experienceSearch = experienceSearch; this.mapper = mapper;
+    }
+
+    /** resume_get 의 보기. outline 은 목차·missing 대조용 개요다(설계 5.3). */
+    public enum ResumeView { full, outline }
+
+    @Operation(summary = "이력서 상세",
+            description = "view 기본 full: content 전체(웹 REST 상세와 같은 필드)이고 응답 맨 앞에 missing(다른 이력서에만 있는 "
+                    + "경험 행 묶음 — 이 이력서에 같은 (종류, 제목, 시작 연월) 행이 없는 것)을 붙인다. "
+                    + "view=outline: {id, name, version, sections[{section, count, rows[{index, experienceId, title, period}]}], "
+                    + "missing[], unlinkedRows[]} 개요다. 이력서를 고치거나 새로 만들기 전에 outline 의 missing 을 사용자와 대조한다. "
+                    + "missing 항목 {kind, title, period, experienceId(아직 null), maybeUnlinked(제목은 같고 기간만 다른 행이 이 이력서에 있음), "
+                    + "sources[{resumeId, resumeName, section, index, resumeVersion}]}. 타인 소유이거나 없으면 404.")
+    public Object getResume(@PathVariable UUID id, @RequestParam(required = false) ResumeView view) {
+        if (view == ResumeView.outline) return experiences.outline(id);
+        return withMissing(resumes.findById(id));
+    }
+
+    @Operation(summary = "이력서 생성",
+            description = "content 를 비우면 빈 문서로 만든다. 응답 맨 앞의 missing 은 다른 이력서에는 있는데 이 이력서에 없는 경험 행 묶음이다 — "
+                    + "생성 때 빠뜨린 프로젝트가 없는지 사용자에게 확인한다(SKILL 이력서 절차).")
+    public Map<String, Object> createResume(@Valid @RequestBody ResumeRequest request) {
+        return withMissing(resumes.create(request));
+    }
+
+    @Operation(summary = "경험 목차",
+            description = "응답은 늘 {counts, complete, nextCursor, experiences, unlinkedRows} 모양이다. 지금(3단계)은 경험 원본이 없어 "
+                    + "experiences 는 늘 [] 이고, unlinkedRows 는 계정의 모든 이력서 경험 행(프로젝트·경력·대내외활동·교육이수)을 "
+                    + "(종류, 제목, 시작 연월)로 묶은 [{kind, title, period, sources[{resumeId, resumeName, section, index, resumeVersion}]}] 다. "
+                    + "정렬은 PROJECT → CAREER → ACTIVITY → TRAINING. counts 는 {unlinkedRows(행 수), groups(묶음 수), "
+                    + "unknownSourceSelfIntros(직접 출처 없는 자소서 수)}. kinds 로 종류를 거르고, limit 기본·최대 60, "
+                    + "complete:false 면 nextCursor 를 cursor 로 넘겨 다음 쪽을 읽는다. 이력서 작성 전 이 목차와 대조한다.")
+    public ExperienceViews.Index indexExperiences(@RequestParam(required = false) List<ExperienceKind> kinds,
+                                                  @RequestParam(required = false) Integer cursor,
+                                                  @RequestParam(required = false) Integer limit) {
+        return experiences.index(kinds, cursor, limit);
+    }
+
+    @Operation(summary = "지원 맞춤 경험 찾기",
+            description = "공고를 저장하지 않고 내 경험 행의 원문 출처를 찾는다. request 에 positionId(등록 직무) 또는 "
+                    + "posting(저장하지 않는 공고의 다섯 칸: qualifications 지원자격, responsibilities 담당업무, requiredSkills 요구 역량, "
+                    + "preferredSkills 우대 역량, techStack 기술 환경 목록, 그리고 companyName·positionName) 중 하나를 넣는다. "
+                    + "고르기 전의 공고는 posting 으로 넘기고 posting_create 하지 않는다. requirements 는 공고 원문에서 뽑은 요구 "
+                    + "[{text: 기술 이름, field: 칸, kind: SKILL|QUALIFICATION, quote: 공고 문장}] 다 — 내 자료에 없는 기술도 넣어야 "
+                    + "uncovered 에 나온다. 빼면 서버가 기술 환경과 일반 사전으로 뽑고 warnings 에 REQUIREMENTS_PARTIAL 을 준다. "
+                    + "QUALIFICATION(경력 연수·학력·고용 조건)은 점수에 넣지 않고 qualifications[] 로 돌려준다. "
+                    + "results[] 는 이력서 행 묶음(type RESUME_ROW)이고 source{resumeId, resumeName, section, index, resumeVersion, "
+                    + "textHash, excerpt} 가 원문 위치, alsoIn 은 같은 묶음의 다른 이력서 행, why 는 맞은 신호(REQUIREMENT 의 키·칸·인용, "
+                    + "LEXICAL 의 순위·단어)다. uncovered 는 지원자격·요구 역량 칸의 요구 중 받쳐 줄 행이 없는 것(우대·기술 환경 나열은 "
+                    + "결핍으로 보지 않는다). coverageIncomplete:true 면 결핍을 단정하지 않는다. limit 기본 8, 최대 20.")
+    public ExperienceSearchResult searchExperiences(@Valid @RequestBody ExperienceSearchRequest request) {
+        return experienceSearch.search(request);
+    }
+
+    /** 응답 맨 앞에 missing 요약을 붙인다(설계 5.3·5.5). REST 응답은 바꾸지 않는다 — 웹은 이 필드를 모른다. */
+    private Map<String, Object> withMissing(ResumeResponse resume) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("missing", experiences.missing(resume.id()));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> fields = mapper.convertValue(resume, Map.class);
+        body.putAll(fields);
+        return body;
     }
     @Operation(summary = "연결된 내 계정 조회")
     public MeResponse me() { return MeResponse.of(users.findById(current.id()).orElseThrow()); }

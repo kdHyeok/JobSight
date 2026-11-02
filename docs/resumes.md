@@ -60,7 +60,7 @@ content = {
 | JSON 변환 | `ResumeService.write()/read()` — Boot 4 의 Jackson 3 `tools.jackson.databind.ObjectMapper` |
 | 화면 | `ResumeBoard.vue`(`/resumes` 목록 카드, `?focus=<id>` 면 편집기) · `ResumeEditor.vue`(전체 페이지 편집기) · `ResumeSection.vue`(섹션 하나 = 행 카드 + ↑↓× + 행 추가) |
 | 섹션 정의 | `frontend/src/types/resume.ts` 의 `SECTIONS` — 라벨·필드·입력 종류. 섹션을 더하려면 **여기와 `ResumeContent`, `ResumeSection` enum 세 곳** |
-| MCP 도구 | `McpTools` 의 `resume_*` 10개. 행 도구는 `McpActions` → `ResumeService.addRow/updateRow/deleteRow/updateBasic`. 입력 `ResumeRowRequest`(합집합 record) + `ResumeSection`(enum). 행 도구는 이력서 전체가 아니라 개요 `ResumeRowResult{id, version, section, count, index, row}` 를 돌려준다 — `docs/mcp-plugin.md` |
+| MCP 도구 | `McpTools` 의 `resume_*` 10개. 행 도구는 `McpActions` → `ResumeService.addRow/updateRow/deleteRow/updateBasic`. 입력 `ResumeRowRequest`(합집합 record) + `ResumeSection`(enum). 행 도구는 이력서 전체가 아니라 개요 `ResumeRowResult{id, version, section, count, index, row}` 를 돌려준다 — `docs/mcp-plugin.md`. `resume_get`·`resume_create` 는 `McpActions` 래퍼라 응답 맨 앞에 `missing`(다른 이력서에만 있는 경험 묶음)이 붙고, `resume_get(view=outline)` 은 개요다 — `docs/experience-graph-search.md` |
 
 ## API 요약 (상세는 Swagger)
 

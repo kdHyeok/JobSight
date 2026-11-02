@@ -70,8 +70,9 @@ public class McpTools {
         register("company_content_update", contents, "update", false, true);
         register("company_content_delete", contents, "delete", false, true);
         register("resume_list", resumes, "findAll", true, false);
-        register("resume_get", resumes, "findById", true, false);
-        register("resume_create", resumes, "create", false, false);
+        // 상세·생성은 응답 머리에 missing 을 붙이는 래퍼다(설계 5.3, 3단계). 웹 REST 응답은 그대로다.
+        register("resume_get", actions, "getResume", true, false);
+        register("resume_create", actions, "createResume", false, false);
         register("resume_update", resumes, "update", false, true);
         register("resume_copy", resumes, "copy", false, false);
         register("resume_delete", resumes, "delete", false, true);
@@ -87,6 +88,9 @@ public class McpTools {
         register("self_intro_create", selfIntroductions, "create", false, false);
         register("self_intro_update", selfIntroductions, "update", false, true);
         register("self_intro_delete", selfIntroductions, "delete", false, true);
+        // 경험 목차·검색(3단계): 이력서 행 묶음이 자료원이다. 4단계는 형식을 유지하고 자료원만 경험 원본으로 바꾼다.
+        register("experience_index", actions, "indexExperiences", true, false);
+        register("experience_search", actions, "searchExperiences", true, false);
         register("account_get", actions, "me", true, false);
         register("account_update", auth, "updateMe", false, true);
         register("admin_users_list", admin, "findUsers", true, false);

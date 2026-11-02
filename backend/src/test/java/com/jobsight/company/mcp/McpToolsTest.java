@@ -35,6 +35,8 @@ class McpToolsTest {
     AppUserService users = mock(AppUserService.class);
     AppSettingService settings = mock(AppSettingService.class);
     AdminStatsService stats = mock(AdminStatsService.class);
+    com.jobsight.company.experience.ExperienceService experiences = mock(com.jobsight.company.experience.ExperienceService.class);
+    com.jobsight.company.experience.ExperienceSearch experienceSearch = mock(com.jobsight.company.experience.ExperienceSearch.class);
     CurrentUser current = new CurrentUser();
     McpTools tools;
     McpPrincipal principal = new McpPrincipal(UUID.randomUUID(), Set.copyOf(McpOAuthConfig.SCOPES));
@@ -45,17 +47,20 @@ class McpToolsTest {
                 new PositionController(positions), new ReferenceController(references), new CompanyContentController(contents),
                 new ResumeController(resumes), new SelfIntroductionController(selfIntroductions),
                 new AdminController(users, settings, stats, current), new AuthController(users, settings, current, null, null),
-                new McpActions(current, users, positions, references, contents, resumes, selfIntroAgent),JsonMapper.builder().findAndAddModules().build(), validator);
+                new McpActions(current, users, positions, references, contents, resumes, selfIntroAgent, experiences,
+                        experienceSearch, JsonMapper.builder().findAndAddModules().build()),
+                JsonMapper.builder().findAndAddModules().build(), validator);
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
                 List.of(new SimpleGrantedAuthority("ROLE_USER"))));
     }
     @AfterEach void clear() { SecurityContextHolder.clearContext(); }
 
     @Test void catalogScopesAndAdministratorRoleAreEnforced() {
-        assertThat(tools.list(principal)).hasSize(46);
+        assertThat(tools.list(principal)).hasSize(48);
         assertThat(tools.list(principal)).extracting(tool -> tool.get("name")).contains(
                 "resume_list", "resume_get", "resume_create", "resume_update", "resume_copy", "resume_delete",
-                "self_intro_list", "self_intro_get", "self_intro_create", "self_intro_update", "self_intro_delete");
+                "self_intro_list", "self_intro_get", "self_intro_create", "self_intro_update", "self_intro_delete",
+                "experience_index", "experience_search");
         assertThat(tools.list(new McpPrincipal(principal.userId(), Set.of(McpOAuthConfig.READ))))
                 .allSatisfy(tool -> assertThat(((Map<?, ?>) tool.get("annotations")).get("readOnlyHint")).isEqualTo(true));
         assertThatThrownBy(() -> tools.call("admin_users_list", Map.of(), principal))
@@ -79,6 +84,9 @@ class McpToolsTest {
     }
     @Test void resumeAndSelfIntroductionInputsReachServices() {
         UUID resumeId = UUID.randomUUID();
+        when(resumes.create(any())).thenReturn(new com.jobsight.company.resume.dto.ResumeResponse(resumeId,
+                "플러그인 테스트 이력서", ResumeContent.empty(), List.of(), 0L, Map.of(),
+                java.time.Instant.EPOCH, java.time.Instant.EPOCH));
         tools.call("resume_create", Map.of("request", Map.of(
                 "name", "플러그인 테스트 이력서",
                 "content", Map.of("basic", Map.of("name", "테스트 사용자")),
