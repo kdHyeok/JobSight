@@ -178,7 +178,7 @@ onMounted(reload)
 </script>
 
 <template>
-  <template v-if="props.focus && current">
+  <template v-if="props.focus === current?.id && current && !loading">
     <div v-if="notice || loadError" class="page page-notice">
       <div v-if="notice" class="notice success" role="status">{{ notice }}</div>
       <div v-if="loadError" class="notice error" role="alert">{{ loadError }}</div>
