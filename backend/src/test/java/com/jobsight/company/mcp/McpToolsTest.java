@@ -87,7 +87,7 @@ class McpToolsTest {
                 && request.content().basic().name().equals("테스트 사용자")));
 
         when(selfIntroductions.create(any())).thenReturn(new com.jobsight.company.selfintro.dto.SelfIntroductionResponse(
-                UUID.randomUUID(), List.of(resumeId), "지원 동기", "협업 경험", java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of()));
+                UUID.randomUUID(), List.of(resumeId), "지원 동기", "협업 경험", java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of(), 0L));
         tools.call("self_intro_create", Map.of("request", Map.of(
                 "resumeIds", List.of(resumeId.toString()), "question", "지원 동기", "answer", "협업 경험")), principal);
         tools.call("self_intro_list", Map.of("q", "협업", "resumeId", resumeId.toString()), principal);
@@ -112,7 +112,7 @@ class McpToolsTest {
         verifyNoInteractions(selfIntroductions);
 
         when(selfIntroductions.create(any())).thenReturn(new com.jobsight.company.selfintro.dto.SelfIntroductionResponse(
-                id, List.of(), "지원 동기", null, java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of()));
+                id, List.of(), "지원 동기", null, java.time.Instant.EPOCH, java.time.Instant.EPOCH, List.of(), List.of(), 0L));
         tools.call("self_intro_create", Map.of("request", Map.of("positionIds", List.of(positionId.toString()),
                 "questionTypes", List.of("MOTIVATION", "ASPIRATION"), "question", "지원 동기")), principal);
         verify(selfIntroductions).create(argThat(request -> request.resumeIds() == null

@@ -7,6 +7,7 @@ import {
   listSelfIntroductions,
   updateSelfIntroduction,
 } from '../api/self-introductions'
+import { ApiClientError } from '../api/http'
 import { listResumes } from '../api/resumes'
 import { listPositions } from '../api/positions'
 import type { Position } from '../types/position'
@@ -32,6 +33,11 @@ const loading = ref(true)
 const saving = ref(false)
 const errorMessage = ref('')
 const editingId = ref<string | null>(null)
+/**
+ * 편집기를 연 때 읽은 version. 저장의 expectedVersion 이다(불변 조건 12). 확정(✓)이 올린 값은 이어받지만,
+ * 409 뒤에 목록을 다시 불러와도 바꾸지 않는다 — 바뀐 내용을 확인하지 않은 초안으로 덮어쓰지 않게 다시 열어야 한다.
+ */
+const editingVersion = ref(0)
 const deleteTarget = ref<SelfIntroduction | null>(null)
 const draft = reactive<Required<SelfIntroductionPayload>>({ resumeIds: [], question: '', answer: '', positionIds: [], questionTypes: [] })
 const resumeQuery = ref('')
@@ -102,6 +108,7 @@ async function confirmLink(payload: SelfIntroductionConfirmPayload) {
   try {
     const updated = await confirmSelfIntroduction(editingId.value, payload)
     items.value = items.value.map((item) => (item.id === updated.id ? updated : item))
+    if (editingId.value === updated.id) editingVersion.value = updated.version
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 기록을 확정하지 못했습니다.'
   }
@@ -206,6 +213,7 @@ function openNew() {
 function openEdit(item: SelfIntroduction) {
   resetResumeSearch()
   editingId.value = item.id
+  editingVersion.value = item.version
   Object.assign(draft, {
     resumeIds: [...item.resumeIds],
     question: item.question,
@@ -230,11 +238,13 @@ async function save() {
   errorMessage.value = ''
   const payload: SelfIntroductionPayload = { ...draft, question: draft.question.trim() }
   try {
-    if (editingId.value) await updateSelfIntroduction(editingId.value, payload)
+    if (editingId.value) await updateSelfIntroduction(editingId.value, { ...payload, expectedVersion: editingVersion.value })
     else await createSelfIntroduction(payload)
     closeEditor()
     await load()
   } catch (error) {
+    // 409(다른 곳에서 먼저 저장·저장 처리 중): 초안은 남기고 목록만 새로 읽어 바뀐 내용을 보여 준다.
+    if (error instanceof ApiClientError && error.status === 409) await load()
     errorMessage.value = error instanceof Error ? error.message : '자기소개 문항을 저장하지 못했습니다.'
   } finally {
     saving.value = false

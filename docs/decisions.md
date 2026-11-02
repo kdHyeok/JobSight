@@ -255,3 +255,18 @@ AI 클라이언트가 직무 이름만 보내거나 직무를 빼고 보내면 �
 전에는 같은 예외가 경로마다 다른 코드였다. REST 의 `ResourceNotFoundException` 은 자원과 무관하게 `COMPANY_NOT_FOUND`(메시지도 "기업을 찾을 수 없습니다")였고, MCP 는 `NOT_FOUND` 였다. MCP 의 마지막 `RuntimeException` 분기는 로그 없이 `INTERNAL_ERROR` 를 돌려줬다. 잠금 대기 초과(55P03)·교착(40P01)은 두 경로 모두 500 `INTERNAL_ERROR` 였다. 그래서 같은 실패가 화면과 AI 에 다르게 보였고, 다시 시도하면 되는 경합이 서버 오류로 보였다.
 이제 `common/ApiErrors.translate` 하나가 공통 도메인 예외의 상태·코드·메시지를 정하고 `GlobalExceptionHandler` 와 `McpController` 가 함께 쓴다. 404 는 `NOT_FOUND`, 잠금 경합은 409 `BUSY`, 나머지는 ERROR 로그와 `INTERNAL_ERROR` 다. 검증 400·본문 파싱(REST)과 `INVALID_ARGUMENT`·JSON-RPC 오류(MCP)는 각자의 진입점에 남긴다.
 REST 404 코드 변경은 계약 변경이다. 바꾸기 전에 `COMPANY_NOT_FOUND` 를 찾았다. 프런트(`frontend/src` 는 `code` 를 문자열로 비교하지 않는다), `scripts/smoke.sh`(상태코드만 본다), 테스트·문서·스킬 어디에도 쓰는 곳이 없었다. 404 메시지는 "항목을 찾을 수 없습니다: <id>" 로 고쳐 두 경로가 같다. — docs/mcp-plugin.md, docs/backend.md
+
+## 자기소개 문항도 이력서처럼 version 으로 덮어쓰기를 막는다 (2026-11-02)
+
+2단계에서 자소서는 AI(MCP)와 웹이 같은 답변을 고치는 대상이 됐다. 전에는 마지막 저장이 이겼다. AI 가 읽은 뒤 사용자가 웹에서 답변을 고치면, AI 의 저장이 사용자의 수정을 조용히 지웠다.
+그래서 이력서(V22, 불변 조건 8·10)와 같은 보호를 둔다: `self_introductions.version`(V24), 쓰기는 행 잠금(`lock_timeout 3s`, `SELF_INTRO_BUSY`) 뒤 버전 확인, 다르면 409 `SELF_INTRO_STALE`, 오류에 지금 버전을 싣지 않음.
+`expectedVersion` 은 웹 PUT 에서 필수다. MCP 는 `resumeIds`·`question`·`answer` 를 바꿀 때만 필수이고 직무·문항 유형 연결만 더할 때는 선택이다 — MCP 수정은 연결을 더하기만 하므로(D4) 남이 저장한 내용을 지우지 못한다.
+사용자가 승인한 범위는 "question 이나 answer 를 바꿀 때"였다. `resumeIds` 도 넣은 이유: 이 필드는 MCP 에서도 전체 교체라, 예전에 읽은 목록으로 보내면 웹에서 붙인 이력서 연결이 조용히 빠진다.
+확정(✓)도 version 을 올린다. 그래서 웹 편집기는 확정 응답의 version 을 이어받고, 같은 문항의 수정·확정을 줄 세운다. — docs/self-introductions.md 불변 조건 12
+
+## 공고·직무·기업 삭제 때 자소서 직접 출처는 CASCADE 로 두고, 지우기 전에 알린다 (2026-11-02)
+
+`self_introduction_positions` 는 직무 삭제 때 `ON DELETE CASCADE` 다(V23). 공고·기업 삭제와 마지막 직무 삭제도 직무를 지우므로, 그 직무용으로 쓴 자소서가 조용히 "출처 미상"이 됐다.
+FK 를 `SET NULL` 류로 바꾸거나 직무를 소프트 삭제하는 안은 택하지 않았다. 지운 직무를 가리키는 출처는 회사·직무 이름도 함께 잃어 쓸 데가 없고, 모든 직무 조회에 삭제 조건이 붙는다.
+대신 직무·공고·기업 상세에 응답 전용 `linkedSelfIntroCount`(소유자 조건 count 한 문장)를 싣고, 웹 삭제 확인창과 SKILL 의 삭제 규칙이 그 수를 알린다. 새 경로는 만들지 않았다.
+공고 수정 폼에서 직무를 빼는 경우는 알리지 않는다. 필요해지면 폼이 빠지는 직무의 상세를 읽어 저장 전에 알린다. — docs/self-introductions.md 함정, docs/job-postings.md 함정

@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ResumeQuestions from '../components/ResumeQuestions.vue'
 import * as api from '../api/self-introductions'
+import { ApiClientError } from '../api/http'
 
 vi.mock('../api/self-introductions', () => ({
   listSelfIntroductions: vi.fn(),
@@ -16,6 +17,7 @@ const item = {
   answer: '기존 답변',
   createdAt: '',
   updatedAt: '',
+  version: 2,
 }
 
 describe('이력서 자기소개 문항', () => {
@@ -92,7 +94,29 @@ describe('이력서 자기소개 문항', () => {
     await flushPromises()
 
     expect(api.updateSelfIntroduction).toHaveBeenCalledWith('intro', {
-      resumeIds: ['resume', 'other'], question: '수정 질문', answer: '수정 답변',
+      resumeIds: ['resume', 'other'], question: '수정 질문', answer: '수정 답변', expectedVersion: 2,
     })
+  })
+
+  it('과거 문항 연결도 읽은 version 을 보내고, 409 면 안내를 띄우고 목록을 다시 부른다', async () => {
+    const past = { ...item, id: 'past', resumeIds: ['other'], version: 7 }
+    vi.mocked(api.listSelfIntroductions).mockImplementation(async (q = '') => (q ? [past] : [item]))
+    vi.mocked(api.updateSelfIntroduction).mockRejectedValueOnce(
+      new ApiClientError(409, 'SELF_INTRO_STALE', '다른 곳에서 먼저 저장했습니다.'))
+    const wrapper = mount(ResumeQuestions, { props: { resumeId: 'resume' } })
+    await flushPromises()
+
+    await wrapper.get('.question-search input').setValue('협업')
+    await wrapper.get('.question-search').trigger('submit')
+    await flushPromises()
+    vi.mocked(api.listSelfIntroductions).mockClear()
+    await wrapper.get('.question-results .button').trigger('click')
+    await flushPromises()
+
+    expect(api.updateSelfIntroduction).toHaveBeenCalledWith('past', {
+      question: past.question, answer: past.answer, resumeIds: ['other', 'resume'], expectedVersion: 7,
+    })
+    expect(wrapper.get('[role="alert"]').text()).toBe('다른 곳에서 먼저 저장했습니다.')
+    expect(api.listSelfIntroductions).toHaveBeenCalledWith('', 'resume')
   })
 })

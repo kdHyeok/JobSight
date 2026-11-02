@@ -12,6 +12,7 @@ import com.jobsight.company.selfintro.dto.SelfIntroductionConfirmRequest;
 import com.jobsight.company.selfintro.dto.SelfIntroductionCreateRequest;
 import com.jobsight.company.selfintro.dto.SelfIntroductionResponse;
 import com.jobsight.company.selfintro.dto.SelfIntroductionUpdateRequest;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,9 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -73,26 +76,35 @@ public class SelfIntroductionService {
         LinkSource source = source();
         value.linkPositions(positionIds, source);
         value.linkQuestionTypes(codes(request.questionTypes()), source);
-        return SelfIntroductionResponse.of(repository.save(value));
+        // flush 뒤의 version 을 싣는다. id 를 미리 정한 엔티티라 save 가 merge 로 가고, 연결 컬렉션을 옮겨 담는 flush 에서
+        // version 이 한 번 더 오른다 — flush 전에 응답을 만들면 MCP 가 생성 직후 수정할 때 거짓 409 를 받는다.
+        return SelfIntroductionResponse.of(repository.saveAndFlush(value));
     }
 
     /**
      * positionIds·questionTypes 가 null 이면 연결을 건드리지 않는다. 남는 연결은 출처를 유지한다(웹 저장이 AI 기록을 확정하지 않는다).
      * 웹은 보낸 목록으로 맞추고(✗ 해제), MCP 는 더하기만 한다(addOnly).
+     * 행을 잠근 뒤 version 을 확인한다. 웹은 expectedVersion 필수, MCP 는 이력서·질문·답변을 바꿀 때만 필수다 —
+     * 더하기만 하는 연결은 남이 저장한 내용을 지우지 못한다(불변 조건 12).
      */
     @Transactional
     public SelfIntroductionResponse update(UUID id, SelfIntroductionUpdateRequest request) {
-        SelfIntroduction value = findOwned(id);
+        SelfIntroduction value = lockOwned(id);
         LinkSource source = source();
+        String question = request.question().trim();
+        String answer = normalize(request.answer());
+        boolean rewritesText = !question.equals(value.getQuestion()) || !Objects.equals(answer, value.getAnswer())
+                || !new HashSet<>(orEmpty(request.resumeIds())).equals(value.getResumeIds());
+        checkVersion(value, request.expectedVersion(), source == LinkSource.USER || rewritesText);
         Set<UUID> resumeIds = requireOwnedResumes(request.resumeIds());
         Set<UUID> positionIds = request.positionIds() == null ? null
                 : addOnly(requireOwnedPositions(request.positionIds()), value.getPositionLinks(), source, MAX_POSITIONS, "지원 직무");
         Set<Competency> types = request.questionTypes() == null ? null
                 : addOnly(codes(request.questionTypes()), value.getQuestionTypes(), source, MAX_TYPES, "문항 유형");
-        value.update(resumeIds, request.question().trim(), normalize(request.answer()));
+        value.update(resumeIds, question, answer);
         if (positionIds != null) value.linkPositions(positionIds, source);
         if (types != null) value.linkQuestionTypes(types, source);
-        return SelfIntroductionResponse.of(repository.save(value));
+        return SelfIntroductionResponse.of(repository.saveAndFlush(value));
     }
 
     /**
@@ -111,14 +123,17 @@ public class SelfIntroductionService {
         return wanted;
     }
 
-    /** 웹의 ✓. 확정 도구는 MCP 에 없다 — 설계 3절 규칙 3. */
+    /**
+     * 웹의 ✓. 확정 도구는 MCP 에 없다 — 설계 3절 규칙 3. 연결만 바꿔도 version 이 오르므로(컬렉션 변경) 같은 잠금을 타고,
+     * 응답에 새 version 을 싣는다. 화면은 이 값을 다음 저장의 expectedVersion 으로 쓴다.
+     */
     @Transactional
     public SelfIntroductionResponse confirm(UUID id, SelfIntroductionConfirmRequest request) {
-        SelfIntroduction value = findOwned(id);
+        SelfIntroduction value = lockOwned(id);
         if (!value.confirm(orEmpty(request.positionIds()), orEmpty(request.questionTypes()))) {
             throw new ApiRuleException(HttpStatus.NOT_FOUND, "LINK_NOT_FOUND", "연결되지 않은 직무나 문항 유형은 확정할 수 없습니다.");
         }
-        return SelfIntroductionResponse.of(repository.save(value));
+        return SelfIntroductionResponse.of(repository.saveAndFlush(value));
     }
 
     @Transactional
@@ -188,6 +203,34 @@ public class SelfIntroductionService {
     private SelfIntroduction findOwned(UUID id) {
         return repository.findByIdAndOwnerId(id, currentUser.id())
                 .orElseThrow(() -> new ResourceNotFoundException(id));
+    }
+
+    /** 쓰기 경로의 조회. 행을 잠가 웹·MCP·확정이 동시에 와도 서로를 덮지 않게 한다 — 이력서와 같은 모양(docs/resumes.md 불변 조건 10). */
+    private SelfIntroduction lockOwned(UUID id) {
+        try {
+            repository.setLocalLockTimeout();
+            return repository.findOwnedForUpdate(id, currentUser.id())
+                    .orElseThrow(() -> new ResourceNotFoundException(id));
+        } catch (PessimisticLockingFailureException exception) {
+            throw new ApiRuleException(HttpStatus.CONFLICT, "SELF_INTRO_BUSY",
+                    "같은 자기소개 문항의 다른 저장을 처리 중입니다. 잠시 후 다시 읽고 시도해 주세요.");
+        }
+    }
+
+    /**
+     * 예전에 읽은 답변으로 덮어쓰지 않게 한다 — 불변 조건 12. 오류에 지금 version 을 싣지 않는다.
+     * 실어 주면 클라이언트가 바뀐 내용을 확인하지 않고 그 값으로 다시 보낼 수 있다.
+     */
+    private static void checkVersion(SelfIntroduction value, Long expected, boolean required) {
+        if (expected == null) {
+            if (!required) return;
+            throw new ApiRuleException(HttpStatus.BAD_REQUEST, "VERSION_REQUIRED",
+                    "expectedVersion 이 필요합니다. 자기소개 문항을 다시 읽고 그 version 을 보내세요.");
+        }
+        if (expected != value.getVersion()) {
+            throw new ApiRuleException(HttpStatus.CONFLICT, "SELF_INTRO_STALE",
+                    "다른 곳에서 먼저 저장했습니다. 자기소개 문항을 다시 불러와 바뀐 내용을 확인한 뒤 저장하세요.");
+        }
     }
 
     private LinkSource source() {

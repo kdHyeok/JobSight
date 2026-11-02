@@ -12,10 +12,12 @@ import java.util.UUID;
 /**
  * 웹 REST 응답. 목록도 이것이다 — 웹은 목록의 answer 를 그대로 PUT 하므로 답변은 항상 전문이다(설계 5.1).
  * positionLinks·questionTypes 는 편집기의 직무 칩과 "AI 기록" 확정에 쓰는 뒤에 붙인 필드다.
+ * version 은 다음 수정의 expectedVersion 이다(불변 조건 12). 쓰기 응답에는 저장 뒤의 새 값이 실린다.
  */
 public record SelfIntroductionResponse(UUID id, List<UUID> resumeIds, String question, String answer,
                                        Instant createdAt, Instant updatedAt,
-                                       List<PositionLinkView> positionLinks, List<QuestionTypeView> questionTypes) {
+                                       List<PositionLinkView> positionLinks, List<QuestionTypeView> questionTypes,
+                                       long version) {
     public record PositionLinkView(UUID positionId, LinkSource source) {}
     public record QuestionTypeView(Competency code, LinkSource source) {}
 
@@ -25,6 +27,7 @@ public record SelfIntroductionResponse(UUID id, List<UUID> resumeIds, String que
                 value.getPositionLinks().stream().map(link -> new PositionLinkView(link.positionId(), link.source()))
                         .sorted(Comparator.comparing(PositionLinkView::positionId)).toList(),
                 value.getQuestionTypes().stream().map(link -> new QuestionTypeView(link.code(), link.source()))
-                        .sorted(Comparator.comparing(QuestionTypeView::code)).toList());
+                        .sorted(Comparator.comparing(QuestionTypeView::code)).toList(),
+                value.getVersion());
     }
 }

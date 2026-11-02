@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.http.HttpStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -51,7 +53,7 @@ class SelfIntroductionServiceTest {
     void setUp() {
         service = new SelfIntroductionService(repository, resumeRepository, positionRepository, currentUser);
         lenient().when(currentUser.id()).thenReturn(OWNER_ID);
-        lenient().when(repository.save(any())).thenAnswer(invocation -> {
+        lenient().when(repository.saveAndFlush(any())).thenAnswer(invocation -> {
             SelfIntroduction value = invocation.getArgument(0);
             value.onCreate();
             return value;
@@ -91,7 +93,7 @@ class SelfIntroductionServiceTest {
         assertThat(validator.validate(new SelfIntroductionCreateRequest(null, null, null, "질문", null))).hasSize(1);
         assertThat(validator.validate(new SelfIntroductionCreateRequest(null, List.of(UUID.randomUUID()), null, "질문", null)))
                 .isEmpty();
-        assertThat(validator.validate(new SelfIntroductionUpdateRequest(List.of(), null, null, "질문", null))).isEmpty();
+        assertThat(validator.validate(new SelfIntroductionUpdateRequest(List.of(), null, null, "질문", null, 0L))).isEmpty();
     }
 
     /** 웹 세션 요청이 만든 연결은 USER 다. 직무만 있어도 만들 수 있다. */
@@ -134,7 +136,7 @@ class SelfIntroductionServiceTest {
 
         assertThatThrownBy(() -> service.create(new SelfIntroductionCreateRequest(null, List.of(foreign), null, "질문", null)))
                 .isInstanceOf(ResourceNotFoundException.class).hasMessageContaining(foreign.toString());
-        verify(repository, never()).save(any());
+        verify(repository, never()).saveAndFlush(any());
     }
 
     /**
@@ -147,11 +149,11 @@ class SelfIntroductionServiceTest {
         Position added = position("데이터");
         SelfIntroduction value = value("지원 동기", "답변");
         value.linkPositions(Set.of(aiLinked.getId()), LinkSource.AI);
-        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
         given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(aiLinked, added));
 
         var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
-                List.of(aiLinked.getId(), added.getId()), null, "지원 동기", "고친 답변"));
+                List.of(aiLinked.getId(), added.getId()), null, "지원 동기", "고친 답변", 0L));
 
         assertThat(updated.resumeIds()).isEmpty();
         assertThat(updated.positionLinks()).containsExactlyInAnyOrder(
@@ -168,11 +170,11 @@ class SelfIntroductionServiceTest {
         value.linkPositions(Set.of(positionId), LinkSource.AI);
         value.linkQuestionTypes(Set.of(Competency.MOTIVATION), LinkSource.AI);
         Resume resume = new Resume(OWNER_ID, "지원용", "{}");
-        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
         given(resumeRepository.findAllByIdInAndOwnerId(anyList(), eq(OWNER_ID))).willReturn(List.of(resume));
 
         var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(resume.getId()),
-                null, null, "지원 동기", "답변"));
+                null, null, "지원 동기", "답변", 0L));
 
         assertThat(updated.positionLinks()).containsExactly(
                 new SelfIntroductionResponse.PositionLinkView(positionId, LinkSource.AI));
@@ -193,11 +195,11 @@ class SelfIntroductionServiceTest {
         value.linkPositions(Set.of(confirmed.getId()), LinkSource.USER);
         value.linkQuestionTypes(Set.of(Competency.MOTIVATION), LinkSource.USER);
         given(currentUser.viaMcp()).willReturn(true);
-        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
         given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(added));
 
         var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
-                List.of(added.getId()), List.of(Competency.COLLABORATION), "지원 동기", "답변"));
+                List.of(added.getId()), List.of(Competency.COLLABORATION), "지원 동기", "답변", 0L));
 
         assertThat(updated.positionLinks()).containsExactlyInAnyOrder(
                 new SelfIntroductionResponse.PositionLinkView(confirmed.getId(), LinkSource.USER),
@@ -213,13 +215,13 @@ class SelfIntroductionServiceTest {
         SelfIntroduction value = value("지원 동기", "답변");
         value.linkQuestionTypes(Set.of(Competency.MOTIVATION, Competency.ASPIRATION, Competency.JOB_FIT), LinkSource.USER);
         given(currentUser.viaMcp()).willReturn(true);
-        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
 
         assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
-                null, List.of(Competency.COLLABORATION), "지원 동기", "답변")))
+                null, List.of(Competency.COLLABORATION), "지원 동기", "답변", 0L)))
                 .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("TOO_MANY_LINKS"));
         assertThat(value.getQuestionTypes()).hasSize(3);
-        verify(repository, never()).save(any());
+        verify(repository, never()).saveAndFlush(any());
     }
 
     /** 웹의 ✓: AI 기록을 USER 로 바꾼다. 연결돼 있지 않은 대상을 확정하려 하면 404 다. */
@@ -229,7 +231,7 @@ class SelfIntroductionServiceTest {
         SelfIntroduction value = value("지원 동기", "답변");
         value.linkPositions(Set.of(positionId), LinkSource.AI);
         value.linkQuestionTypes(Set.of(Competency.MOTIVATION), LinkSource.AI);
-        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
 
         var confirmed = service.confirm(value.getId(),
                 new SelfIntroductionConfirmRequest(List.of(positionId), List.of(Competency.MOTIVATION)));
@@ -241,6 +243,78 @@ class SelfIntroductionServiceTest {
         assertThatThrownBy(() -> service.confirm(value.getId(),
                 new SelfIntroductionConfirmRequest(List.of(UUID.randomUUID()), null)))
                 .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("LINK_NOT_FOUND"));
+    }
+
+    /** 웹 PUT 은 expectedVersion 이 필수다. 없으면 400, 다르면 409 이고 어느 쪽도 저장하지 않는다(불변 조건 12). */
+    @Test
+    void webUpdateRequiresMatchingVersion() {
+        SelfIntroduction value = value("지원 동기", "처음 답변");
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+
+        assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
+                null, null, "지원 동기", "고친 답변", null)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("VERSION_REQUIRED");
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                });
+        assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
+                null, null, "지원 동기", "고친 답변", 3L)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("SELF_INTRO_STALE");
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    // 지금 버전을 싣지 않는다 — 클라이언트가 다시 읽고 확인하게 한다.
+                    assertThat(e.getMessage()).doesNotContain("0");
+                });
+        assertThat(value.getAnswer()).isEqualTo("처음 답변");
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    /**
+     * MCP 는 질문·답변·이력서 목록을 바꿀 때만 expectedVersion 이 필수다. 직무·문항 유형을 더하기만 할 때는 생략해도 된다 —
+     * 더하기는 남이 저장한 내용을 지우지 못하기 때문이다. 보냈는데 다르면 409 다.
+     */
+    @Test
+    void mcpNeedsVersionOnlyWhenRewritingText() {
+        Resume resume = new Resume(OWNER_ID, "지원용", "{}");
+        Position added = position("프론트");
+        SelfIntroduction value = new SelfIntroduction(OWNER_ID, Set.of(resume.getId()), "지원 동기", "답변");
+        value.onCreate();
+        given(currentUser.viaMcp()).willReturn(true);
+        given(repository.findOwnedForUpdate(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        lenient().when(resumeRepository.findAllByIdInAndOwnerId(anyList(), eq(OWNER_ID))).thenReturn(List.of(resume));
+        lenient().when(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).thenReturn(List.of(added));
+
+        var linked = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(resume.getId()),
+                List.of(added.getId()), List.of(Competency.COLLABORATION), " 지원 동기 ", "답변 ", null));
+        assertThat(linked.positionLinks()).extracting(SelfIntroductionResponse.PositionLinkView::positionId)
+                .containsExactly(added.getId());
+
+        assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(resume.getId()),
+                null, null, "지원 동기", "AI 가 고친 답변", null)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("VERSION_REQUIRED"));
+        assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
+                null, null, "지원 동기", "답변", null)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("VERSION_REQUIRED"));
+        assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(resume.getId()),
+                List.of(added.getId()), null, "지원 동기", "답변", 7L)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("SELF_INTRO_STALE"));
+        assertThat(value.getAnswer()).isEqualTo("답변");
+    }
+
+    /** 잠금을 3초 안에 얻지 못하면 409 SELF_INTRO_BUSY 다. 확정도 같은 잠금을 탄다. */
+    @Test
+    void lockTimeoutIsBusy() {
+        UUID id = UUID.randomUUID();
+        given(repository.findOwnedForUpdate(id, OWNER_ID)).willThrow(new PessimisticLockingFailureException("lock timeout"));
+
+        assertThatThrownBy(() -> service.update(id, new SelfIntroductionUpdateRequest(List.of(), null, null, "질문", null, 0L)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("SELF_INTRO_BUSY");
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                });
+        assertThatThrownBy(() -> service.confirm(id, new SelfIntroductionConfirmRequest(null, null)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("SELF_INTRO_BUSY"));
+        verify(repository, org.mockito.Mockito.times(2)).setLocalLockTimeout();
     }
 
     private static Position position(String name) {

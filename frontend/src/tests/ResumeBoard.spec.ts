@@ -25,7 +25,7 @@ vi.mock('../api/positions', () => ({ listPositions: vi.fn() }))
 vi.mock('../api/self-introductions', () => ({ listSelfIntroductions: vi.fn() }))
 
 const resume = { id: 'resume', name: '이력서', content: {}, positionIds: [], createdAt: '', updatedAt: '' } as unknown as Resume
-const linked = [{ id: 'intro', resumeIds: ['resume'], question: '지원 동기', answer: '', createdAt: '', updatedAt: '' }]
+const linked = [{ id: 'intro', resumeIds: ['resume'], question: '지원 동기', answer: '', createdAt: '', updatedAt: '', version: 0 }]
 
 describe('이력서 편집기 열기', () => {
   beforeEach(() => {

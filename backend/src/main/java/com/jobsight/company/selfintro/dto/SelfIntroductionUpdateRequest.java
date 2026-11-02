@@ -11,6 +11,8 @@ import java.util.UUID;
 /**
  * 수정 요청. resumeIds·question·answer 는 보낸 값으로 바꾸고 연결 0개도 허용한다(직무가 지워져 연결이 없어진 문항도 고칠 수 있게).
  * positionIds·questionTypes 는 null 이면 유지, 배열이면 그 목록으로 맞춘다([] 는 비움) — 웹의 기존 저장 경로는 이 필드를 보내지 않는다.
+ * expectedVersion 은 읽은 문항의 version 이다. 웹은 필수, MCP 는 resumeIds·question·answer 를 바꿀 때 필수다
+ * (연결만 더할 때는 선택) — docs/self-introductions.md 불변 조건 12.
  */
 public record SelfIntroductionUpdateRequest(
         @NotNull(message = "이력서 목록은 필수입니다(연결을 모두 끊으려면 []).")
@@ -19,6 +21,7 @@ public record SelfIntroductionUpdateRequest(
         @Size(max = 3, message = "문항 유형은 3개 이하여야 합니다.") List<Competency> questionTypes,
         @NotBlank(message = "질문은 필수입니다.")
         @Size(max = 1000, message = "질문은 1,000자 이하여야 합니다.") String question,
-        @Size(max = 10000, message = "답변은 10,000자 이하여야 합니다.") String answer
+        @Size(max = 10000, message = "답변은 10,000자 이하여야 합니다.") String answer,
+        Long expectedVersion
 ) {
 }

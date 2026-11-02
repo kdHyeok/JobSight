@@ -4,6 +4,7 @@ import SelfIntroductionBoard from '../components/SelfIntroductionBoard.vue'
 import * as api from '../api/self-introductions'
 import { listResumes } from '../api/resumes'
 import { listPositions } from '../api/positions'
+import { ApiClientError } from '../api/http'
 import { highlightMatches } from '../utils/highlight'
 import type { Position } from '../types/position'
 import type { SelfIntroduction } from '../types/self-introduction'
@@ -34,6 +35,7 @@ const item = {
   answer: '역할을 나누고 진행했습니다.',
   createdAt: '2026-09-16T00:00:00Z',
   updatedAt: '2026-09-16T00:00:00Z',
+  version: 4,
 }
 const resumes = [
   { id: item.resumeIds[0], name: '백엔드 이력서', createdAt: item.createdAt, updatedAt: item.updatedAt },
@@ -137,10 +139,29 @@ describe('자기소개 문항과 연결 이력서', () => {
     await wrapper.get('[role="option"]').trigger('click')
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
+    // 읽어 온 version 을 함께 보낸다. 그사이 AI 가 저장했으면 덮어쓰지 않고 409 를 받는다(불변 조건 12).
     expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, {
       resumeIds: ['data'], question: item.question, answer: item.answer, positionIds: [], questionTypes: [],
+      expectedVersion: item.version,
     })
     expect(item.resumeIds).toEqual([resumes[0].id])
+  })
+
+  it('다른 곳에서 먼저 저장했으면(409) 안내를 띄우고 초안을 남긴 채 목록만 다시 불러온다', async () => {
+    const stale = new ApiClientError(409, 'SELF_INTRO_STALE', '다른 곳에서 먼저 저장했습니다. 자기소개 문항을 다시 불러와 바뀐 내용을 확인한 뒤 저장하세요.')
+    vi.mocked(api.updateSelfIntroduction).mockRejectedValueOnce(stale)
+    const wrapper = await mountBoard()
+    await wrapper.get('.intro-card .button').trigger('click')
+    const textareas = wrapper.findAll<HTMLTextAreaElement>('.intro-editor textarea')
+    await textareas[1].setValue('웹에서 고친 답변')
+    vi.mocked(api.listSelfIntroductions).mockClear()
+
+    await wrapper.get('.intro-editor form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toBe(stale.message)
+    expect(api.listSelfIntroductions).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll<HTMLTextAreaElement>('.intro-editor textarea')[1].element.value).toBe('웹에서 고친 답변')
   })
 
   it('직무만 골라도 새 문항을 만들고, 이력서도 직무도 없으면 생성을 막는다', async () => {
@@ -203,8 +224,9 @@ describe('자기소개 문항과 연결 이력서', () => {
       questionTypes: [{ code: 'MOTIVATION', source: 'AI' }],
     }
     vi.mocked(api.listSelfIntroductions).mockResolvedValue([aiRecorded])
+    // 확정도 version 을 올린다. 이어지는 저장은 확정 응답의 version 을 보내야 409 가 나지 않는다.
     vi.mocked(api.confirmSelfIntroduction).mockResolvedValue({
-      ...aiRecorded, positionLinks: [{ positionId: 'p-backend', source: 'USER' }],
+      ...aiRecorded, positionLinks: [{ positionId: 'p-backend', source: 'USER' }], version: item.version + 1,
     })
     const wrapper = await mountBoard()
     expect(wrapper.get('.intro-card').text()).toContain('에이회사 · 공채 · 백엔드 · AI 기록')
@@ -219,7 +241,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
     expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, expect.objectContaining({
-      positionIds: ['p-backend'], questionTypes: [],
+      positionIds: ['p-backend'], questionTypes: [], expectedVersion: item.version + 1,
     }))
   })
 

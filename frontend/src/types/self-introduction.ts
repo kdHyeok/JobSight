@@ -48,6 +48,8 @@ export interface SelfIntroduction {
   /** 이 답변을 어느 지원용으로 썼나(직접 출처). */
   positionLinks?: PositionLink[]
   questionTypes?: QuestionTypeLink[]
+  /** 저장(확정 포함)마다 오른다. 다음 수정의 expectedVersion 이다 — docs/self-introductions.md 불변 조건 12. */
+  version: number
 }
 
 /**
@@ -60,6 +62,11 @@ export interface SelfIntroductionPayload {
   answer: string
   positionIds?: string[]
   questionTypes?: Competency[]
+}
+
+/** 웹 수정은 읽어 온 version 이 필수다. 다르면 서버가 409 SELF_INTRO_STALE 로 거절한다. */
+export interface SelfIntroductionUpdatePayload extends SelfIntroductionPayload {
+  expectedVersion: number
 }
 
 /** 웹의 ✓: 이미 연결된 AI 기록을 확정한다. */

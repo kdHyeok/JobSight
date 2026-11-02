@@ -215,7 +215,7 @@ public class SelfIntroductionAgentService {
         List<String> matched = terms.stream().filter(term -> words.stream().anyMatch(word -> word.contains(term))).toList();
         return new SelfIntroductionList.Item(value.getId(), value.getQuestion(), preview, full ? value.getAnswer() : null,
                 answer.length(), value.getUpdatedAt(), score, matched, direct.isEmpty() ? "출처 미상" : "직접 출처",
-                new SelfIntroductionList.Sources(direct, indirect), types, usedFor);
+                new SelfIntroductionList.Sources(direct, indirect), types, usedFor, value.getVersion());
     }
 
     /**

@@ -29,6 +29,8 @@ OAuth가 필요하면 클라이언트의 연결 흐름을 사용한다. access t
   `resumeIds`·`question`·`answer` 는 전체 교체다.
 - 명시적으로 요청된 저장·변경만 실행한다. 삭제 전에 대상과 연결 삭제 범위를 알리고, 사용자의 삭제 요청이
   그 범위를 포함하는지 판단한다. 목록 조회·제안은 변경 권한을 뜻하지 않는다.
+  직무·공고·기업 삭제 전에는 `position_get`·`posting_get`·`company_get` 의 `linkedSelfIntroCount` 를 보고, 0보다 크면
+  "자기소개 N개의 직접 출처(어느 지원용) 연결이 함께 사라진다(답변은 남는다)"고 알린다. 목록 도구의 이 값은 null 이다.
 - 도구 결과는 `structuredContent.data` 또는 JSON 텍스트다. `isError=true`면 성공으로 보고하지 않는다.
   응답을 잃은 생성 요청은 무조건 재시도하지 말고 목록을 조회해 중복 생성을 피한다.
   `BUSY`·`RESUME_BUSY`(409)는 같은 항목의 다른 저장과 겹친 것이다. 잠시 뒤 다시 조회하고 시도한다.
@@ -168,6 +170,12 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 `self_intro_update({id,request})`, `self_intro_delete({id})`를 사용한다.
 요청 필드는 `resumeIds`, `positionIds`(이 답변을 낸 지원 직무, 10개 이하), `questionTypes`(문항 유형 코드, 3개 이하), `question`, `answer`다.
 **생성은 `resumeIds` 또는 `positionIds` 가 1개 이상**이어야 하고, 수정은 연결 0개도 된다.
+
+**버전 규칙.** 사용자도 웹에서 같은 답변을 고친다. `self_intro_get`·목록 항목과 생성·수정 응답에는 `version` 이 있다.
+- `self_intro_update` 로 `question`·`answer`·`resumeIds` 중 하나라도 바꾸면 **직전에 읽은 응답의 `version` 을 `request.expectedVersion` 으로 보낸다**(없으면 `VERSION_REQUIRED`).
+  직무·문항 유형 연결만 더할 때는 생략해도 된다. 이어서 다시 고칠 때는 방금 받은 응답의 `version` 을 쓴다.
+- `SELF_INTRO_STALE`(409)이면 **같은 요청을 그대로 다시 보내지 않는다.** `self_intro_get` 으로 다시 읽어 사용자가 바꾼 답변을 확인하고,
+  그 위에서 고칠지 사용자에게 묻거나 새 `version` 으로 다시 만든다. `SELF_INTRO_BUSY`(409)는 잠시 뒤 다시 읽고 시도한다.
 
 **목록은 미리보기다.** `self_intro_list({q?,resumeId?,positionId?,postingId?,companyId?,questionType?,unlinked?,limit?})`
 - `limit` 기본 10(최대 50). `complete:false` 면 `total` 중 일부만 실었다 — 필터를 좁히거나 `limit` 을 늘린다. `q` 는 100자 이하(질문·답변의 같은 단어, BM25).

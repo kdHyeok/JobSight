@@ -16,10 +16,12 @@ public record SelfIntroductionList(String fallback, int total, boolean complete,
     /**
      * 목록에서는 answerPreview(300자)만, self_intro_get 에서는 answer 전문만 채운다.
      * sourceStatus 는 "직접 출처"(written_for 가 있음) 또는 "출처 미상".
+     * version 은 self_intro_update 의 request.expectedVersion 으로 보낸다(docs/self-introductions.md 불변 조건 12).
      */
     public record Item(UUID id, String question, String answerPreview, String answer, int answerLength,
                        Instant updatedAt, Double score, List<String> matchedTerms, String sourceStatus,
-                       Sources sources, List<QuestionType> questionTypes, List<UsedFor> alreadyUsedFor) {}
+                       Sources sources, List<QuestionType> questionTypes, List<UsedFor> alreadyUsedFor,
+                       long version) {}
 
     /** direct: 이 답변을 어느 지원용으로 썼나(written_for). indirect: 연결 이력서가 지원하는 직무(추정). */
     public record Sources(List<Direct> direct, List<Indirect> indirect) {}

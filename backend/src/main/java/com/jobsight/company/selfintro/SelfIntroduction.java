@@ -13,6 +13,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -78,6 +79,14 @@ public class SelfIntroduction {
 
     @Column(columnDefinition = "TEXT")
     private String answer;
+
+    /**
+     * 저장할 때마다 오른다(연결만 바뀌어도 — 컬렉션 변경도 소유 엔티티의 버전을 올린다). 예전에 읽은 답변으로 덮어쓰지 않게
+     * 서비스가 비교한다 — docs/self-introductions.md 불변 조건 12.
+     */
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -155,6 +164,7 @@ public class SelfIntroduction {
     public Set<CompetencyLink> getQuestionTypes() { return Set.copyOf(questionTypes); }
     public String getQuestion() { return question; }
     public String getAnswer() { return answer; }
+    public long getVersion() { return version; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

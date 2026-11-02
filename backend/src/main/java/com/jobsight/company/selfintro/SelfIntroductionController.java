@@ -66,7 +66,11 @@ public class SelfIntroductionController {
                     + "positionIds·questionTypes 는 null 이면 유지한다. 웹은 배열 목록으로 맞추고([] 는 비움), "
                     + "MCP 는 목록의 연결을 더하기만 한다 — 목록에 없는 기존 연결(확정·AI 기록)을 지우지 않으며, 빼는 것은 사용자가 웹에서 한다. "
                     + "더한 결과가 직무 10개·문항 유형 3개를 넘으면 TOO_MANY_LINKS. "
-                    + "남는 연결은 출처(확정·AI 기록)를 유지하고 새 연결만 요청 주체의 출처로 단다. MCP 연결은 'AI 기록'이다.")
+                    + "남는 연결은 출처(확정·AI 기록)를 유지하고 새 연결만 요청 주체의 출처로 단다. MCP 연결은 'AI 기록'이다. "
+                    + "request.expectedVersion 은 직전에 읽은 응답(self_intro_get·목록 항목·직전 쓰기 응답)의 version 이다. "
+                    + "웹은 필수, MCP 는 resumeIds·question·answer 를 바꿀 때 필수이고 연결만 더할 때는 선택이다. "
+                    + "없으면 400 VERSION_REQUIRED, 다르면 409 SELF_INTRO_STALE — 그대로 재시도하지 말고 다시 읽어 바뀐 답변을 확인한 뒤 "
+                    + "새 version 으로 보낸다. 다른 저장을 처리 중이면 409 SELF_INTRO_BUSY.")
     public SelfIntroductionResponse update(@PathVariable UUID id,
                                            @Valid @RequestBody SelfIntroductionUpdateRequest request) {
         return service.update(id, request);
@@ -75,7 +79,7 @@ public class SelfIntroductionController {
     @PostMapping("/{id}/confirm")
     @Operation(summary = "AI 기록 연결 확정",
             description = "웹 전용(MCP 도구 없음). 이미 연결된 직무·문항 유형의 AI 기록을 사용자 확정으로 바꾼다. "
-                    + "연결되지 않은 대상이 있으면 404 LINK_NOT_FOUND.")
+                    + "연결되지 않은 대상이 있으면 404 LINK_NOT_FOUND. version 이 오르므로 다음 PUT 은 응답의 version 을 쓴다.")
     public SelfIntroductionResponse confirm(@PathVariable UUID id,
                                             @Valid @RequestBody SelfIntroductionConfirmRequest request) {
         return service.confirm(id, request);

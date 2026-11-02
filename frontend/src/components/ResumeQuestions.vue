@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { createSelfIntroduction, listSelfIntroductions, updateSelfIntroduction } from '../api/self-introductions'
+import { ApiClientError } from '../api/http'
 import type { SelfIntroduction } from '../types/self-introduction'
 
 /**
@@ -52,11 +53,23 @@ async function search() {
   matches.value = query.value.trim() ? await listSelfIntroductions(query.value.trim()) : []
 }
 
+/** 409(다른 곳에서 먼저 저장)면 서버 안내를 띄우고 목록을 다시 읽는다. 읽은 version 으로는 덮어쓰지 않는다(불변 조건 12). */
+async function failSave(error: unknown, fallback: string) {
+  if (error instanceof ApiClientError && error.status === 409) await load()
+  errorMessage.value = error instanceof Error ? error.message : fallback
+}
+
 async function attach(item: SelfIntroduction) {
   saving.value = true
+  errorMessage.value = ''
   try {
-    await updateSelfIntroduction(item.id, { question: item.question, answer: item.answer ?? '', resumeIds: [...new Set([...item.resumeIds, props.resumeId])] })
+    await updateSelfIntroduction(item.id, {
+      question: item.question, answer: item.answer ?? '', resumeIds: [...new Set([...item.resumeIds, props.resumeId])],
+      expectedVersion: item.version,
+    })
     await load()
+  } catch (error) {
+    await failSave(error, '문항을 연결하지 못했습니다.')
   } finally { saving.value = false }
 }
 
@@ -71,11 +84,13 @@ async function saveEdit(item: SelfIntroduction) {
   saving.value = true
   errorMessage.value = ''
   try {
-    await updateSelfIntroduction(item.id, { resumeIds: item.resumeIds, question: editQuestion.value.trim(), answer: editAnswer.value.trim() })
+    await updateSelfIntroduction(item.id, {
+      resumeIds: item.resumeIds, question: editQuestion.value.trim(), answer: editAnswer.value.trim(), expectedVersion: item.version,
+    })
     editingId.value = ''
     await load()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '문항을 수정하지 못했습니다.'
+    await failSave(error, '문항을 수정하지 못했습니다.')
   } finally { saving.value = false }
 }
 

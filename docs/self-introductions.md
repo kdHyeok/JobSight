@@ -14,7 +14,7 @@
 ```
 app_users ──1:N──▶ self_introductions ──N:M──▶ resumes          self_introduction_resumes      (간접 출처)
                   id · owner_id · question · answer         ──N:M──▶ positions        self_introduction_positions    (직접 출처, source)
-                  · created_at · updated_at                 ──N:M──▶ competencies     self_introduction_competencies (문항 유형, source)
+                  · version · created_at · updated_at       ──N:M──▶ competencies     self_introduction_competencies (문항 유형, source)
 ```
 
 하나의 문항은 같은 계정의 이력서 여러 개에 연결할 수 있다. 질문은 이력서 편집기 맨 아래에서 선택적 답변과 함께 추가하거나 과거 문항 검색으로 연결한다. 연결된 기존 문항은 그 자리에서 질문·답변을 수정할 수 있고, 질문 추가와 과거 검색은 기존 문항 목록 아래에 둔다. `/introductions`에서도 전체 CRUD를 한다.
@@ -45,6 +45,28 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 10. **웹 REST 목록 응답은 답변 전문이다.** 웹은 목록 항목의 `answer` 를 그대로 PUT 하므로 미리보기로 줄이면 답변이 잘려 저장된다.
     MCP 전용 목록 모양(미리보기·limit·출처)은 `McpActions` 래퍼가 따로 만든다. REST 응답에는 편집기용 `positionLinks`·`questionTypes` 만 덧붙였다.
 11. `competencies` 표와 enum `Competency` 는 순서·이름·모드가 같아야 한다. 다르면 기동이 멈춘다(`CompetencyCatalogCheck`).
+12. **예전에 읽은 답변으로 덮어쓰지 않는다** (`version`, V24 — 이력서 불변 조건 8·10 과 같은 보호). AI(MCP)와 웹이 같은 답변을 고친다.
+    - `version` 은 저장마다 오른다. 연결만 바뀌는 확정(✓)도 컬렉션 변경이라 오른다. 생성·수정·확정 응답, REST 목록·상세, MCP `self_intro_list`·`get` 항목에 실린다.
+    - 수정·확정은 행을 잠근다(`findOwnedForUpdate`, `lock_timeout 3s`). 잠금을 못 얻으면 409 `SELF_INTRO_BUSY`. 저장은 `saveAndFlush` 로 하고 응답에 flush 뒤의 version 을 싣는다.
+    - `expectedVersion`(수정 요청 본문): **웹 PUT 은 필수**. **MCP 는 `resumeIds`·`question`·`answer` 중 하나라도 바꾸면 필수**이고, 직무·문항 유형 연결만 더할 때는(불변 조건 8) 선택이다.
+      판정은 요청 주체(`CurrentUser.viaMcp()`)와 저장된 값과의 비교다(질문은 trim, 답변은 빈 값 null, 이력서는 집합). 보내면 MCP 도 다를 때 409 다.
+    - 없으면 400 `VERSION_REQUIRED`, 다르면 409 `SELF_INTRO_STALE`. 오류에 지금 version 을 싣지 않는다 — 다시 읽고 바뀐 답변을 확인하게 하려는 것이다.
+    - 화면은 같은 문항의 수정·확정을 줄 세우고 앞 응답의 version 을 이어받는다(`api/self-introductions.ts`의 `queued`). 편집기는 연 때의 version 을 쓰고 확정 응답의 version 으로만 바꾼다.
+      409 면 서버 안내를 띄우고 초안은 남긴 채 목록만 다시 읽는다. 편집기를 다시 열어야 새 version 으로 저장된다(확인하지 않은 초안으로 덮어쓰지 않게).
+
+## API (상세는 Swagger)
+
+```
+GET    /api/self-introductions?q=&resumeId=   → [{id, resumeIds, question, answer(전문), positionLinks, questionTypes, version, createdAt, updatedAt}]
+GET    /api/self-introductions/{id}
+POST   /api/self-introductions                {resumeIds?, positionIds?, questionTypes?, question, answer?}  (이력서 또는 직무 1개 이상)
+PUT    /api/self-introductions/{id}           {resumeIds, positionIds?, questionTypes?, question, answer?, expectedVersion}
+                                              없으면 400 VERSION_REQUIRED, 다르면 409 SELF_INTRO_STALE, 잠금 대기 초과 409 SELF_INTRO_BUSY
+POST   /api/self-introductions/{id}/confirm   {positionIds?, questionTypes?}  웹 전용. version 이 오른다
+DELETE /api/self-introductions/{id}
+```
+
+직무·공고·기업 상세(`GET /api/positions/{id}`·`/postings/{id}`·`/companies/{id}`, MCP `*_get`)에는 응답 전용 `linkedSelfIntroCount` 가 있다 — 함정의 CASCADE 참고.
 
 ## 편집기의 직무·문항 유형
 
@@ -62,10 +84,10 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 |---|---|---|
 | `self_intro_list` | `McpActions.listSelfIntros` → `SelfIntroductionAgentService.list` | 필터 `q`(100자, 넘으면 `QUERY_TOO_LONG`)·`resumeId`·`positionId`·`postingId`·`companyId`·`questionType`·`unlinked`, `limit`(기본 10, 1~50로 맞춤). 응답 `{fallback, total, complete, results[]}` |
 | `self_intro_get` | `McpActions.getSelfIntro` | 같은 항목 모양에 `answer` 전문 |
-| `self_intro_create` / `_update` | `SelfIntroductionController` | 위 DTO 그대로. MCP 로 남긴 연결은 항상 `AI`. `_update` 의 연결은 더하기만(불변 조건 8) |
+| `self_intro_create` / `_update` | `SelfIntroductionController` | 위 DTO 그대로. MCP 로 남긴 연결은 항상 `AI`. `_update` 의 연결은 더하기만(불변 조건 8). `_update` 의 `request.expectedVersion` 은 질문·답변·이력서를 바꿀 때 필수(불변 조건 12) |
 | `self_intro_delete` | `SelfIntroductionController` | — |
 
-목록 항목: `answerPreview`(300자 + `…`), `answerLength`, `score`·`matchedTerms`(q 가 있을 때), `sourceStatus`(`직접 출처`/`출처 미상`),
+목록 항목: `version`, `answerPreview`(300자 + `…`), `answerLength`, `score`·`matchedTerms`(q 가 있을 때), `sourceStatus`(`직접 출처`/`출처 미상`),
 `sources{direct[{position, company, trust}], indirect[{resume, position, company}]}`, `questionTypes[{code, name, confidence, from, trust}]`,
 `alreadyUsedFor[{company, position, sameCompany, otherCompanySpecific}]`.
 
@@ -84,7 +106,8 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 
 | 무엇 | 어디 |
 |---|---|
-| 스키마 | `V19__resume_positions_and_self_introductions.sql` · 다중 이력서 연결 `V20__self_introduction_resumes.sql` · 직접 출처·문항 유형 `V23__self_intro_relations.sql` |
+| 스키마 | `V19__resume_positions_and_self_introductions.sql` · 다중 이력서 연결 `V20__self_introduction_resumes.sql` · 직접 출처·문항 유형 `V23__self_intro_relations.sql` · 동시 수정 보호 `V24__self_intro_version.sql` |
+| 삭제 전 안내 | `PositionRepository.countSelfIntrosWrittenFor*` → 직무·공고·기업 상세 `linkedSelfIntroCount` · `utils/writtenFor.ts` |
 | 백엔드 | `selfintro/SelfIntroduction*` · `Competency`(코드·정규식) · `CompetencyCatalogCheck` · `common/LinkSource` · `ApiPaths.SELF_INTRODUCTIONS` |
 | MCP 모양 | `selfintro/SelfIntroductionAgentService` · `dto/SelfIntroductionList` · `mcp/McpActions` |
 | 출처 판정 | `auth/CurrentUser.viaMcp()` — MCP 토큰이면 AI |
@@ -95,7 +118,7 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 
 ```bash
 docker compose up -d --build
-docker compose logs backend   # now at version v23
+docker compose logs backend   # now at version v24
 bash scripts/smoke.sh
 cd frontend && npm run type-check && npm test
 ```
@@ -114,6 +137,10 @@ cd frontend && npm run type-check && npm test
   **MCP 목록·상세가 이력서·직무·공고·기업 엔티티를 읽지 않고 SQL 상한(6·6·7·7) 안.** 직무 삭제 시 연결 CASCADE 와 0개 연결 수정. 표와 enum 일치.
 - `McpToolsTest`: `self_intro_list`·`get` 이 래퍼로 가고 REST 목록을 부르지 않음, 스키마의 `maxLength:100`·필터·enum, 생성 요청의 직무·유형 전달과 연결 0개 생성 거부, 확정 도구 없음.
 - `SelfIntroduction.spec.ts`: 직무만으로 생성·연결 없는 생성 차단, 수정 0개 허용, "어느 지원용?" 후보(연결 이력서들의 직무 전부), AI 기록 ✓ 확정·✗ 해제, 카드의 AI 기록 표시, **같은 회사·같은 이름 직무를 공고명으로 구분**.
+  **수정은 읽은 `expectedVersion` 을 보내고, ✓ 뒤 저장은 확정 응답의 version 을 보낸다. 409 면 안내·초안 유지·목록만 재조회.**
+- 버전(불변 조건 12): `SelfIntroductionServiceTest` — 웹 버전 없음 400·다름 409(저장 없음, 오류에 지금 버전 없음), MCP 는 연결만 더하면 버전 생략 허용·답변이나 이력서 목록을 바꾸면 400·보낸 버전이 다르면 409, 잠금 대기 초과 `SELF_INTRO_BUSY`(수정·확정).
+  `SelfIntroductionRelationsIntegrationTest.secondUpdateFromSameReadIsStaleAndFirstContentStays` — 같은 읽기에서 웹 저장 뒤 MCP·다른 탭 저장이 409 이고 첫 내용이 남음, 생성 응답 version = DB, MCP 상세 version 으로 재전송하면 저장, 확정이 version 을 올려 확정 전 화면의 저장은 409.
+  `SelfIntroductionSaveRace.spec.ts` — 같은 문항 연속 저장·확정 직후 저장이 앞 응답의 version 을 이어받음, 예전 version 은 덮어쓰지 않음. `ResumeQuestions.spec.ts` — 수정·과거 문항 연결이 version 을 보내고 409 면 안내와 재조회.
 
 손으로 볼 것: 로그인 뒤 `/introductions` 에서 직무를 골라 저장하고 새로고침해 칩이 남는지, MCP 로 만든 문항의 AI 기록 칩을 ✓로 확정하는지.
 그 밖에 이력서에서 여러 직무를 선택해 저장한 다음 새로고침해 유지되는지 확인한다. 기존 문항의 질문·답변을 이력서에서 수정하고 질문 추가·과거 검색이 목록 아래에 있는지 확인한다. 질문을 추가해 자기소개 화면에서
@@ -135,6 +162,12 @@ cd frontend && npm run type-check && npm test
 - 이력서 복제는 연결 직무는 복사하지만 자기소개 문항은 복사하지 않는다. 문항 답변까지 복제하면 서로 다른 지원서가 같은 초안을 갖는 혼동이 생긴다.
 - **trust "확정"은 사용자가 연결을 눌러 확인했다는 뜻이지 성과 검증이 아니다.** 웹과 MCP가 같은 문자열(`확정`·`AI 기록`·`추정`)을 쓴다.
 - 직무를 지우면(공고 수정에서 빠진 직무 포함) 그 직접 출처가 함께 사라진다(ON DELETE CASCADE). 답변은 남고 "출처 미상"이 된다.
+  공고 삭제는 소속 직무를, 기업 삭제는 소속 공고를, 마지막 직무 삭제는 공고를 지우므로 같은 일이 일어난다. **스키마는 그대로 두고 삭제 전에 알린다**:
+  직무·공고·기업 상세의 `linkedSelfIntroCount` 를 웹 삭제 확인창이 "…로 쓴 자소서 N개의 직접 출처 연결이 함께 사라집니다(답변은 남습니다)" 로 보여 준다(0 이면 문구 없음).
+  MCP 는 SKILL 의 삭제 규칙대로 `*_get` 의 이 값을 사용자에게 알린다. 공고 수정 폼에서 직무를 빼는 경우는 알리지 않는다 — docs/job-postings.md 함정.
+- **생성 응답의 `version` 은 flush 뒤 값이어야 한다.** id 를 미리 정한 엔티티라 `save` 가 merge 로 가고, 연결 컬렉션을 옮겨 담는 flush 에서 version 이 한 번 더 오른다.
+  flush 전에 응답을 만들면 생성 직후의 MCP 수정이 거짓 409 를 받는다. 그래서 생성도 `saveAndFlush` 다.
+- 확정(✓)도 version 을 올린다. 편집기에서 ✓ 를 누른 뒤 저장은 확정 응답의 version 을 써야 한다(`SelfIntroductionBoard.editingVersion`).
 - `ResumeQuestions.vue` 의 문항 저장은 `positionIds`·`questionTypes` 를 보내지 않는다(null=유지). 여기서 빈 배열을 보내면 직접 출처가 지워진다.
 - 통합 테스트에서 `CurrentUser` 를 목으로 바꾸고 `viaMcp()` 를 지정하면 출처 판정 자체는 검증되지 않는다. 출처를 보는 테스트는 SecurityContext 에
   `McpPrincipal`·`AppSessionUser` 를 넣어 실제 판정을 탄다.

@@ -116,7 +116,8 @@ public class McpActions {
     }
 
     @Operation(summary = "자기소개 문항 상세 조회",
-            description = "답변 전문(answer)과 직접·간접 출처, 문항 유형, alreadyUsedFor 를 준다. 수정 전에 이것으로 원문을 읽는다.")
+            description = "답변 전문(answer)과 직접·간접 출처, 문항 유형, alreadyUsedFor 를 준다. 수정 전에 이것으로 원문을 읽는다. "
+                    + "version 은 self_intro_update 의 request.expectedVersion 으로 보낸다(질문·답변·이력서를 바꿀 때 필수).")
     public SelfIntroductionList.Item getSelfIntro(@PathVariable UUID id) {
         return selfIntros.get(id);
     }
