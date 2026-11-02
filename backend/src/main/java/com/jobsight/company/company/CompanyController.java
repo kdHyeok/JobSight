@@ -38,7 +38,9 @@ public class CompanyController {
     }
 
     @Operation(summary = "기업 상세",
-            description = "openPostings 에 마감이 지나지 않은 이 기업의 공고가 마감 임박 순으로 담긴다. 타인 소유이거나 없으면 404.")
+            description = "openPostings 에 마감이 지나지 않은 이 기업의 공고가 마감 임박 순으로 담긴다. "
+                    + "linkedSelfIntroCount 는 이 기업을 지우면 소속 공고 직무용 직접 출처 연결이 함께 사라지는 자기소개 문항 수다"
+                    + "(답변은 남는다). 삭제 전에 알린다. 타인 소유이거나 없으면 404.")
     @GetMapping("/{id}")
     public CompanyResponse findById(@PathVariable UUID id) {
         return service.findById(id);

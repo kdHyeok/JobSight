@@ -30,7 +30,8 @@ public record JobPostingResponse(
         List<PositionSummary> positions,
         boolean archived,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long linkedSelfIntroCount
 ) {
     public static JobPostingResponse of(JobPosting posting, String companyName, List<PositionSummary> positions) {
         List<StepResponse> steps = IntStream.range(0, posting.getSteps().size())
@@ -52,7 +53,17 @@ public record JobPostingResponse(
                 positions,
                 posting.isArchived(),
                 posting.getCreatedAt(),
-                posting.getUpdatedAt()
+                posting.getUpdatedAt(),
+                null
         );
+    }
+
+    /**
+     * 상세 조회(GET·posting_get)에서만 채운다 — 이 공고를 지우면 소속 직무 전부의 직접 출처 연결이 CASCADE 로 사라지는
+     * 내 자소서 수. 삭제 확인창이 보여 준다. 목록·수정 응답은 null.
+     */
+    public JobPostingResponse withLinkedSelfIntroCount(long count) {
+        return new JobPostingResponse(id, companyId, companyName, title, postingUrl, employmentType, deadlineAt, status,
+                qualifications, memo, targetPositionId, steps, positions, archived, createdAt, updatedAt, count);
     }
 }

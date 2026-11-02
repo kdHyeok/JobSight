@@ -21,6 +21,7 @@ import PostingForm from './PostingForm.vue'
 import type { Company } from '../types/company'
 import type { ApplicationStatus, JobPosting, JobPostingPayload, PostingTab, StepResult } from '../types/posting'
 import { groupPostingsByKanban, postingDropTarget, postingTabCounts } from '../types/posting'
+import { linkedSelfIntroCount, writtenForNotice } from '../utils/writtenFor'
 
 const props = defineProps<{ focus: string | null }>()
 
@@ -46,6 +47,8 @@ const selected = ref<JobPosting | null>(null)
 const saving = ref(false)
 const formErrors = ref<Record<string, string>>({})
 const deleteTarget = ref<JobPosting | null>(null)
+/** 소속 직무로 쓴 자소서의 직접 출처가 함께 사라진다는 안내. 목록에서 고른 공고면 상세를 한 번 불러 수를 얻는다. */
+const deleteNotice = ref('')
 const deleting = ref(false)
 const dragging = ref<JobPosting | null>(null)
 const dropOver = ref('')
@@ -195,6 +198,13 @@ async function dropPosting(targetTab: PostingTab, columnKey?: string) {
   }
 }
 
+async function askDelete(target: JobPosting) {
+  deleteTarget.value = target
+  deleteNotice.value = ''
+  const count = await linkedSelfIntroCount(target, () => getPosting(target.id))
+  if (deleteTarget.value?.id === target.id) deleteNotice.value = writtenForNotice(count, '이 공고의 직무로')
+}
+
 async function remove() {
   if (!deleteTarget.value) return
   deleting.value = true
@@ -318,7 +328,7 @@ onMounted(async () => {
       <button type="button" class="button secondary compact" @click="toggleArchive">
         {{ selected.archived ? '되돌리기' : '보관' }}
       </button>
-      <button type="button" class="button danger compact" @click="deleteTarget = selected">삭제</button>
+      <button type="button" class="button danger compact" @click="askDelete(selected)">삭제</button>
     </template>
     <PostingDetail
       :posting="selected"
@@ -355,7 +365,7 @@ onMounted(async () => {
     v-if="deleteTarget"
     title="채용공고를 삭제할까요?"
     :subject="deleteTarget.title"
-    detail=" 공고와 그 직무·절차 기록이 영구 삭제됩니다."
+    :detail="` 공고와 그 직무·절차 기록이 영구 삭제됩니다.${deleteNotice}`"
     aria-label="채용공고 삭제 확인"
     :busy="deleting"
     @confirm="remove"

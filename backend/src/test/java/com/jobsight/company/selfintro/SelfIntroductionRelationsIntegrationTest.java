@@ -5,6 +5,11 @@ import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.LinkSource;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.Company;
+import com.jobsight.company.company.CompanyService;
+import com.jobsight.company.company.dto.CompanyResponse;
+import com.jobsight.company.position.PositionRepository;
+import com.jobsight.company.position.PositionService;
+import com.jobsight.company.position.dto.PositionResponse;
 import com.jobsight.company.mcp.McpController;
 import com.jobsight.company.mcp.McpOAuthConfig;
 import com.jobsight.company.mcp.McpPrincipal;
@@ -93,6 +98,9 @@ class SelfIntroductionRelationsIntegrationTest {
     @Autowired SelfIntroductionAgentService agent;
     @Autowired JobPostingService postings;
     @Autowired ResumeService resumes;
+    @Autowired PositionService positionService;
+    @Autowired PositionRepository positionRepository;
+    @Autowired CompanyService companies;
     @Autowired McpTools tools;
     @Autowired McpController mcp;
     @Autowired JdbcTemplate jdbc;
@@ -149,12 +157,19 @@ class SelfIntroductionRelationsIntegrationTest {
         return agent.list(null, null, null, null, null, null, null, null);
     }
 
-    /** MCP self_intro_update 인자. positionIds·questionTypes 는 null 이면 빼서 보낸다(유지). */
-    private Map<String, Object> mcpUpdate(UUID id, String question, List<UUID> positionIds, List<String> questionTypes) {
-        Map<String, Object> request = new java.util.HashMap<>(Map.of("resumeIds", List.of(), "question", question, "answer", "답변"));
+    /** MCP self_intro_update 인자. positionIds·questionTypes·expectedVersion 은 null 이면 빼서 보낸다(유지·생략). */
+    private Map<String, Object> mcpUpdate(UUID id, String question, String answer, List<UUID> positionIds,
+                                          List<String> questionTypes, Long expectedVersion) {
+        Map<String, Object> request = new java.util.HashMap<>(Map.of("resumeIds", List.of(), "question", question, "answer", answer));
         if (positionIds != null) request.put("positionIds", positionIds.stream().map(UUID::toString).toList());
         if (questionTypes != null) request.put("questionTypes", questionTypes);
+        if (expectedVersion != null) request.put("expectedVersion", expectedVersion);
         return Map.of("id", id.toString(), "request", request);
+    }
+
+    /** 지금 저장된 version. 웹 화면이 목록에서 읽는 값과 같다. */
+    private long version(UUID id) {
+        return service.findById(id).version();
     }
 
     private String positionSource(UUID id, UUID positionId) {
@@ -179,7 +194,7 @@ class SelfIntroductionRelationsIntegrationTest {
 
         assertThatThrownBy(() -> service.create(new SelfIntroductionCreateRequest(null, List.of(foreign), null, "지원 동기", null)))
                 .isInstanceOf(ResourceNotFoundException.class);
-        assertThatThrownBy(() -> service.update(id, new SelfIntroductionUpdateRequest(List.of(), List.of(foreign), null, "지원 동기", null)))
+        assertThatThrownBy(() -> service.update(id, new SelfIntroductionUpdateRequest(List.of(), List.of(foreign), null, "지원 동기", null, version(id))))
                 .isInstanceOf(ResourceNotFoundException.class);
         assertThat(service.findById(id).positionLinks()).extracting(PositionLinkView::positionId)
                 .containsExactly(mine);
@@ -285,9 +300,11 @@ class SelfIntroductionRelationsIntegrationTest {
         UUID id = service.create(new SelfIntroductionCreateRequest(null, List.of(a), List.of(Competency.MOTIVATION),
                 "에이회사 지원 동기", "답변")).id();
 
+        long read = version(id);
         McpPrincipal principal = asMcp();
-        tools.call("self_intro_update", mcpUpdate(id, "비회사 지원 동기", List.of(b), List.of("COLLABORATION")), principal);
-        tools.call("self_intro_update", mcpUpdate(id, "비회사 지원 동기", List.of(), List.of()), principal);
+        // 질문을 바꾸는 MCP 수정은 읽은 version 이 필요하고, 연결만 더하는 두 번째 수정은 생략해도 된다(불변 조건 12).
+        tools.call("self_intro_update", mcpUpdate(id, "비회사 지원 동기", "답변", List.of(b), List.of("COLLABORATION"), read), principal);
+        tools.call("self_intro_update", mcpUpdate(id, "비회사 지원 동기", "답변", List.of(), List.of(), null), principal);
 
         asWeb();
         var kept = service.findById(id);
@@ -300,7 +317,7 @@ class SelfIntroductionRelationsIntegrationTest {
         assertThat(only(agent.list(null, null, null, null, null, null, null, null)).alreadyUsedFor())
                 .extracting(SelfIntroductionList.UsedFor::company).containsExactlyInAnyOrder("에이회사", "비회사");
 
-        var cleared = service.update(id, new SelfIntroductionUpdateRequest(List.of(), List.of(), List.of(), "비회사 지원 동기", "답변"));
+        var cleared = service.update(id, new SelfIntroductionUpdateRequest(List.of(), List.of(), List.of(), "비회사 지원 동기", "답변", version(id)));
         assertThat(cleared.positionLinks()).isEmpty();
         assertThat(cleared.questionTypes()).isEmpty();
     }
@@ -475,7 +492,7 @@ class SelfIntroductionRelationsIntegrationTest {
         UUID id = service.create(new SelfIntroductionCreateRequest(null, List.of(a), null, question, "답변")).id();
 
         McpPrincipal principal = asMcp();
-        tools.call("self_intro_update", mcpUpdate(id, question, null, List.of("COLLABORATION")), principal);
+        tools.call("self_intro_update", mcpUpdate(id, question, "답변", null, List.of("COLLABORATION"), null), principal);
 
         var tagged = only(listAll());
         assertThat(tagged.questionTypes())
@@ -570,9 +587,107 @@ class SelfIntroductionRelationsIntegrationTest {
                 List.of(new PositionNameRequest(data, "데이터")), null));
 
         assertThat(service.findById(id).positionLinks()).isEmpty();
-        var updated = service.update(id, new SelfIntroductionUpdateRequest(List.of(), List.of(), null, "협업 경험", "답변"));
+        var updated = service.update(id, new SelfIntroductionUpdateRequest(List.of(), List.of(), null, "협업 경험", "답변", version(id)));
         assertThat(updated.resumeIds()).isEmpty();
         assertThat(updated.answer()).isEqualTo("답변");
+    }
+
+    /**
+     * 같은 읽기(version)에서 출발한 두 수정 중 두 번째는 409 이고 첫 번째 내용이 남는다 — AI 와 웹이 같은 답변을 고친다(불변 조건 12).
+     * 쓰기 응답에는 새 version 이 실리고, MCP 상세(self_intro_get)의 version 으로 다시 보내면 저장된다.
+     * 확정은 연결만 바꾸지만 version 을 올리고 응답에 싣는다 — 확정 전에 읽은 화면의 저장은 409 다.
+     */
+    @Test
+    void secondUpdateFromSameReadIsStaleAndFirstContentStays() {
+        signIn();
+        UUID backend = position(posting("에이회사", "백엔드"));
+        UUID front = position(posting("비회사", "프론트"));
+        var created = service.create(new SelfIntroductionCreateRequest(null, List.of(backend), null, "지원 동기", "처음 답변"));
+        long read = created.version();
+        // 생성 응답의 version 도 저장된 값이다 — MCP 가 생성 직후 그 값으로 고칠 수 있어야 한다.
+        assertThat(read).isEqualTo(version(created.id()));
+
+        var first = service.update(created.id(), new SelfIntroductionUpdateRequest(List.of(), null, null,
+                "지원 동기", "웹에서 고친 답변", read));
+        assertThat(first.version()).isGreaterThan(read);
+
+        McpPrincipal principal = asMcp();
+        assertThatThrownBy(() -> tools.call("self_intro_update",
+                mcpUpdate(created.id(), "지원 동기", "AI 가 고친 답변", null, null, read), principal))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo("SELF_INTRO_STALE");
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                });
+        assertThatThrownBy(() -> tools.call("self_intro_update",
+                mcpUpdate(created.id(), "지원 동기", "AI 가 고친 답변", null, null, null), principal))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("VERSION_REQUIRED"));
+        asWeb();
+        assertThatThrownBy(() -> service.update(created.id(), new SelfIntroductionUpdateRequest(List.of(), null, null,
+                "지원 동기", "다른 탭의 답변", read)))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("SELF_INTRO_STALE"));
+        assertThat(service.findById(created.id()).answer()).isEqualTo("웹에서 고친 답변");
+
+        asMcp();
+        long latest = agent.get(created.id()).version();
+        assertThat(latest).isEqualTo(first.version());
+        var saved = (SelfIntroductionResponse) tools.call("self_intro_update",
+                mcpUpdate(created.id(), "지원 동기", "AI 가 고친 답변", List.of(front), null, latest), principal);
+        assertThat(saved.version()).isGreaterThan(latest);
+        assertThat(only(listAll()).version()).isEqualTo(saved.version());
+
+        asWeb();
+        var confirmed = service.confirm(created.id(), new SelfIntroductionConfirmRequest(List.of(front), null));
+        assertThat(confirmed.version()).isGreaterThan(saved.version()).isEqualTo(version(created.id()));
+        assertThatThrownBy(() -> service.update(created.id(), new SelfIntroductionUpdateRequest(List.of(), null, null,
+                "지원 동기", "확정 전에 읽은 화면의 답변", saved.version())))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("SELF_INTRO_STALE"));
+        assertThat(service.findById(created.id()).answer()).isEqualTo("AI 가 고친 답변");
+    }
+
+    /**
+     * 직무·공고·기업 상세는 지우면 직접 출처가 CASCADE 로 사라질 내 자소서 수를 싣는다(삭제 확인창용). 한 문항이 같은 공고의
+     * 두 직무에 연결돼 있어도 한 번만 센다. 기업은 소속 공고 전부를 센다. 목록 응답은 null 이고 남의 자소서는 세지 않는다.
+     */
+    @Test
+    void detailCountsSelfIntrosWhoseDirectSourceADeleteWouldDrop() {
+        UUID other = signIn();
+        JobPostingResponse theirs = posting("남의 회사", "남의 직무");
+        service.create(new SelfIntroductionCreateRequest(null, List.of(position(theirs)), null, "남의 답변", null));
+
+        UUID me = signIn();
+        JobPostingResponse a = posting("에이회사", "백엔드", "데이터");
+        UUID backend = a.positions().get(0).id();
+        UUID data = a.positions().get(1).id();
+        UUID front = position(posting("에이회사", "프론트"));
+        JobPostingResponse b = posting("비회사", "기획");
+        service.create(new SelfIntroductionCreateRequest(null, List.of(backend, data), null, "두 직무용", null));
+        service.create(new SelfIntroductionCreateRequest(null, List.of(data), null, "데이터용", null));
+        service.create(new SelfIntroductionCreateRequest(null, List.of(front), null, "프론트용", null));
+        service.create(new SelfIntroductionCreateRequest(null, List.of(position(b)), null, "비회사용", null));
+
+        assertThat(positionService.findById(backend).linkedSelfIntroCount()).isEqualTo(1);
+        assertThat(positionService.findById(data).linkedSelfIntroCount()).isEqualTo(2);
+        assertThat(postings.findById(a.id()).linkedSelfIntroCount()).isEqualTo(2);
+        assertThat(companies.findById(a.companyId()).linkedSelfIntroCount()).isEqualTo(3);
+        assertThat(companies.findById(b.companyId()).linkedSelfIntroCount()).isEqualTo(1);
+        assertThat(positionService.findAll(null)).extracting(PositionResponse::linkedSelfIntroCount).containsOnlyNulls();
+        assertThat(companies.findAll()).extracting(CompanyResponse::linkedSelfIntroCount).containsOnlyNulls();
+
+        McpPrincipal principal = asMcp();
+        assertThat(((PositionResponse) tools.call("position_get", Map.of("id", data.toString()), principal))
+                .linkedSelfIntroCount()).isEqualTo(2);
+        assertThat(((JobPostingResponse) tools.call("posting_get", Map.of("id", a.id().toString()), principal))
+                .linkedSelfIntroCount()).isEqualTo(2);
+        assertThat(((CompanyResponse) tools.call("company_get", Map.of("id", a.companyId().toString()), principal))
+                .linkedSelfIntroCount()).isEqualTo(3);
+
+        // 남의 직무·공고·기업 id 를 넣어도 소유자 조건이 남의 자소서를 세지 않는다. 그 계정으로는 1이다.
+        assertThat(positionRepository.countSelfIntrosWrittenFor(position(theirs), me)).isZero();
+        assertThat(positionRepository.countSelfIntrosWrittenForPosting(theirs.id(), me)).isZero();
+        assertThat(positionRepository.countSelfIntrosWrittenForCompany(theirs.companyId(), me)).isZero();
+        assertThat(positionRepository.countSelfIntrosWrittenForCompany(theirs.companyId(), other)).isEqualTo(1);
+        asWeb();
+        assertThatThrownBy(() -> positionService.findById(position(theirs))).isInstanceOf(ResourceNotFoundException.class);
     }
 
     /** 문항 유형 코드는 시스템 고정 어휘다. 표와 enum 이 같아야 기동한다(V23). */

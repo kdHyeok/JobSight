@@ -66,8 +66,10 @@ public class JobPostingService {
         return toResponses(repository.findArchived(ownerId));
     }
 
+    /** 상세에는 이 공고를 지우면 소속 직무의 직접 출처가 사라질 자소서 수를 싣는다(삭제 확인창용, count 한 문장). */
     public JobPostingResponse findById(UUID id) {
-        return toResponses(List.of(findOwned(id))).get(0);
+        return toResponses(List.of(findOwned(id))).get(0)
+                .withLinkedSelfIntroCount(positionRepository.countSelfIntrosWrittenForPosting(id, currentUser.id()));
     }
 
     /** 기업 상세의 채용정보 카드. 마감이 지나지 않은 공고만. */

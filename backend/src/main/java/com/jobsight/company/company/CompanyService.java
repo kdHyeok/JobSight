@@ -4,6 +4,7 @@ import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.dto.CompanyRequest;
 import com.jobsight.company.company.dto.CompanyResponse;
+import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.posting.JobPostingService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,11 +24,14 @@ import java.util.UUID;
 public class CompanyService {
     private final CompanyRepository repository;
     private final JobPostingService postings;
+    private final PositionRepository positionRepository;
     private final CurrentUser currentUser;
 
-    public CompanyService(CompanyRepository repository, JobPostingService postings, CurrentUser currentUser) {
+    public CompanyService(CompanyRepository repository, JobPostingService postings, PositionRepository positionRepository,
+                          CurrentUser currentUser) {
         this.repository = repository;
         this.postings = postings;
+        this.positionRepository = positionRepository;
         this.currentUser = currentUser;
     }
 
@@ -38,10 +42,14 @@ public class CompanyService {
                 .toList();
     }
 
-    /** 상세에는 마감이 지나지 않은 공고를 채운다. 사용자가 입력하는 값이 아니다. */
+    /**
+     * 상세에는 마감이 지나지 않은 공고를 채운다. 사용자가 입력하는 값이 아니다.
+     * 이 기업을 지우면 소속 공고(마감 지난 것 포함) 직무의 직접 출처가 사라질 자소서 수도 싣는다(삭제 확인창용).
+     */
     public CompanyResponse findById(UUID id) {
         Company company = findOwnedEntity(id);
-        return CompanyResponse.of(company, postings.findOpenByCompany(company.getId()));
+        return CompanyResponse.of(company, postings.findOpenByCompany(company.getId()))
+                .withLinkedSelfIntroCount(positionRepository.countSelfIntrosWrittenForCompany(id, currentUser.id()));
     }
 
     @Transactional

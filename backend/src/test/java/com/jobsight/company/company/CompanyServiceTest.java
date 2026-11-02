@@ -3,6 +3,7 @@ package com.jobsight.company.company;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ResourceNotFoundException;
 import com.jobsight.company.company.dto.CompanyRequest;
+import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.posting.JobPostingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,13 +29,15 @@ class CompanyServiceTest {
     @Mock
     private JobPostingService postings;
     @Mock
+    private PositionRepository positionRepository;
+    @Mock
     private CurrentUser currentUser;
 
     private CompanyService service;
 
     @BeforeEach
     void setUp() {
-        service = new CompanyService(repository, postings, currentUser);
+        service = new CompanyService(repository, postings, positionRepository, currentUser);
     }
 
     private static CompanyRequest request(String name, List<String> industries, String website, String summary) {

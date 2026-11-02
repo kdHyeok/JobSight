@@ -47,7 +47,7 @@ class CompanyControllerTest {
                 List.of(new com.jobsight.company.company.dto.BusinessAreaResponse("클라우드", "매출의 절반")),
                 CompanySize.MEDIUM,
                 1_000_000_000L, RevenueUnit.HUNDRED_MILLION, 250, "서울 강남", LocalDate.of(2015, 3, 1),
-                null, null, null, List.of(), Instant.now(), Instant.now()
+                null, null, null, List.of(), Instant.now(), Instant.now(), null
         );
         given(service.findAll()).willReturn(List.of(company));
 
