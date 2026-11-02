@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { ApiClientError } from '../api/http'
-import { attachmentUrl, deleteAttachment, fetchAttachmentMeta, uploadAttachment } from '../api/attachments'
+import { attachmentUrl, fetchAttachmentMeta, uploadAttachment } from '../api/attachments'
 import type { AttachmentMeta } from '../types/attachment'
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, formatBytes, isImage } from '../types/attachment'
 
@@ -10,8 +10,14 @@ import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, formatBytes, isImage } from '.
  *
  * 업로드는 파일을 고르는 즉시 일어난다 — 그래야 미리보기가 된다. 이력서 문서에 id 가 들어가는 건
  * `저장` 을 눌렀을 때다. 저장 없이 나가면 고아 첨부가 남는다(docs/attachments.md 함정).
+ * 교체·제거는 값만 바꾸고 파일은 지우지 않는다. 복제한 이력서가 같은 id 를 가리킬 수 있다.
  */
-const props = defineProps<{ id: string; label: string }>()
+const props = defineProps<{
+  id: string
+  label: string
+  /** 이력서 응답에 함께 실려 온 이 id 의 메타. 있으면 다시 부르지 않는다(설계 1.3 P5). */
+  preloaded?: AttachmentMeta
+}>()
 const emit = defineEmits<{ 'update:id': [string] }>()
 
 const meta = ref<AttachmentMeta | null>(null)
@@ -24,6 +30,7 @@ watch(() => props.id, async (id) => {
   error.value = ''
   if (!id) { meta.value = null; return }
   if (meta.value?.id === id) return
+  if (props.preloaded?.id === id) { meta.value = props.preloaded; return }
   try {
     meta.value = await fetchAttachmentMeta(id)
   } catch {
@@ -43,13 +50,12 @@ async function pick(event: Event) {
     return
   }
   busy.value = true
-  const previous = props.id
   try {
+    // 교체는 새 업로드다. 이전 파일은 지우지도 덮어쓰지도 않는다 — 복제한 이력서가 같은 id 를 가리킬 수 있고,
+    // 저장하지 않고 나가면 이력서는 여전히 이전 id 를 들고 있다(설계 1.4 T7).
     const uploaded = await uploadAttachment(file)
     meta.value = uploaded
     emit('update:id', uploaded.id)
-    // 교체는 새 업로드 + 이전 것 삭제다. 같은 id 의 바이트를 덮어쓰면 복제된 이력서까지 바뀐다.
-    if (previous) await deleteAttachment(previous).catch(() => {})
   } catch (e) {
     error.value = e instanceof ApiClientError ? e.message : '파일을 올리지 못했습니다.'
   } finally {
@@ -57,12 +63,11 @@ async function pick(event: Event) {
   }
 }
 
-async function clear() {
-  const current = props.id
+/** 이 이력서에서 연결만 푼다. 파일은 남는다 — 교체와 같은 이유. */
+function clear() {
   emit('update:id', '')
   meta.value = null
   previewing.value = false
-  if (current) await deleteAttachment(current).catch(() => {})
 }
 </script>
 

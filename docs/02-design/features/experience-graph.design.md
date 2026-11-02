@@ -1,6 +1,6 @@
 # JobSight 경험-지원 관계 구조 최종 설계
 
-작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
+작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
 
 아래에서 `B/` 는 `backend/src/main/java/com/jobsight/company/`, `M/` 은 `backend/src/main/resources/db/migration/`, `F/` 는 `frontend/src/components/` 를 줄여 쓴 것이다.
 
@@ -101,6 +101,7 @@
 ```
 
 2026-11-02: [4] 의 자소서 요청을 [3] 으로 옮겼다(`ResumeBoard.loadCurrent`, `ResumeBoard.spec.ts`). 첨부가 있는 이력서는 첨부 메타가 아직 [4] 에 남는다(P5).
+2026-11-02(1b): 첨부 메타를 [3] 의 이력서 응답 `attachments` 에 실었다(P5). 이제 [4] 는 없다. 응답에 빠진 id(남의 것·지워진 것)만 칸이 직접 부른다.
 
 - 이력서 자체 조회 `GET /api/resumes/{id}` 는 SQL 2회 수준이다: `findByIdAndOwnerId` 1회 + EAGER `positionIds` 1회(`B/resume/Resume.java:42-45`).
 - SQL 대부분은 병렬로 나가는 `/api/positions` 에서 나온다. 원인은 EAGER 컬렉션의 1+N이다:
@@ -134,7 +135,7 @@
 | P2 | 자소서 요청이 편집기가 그려진 뒤에야 나갔다(`F/ResumeQuestions.vue` onMounted) | **적용함(2026-11-02)**: 이력서·직무와 같은 `Promise.all` 로 옮기고 `questions` prop 으로 내렸다. 실패하면 `null` 을 넘겨 문항 칸이 직접 다시 부른다. `Promise.all` 을 풀어 직무를 배경으로 돌리는 것은 하지 않는다 — HTTP/2 병렬이라 이득이 서버 처리 시간 차이(ms)뿐이다 | 직렬 단계 하나, 약 0.3초 | 완료 |
 | P3 | 자소서: 소유자 전체를 읽고 자바에서 거른다(`B/selfintro/SelfIntroductionService.java:41-45`). LAZY `resumeIds` 가 행마다 SQL을 낸다(`B/selfintro/SelfIntroduction.java:27-31`). 인덱스 `idx_self_introduction_resumes_resume`(`M/V20__self_introduction_resumes.sql:10-11`)를 쓰지 않는다 | `join s.resumeIds r where s.ownerId=:o and r=:rid` 조인 쿼리 | SQL 1+S → 2~3 | 트랙 |
 | P4 | 이력서 목록이 content JSONB까지 읽는다(`B/resume/ResumeService.java:52-56`) | JPQL 생성자 projection | JSONB 전송 0 | 트랙 |
-| P5 | 첨부 메타를 편집기가 그려진 뒤 필드마다 GET한다(`F/AttachmentField.vue:23-33`). 첨부가 있는 이력서에서는 **남은 직렬 단계**다 | 이력서 상세 응답에 `attachments:{id→meta}` 동봉. 새 경로가 아니라 응답 필드라 경로 표는 그대로다 | 직렬 단계 하나(약 0.3초), HTTP A건 → 0 | **1** |
+| P5 | 첨부 메타를 편집기가 그려진 뒤 필드마다 GET한다(`F/AttachmentField.vue:23-33`). 첨부가 있는 이력서에서는 **남은 직렬 단계**다 | **적용함(2026-11-02)**: 이력서 상세 응답에 `attachments:{id→meta}` 동봉. 새 경로가 아니라 응답 필드라 경로 표는 그대로다. 이력서를 돌려주는 모든 응답이 같은 모양으로 싣고(생성·저장·복제·`resume_get` 포함), 첨부가 없으면 조회하지 않는다. 남의 것·지워진 id 는 소유자 조건에서 빠지고 그 칸만 `/meta` 를 부른다 | 직렬 단계 하나(약 0.3초), HTTP A건 → 0 | 완료 |
 | P6 | 편집기가 쓰는 직무 값은 이름·기업·공고·`updatedAt` 정도(`F/ResumeEditor.vue:88-95`)인데 `PositionResponse` 전체를 받는다 | `GET /api/positions?view=summary`. 쿼리 파라미터라 경로 표는 그대로다. `position_list` MCP 스키마에 `view` 가 노출되는지 확인하고, 노출된다면 설명을 단다 | 응답 크기 감소 | 트랙 |
 | P7 | 소유 확인 때문에 엔티티 전체를 로드한다(`ResumeService.java:204-213`) | id 목록 projection 또는 count | 저장 SQL 감소 | 트랙 |
 | P8 | 컬렉션을 새 Set으로 갈아 끼워 저장마다 전체 DELETE와 INSERT가 나간다(`Resume.java:69-70`, `Position.java:116,121`, `Company.java:108-109`) | `clear()+addAll()` 로 바꾼다(`SelfIntroduction.java:54-56` 방식) | 바뀐 부분만 갱신 | 트랙 |
@@ -152,7 +153,7 @@
 | T4 | `resume_row_update` 가 행을 통째로 교체한다. 배열만 `carryArrays` 로 옮기고, 빠진 문자열 필드는 지운다(`ResumeService.java:113-146`) | 행 갱신도 병합한다(null=유지, `""`=비움). 그러면 `carryArrays` 는 필요 없다 | 1 |
 | T5 | 행 도구가 이력서 전체를 돌려주고(`ResumeService.java:156`), MCP는 그것을 text와 structuredContent에 두 번 싣는다(`McpController.java:65-66`) | 반환을 `{version, section, count, index, 행 머리}` 로 줄인다 | 1 |
 | T6 | 행 추가가 섹션 상한 검증을 거치지 않는다(`mutateRows` 는 `normalized()` 만 호출한다) | `mutateRows` 끝에서 문서 전체를 Bean Validation으로 검증한다 | 트랙 |
-| T7 | **첨부 손실.** 교체나 비우기를 하면 이전 첨부를 즉시 DELETE한다(`F/AttachmentField.vue:51-52,65`). 그런데 복제 이력서는 같은 id를 공유한다(같은 파일 51행 주석, `docs/attachments.md:71`). 그래서 복제본에서 교체하면 원본의 파일이 사라지고, 저장하지 않고 나가도 이미 지워져 있다 | 즉시 삭제만 없앤다. 고아 첨부 정리 작업은 **만들지 않는다.** 기존 문서가 고아 첨부를 함정으로 받아들이고 있고, 용량이 실제 문제가 될 때 추가한다. 그때 기준은 "7일 이상, 같은 owner의 어느 이력서도 참조하지 않음"이고, JSONB 내부 질의가 생긴다는 점을 1.5에 반영한다 | 1 |
+| T7 | **첨부 손실.** 교체나 비우기를 하면 이전 첨부를 즉시 DELETE한다(`F/AttachmentField.vue:51-52,65`). 그런데 복제 이력서는 같은 id를 공유한다(같은 파일 51행 주석, `docs/attachments.md:71`). 그래서 복제본에서 교체하면 원본의 파일이 사라지고, 저장하지 않고 나가도 이미 지워져 있다 | **적용함(2026-11-02)**: 즉시 삭제만 없앤다(교체·제거 모두). 화면에서 쓰지 않게 된 `deleteAttachment` 도 지웠고 `DELETE` 경로는 남긴다. 고아 첨부 정리 작업은 **만들지 않는다.** 기존 문서가 고아 첨부를 함정으로 받아들이고 있고, 용량이 실제 문제가 될 때 추가한다. 그때 기준은 "7일 이상, 같은 owner의 어느 이력서도 참조하지 않음"이고, JSONB 내부 질의가 생긴다는 점을 1.5에 반영한다 | 1 |
 | T8 | 트랜잭션 안에서 임베딩 서비스를 부르면 DB 연결 획득 3초 제한(`docs/backend.md:18`)에 걸린다 | 쓰기는 `embedding_dirty` 만 표시하고, 계산은 트랜잭션 밖 스위퍼가 한다(4.4) | 5 |
 | T9 | 이력서와 경험을 함께 잠그는 쓰기(저장 링커, 가져오기, 병합)에서 순서가 엇갈리면 교착이 생긴다. 예: 일반 저장은 이력서 → 경험, 병합은 경험 → 이력서(10.3 R14) | **경험 관계를 바꾸는 쓰기는 계정 단위로 직렬화한다.** 트랜잭션 첫 문장에서 `pg_advisory_xact_lock(hashtextextended(owner_id::text, 0))` 을 얻고, 그다음 이력서(id 오름차순) → 경험(id 오름차순) 순서로만 잠근다. `app_users` 행을 잠그지 않고 권고 잠금을 쓰는 것은 로그인 쓰기와 엉키지 않게 하려는 것이다. 해시 충돌은 두 계정을 잠깐 함께 줄 세울 뿐이다. 외부 호출(embedder, LLM)은 이 트랜잭션에 넣지 않는다. 1인 쓰기 규모라 계정 단위 직렬화의 대기는 허용한다 | 4 |
 
@@ -1078,7 +1079,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | D7 | 태그 선택지는 계정 기존 값에서 모은다 (`docs/job-postings.md:140`) | 역량·문항 유형은 시스템 고정 코드 18개로 둔다 | 문항과 사건이 같은 어휘를 써야 매칭된다 |
 | D8 | 메모리 BM25 (`:50`) | LEXICAL 신호로 유지하고 df 계산만 고친다. 존치는 실데이터 측정으로 정한다 | 합성 PoC는 제거 근거로 부족하다 |
 | D9 | `job_postings.target_position_id` | 쓰지도 지우지도 않는다 | 데이터 삭제 금지 원칙 |
-| D10 | 첨부 교체 시 즉시 삭제 (`docs/attachments.md:71`, `AttachmentField.vue:51`) | 즉시 삭제를 없앤다. 정리 작업은 두지 않는다 | 복제 이력서가 id를 공유해 원본의 파일이 사라진다 |
+| D10 | 첨부 교체 시 즉시 삭제 (`docs/attachments.md:71`, `AttachmentField.vue:51`) | 즉시 삭제를 없앤다. 정리 작업은 두지 않는다. **적용함(2026-11-02)** — `docs/decisions.md` 「첨부 교체·제거 때 이전 파일을 지우지 않는다」 | 복제 이력서가 id를 공유해 원본의 파일이 사라진다 |
 | D11 | 임베딩 저장은 pgvector `vector(384)` (`docs/experience-graph-search.md:149`) | **5단계에서 정한다.** 후보는 `REAL[]` + Java 정확 cosine, 또는 pgvector(공식 `pgvector/pgvector:pg17` 이미지)의 SQL 정확 검색 | pgvector는 인덱스 없이도 소유자로 거른 뒤 상위 k개만 돌려준다. `REAL[]` 은 검색마다 계정 벡터 전부를 JVM으로 가져온다. 반대로 pgvector 이미지는 Debian 기반이라 alpine에서 바꾸면 콜레이션이 달라져 REINDEX가 필요할 수 있고, 백업·복원이 확장에 묶인다. "인덱스가 필요 없으니 확장도 필요 없다"는 처음 근거는 약했다(10.3 R17) |
 | D12 | e5 접두 "질의 `query:`, 문서 `passage:`" (`:158`) | 문항↔문항은 양쪽 `query:` (4.4 표) | 확정된 맥락에 맞춘다 |
 | D13 | `owner_id` 없이 id만 보는 조회 메서드 금지 (`docs/experience-graph-search.md:161`) | 시스템 배치 예외: 임베딩 스위퍼만 허용한다. 별도 패키지·리포지토리이고, 대상은 dirty·임베딩 컬럼뿐, 내용은 embedder 외로 내보내지 않는다 | 계정과 무관한 백그라운드 적재가 필요하다 |

@@ -8,7 +8,6 @@ import type { Row } from '../types/resume'
 vi.mock('../api/attachments', () => ({
   uploadAttachment: vi.fn(),
   fetchAttachmentMeta: vi.fn().mockResolvedValue({ id: 'x', filename: 'x', contentType: 'image/png', size: 1 }),
-  deleteAttachment: vi.fn(),
   attachmentUrl: (id: string) => `/api/attachments/${id}`,
 }))
 

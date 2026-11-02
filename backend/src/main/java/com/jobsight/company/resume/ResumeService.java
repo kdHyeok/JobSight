@@ -1,5 +1,7 @@
 package com.jobsight.company.resume;
 
+import com.jobsight.company.attachment.AttachmentRepository;
+import com.jobsight.company.attachment.dto.AttachmentResponse;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.ResourceNotFoundException;
@@ -43,14 +45,17 @@ public class ResumeService {
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final PositionRepository positionRepository;
+    private final AttachmentRepository attachmentRepository;
 
     public ResumeService(ResumeRepository repository, CurrentUser currentUser, ObjectMapper objectMapper,
-                         Validator validator, PositionRepository positionRepository) {
+                         Validator validator, PositionRepository positionRepository,
+                         AttachmentRepository attachmentRepository) {
         this.repository = repository;
         this.currentUser = currentUser;
         this.objectMapper = objectMapper;
         this.validator = validator;
         this.positionRepository = positionRepository;
+        this.attachmentRepository = attachmentRepository;
     }
 
     /** 목록엔 content 를 싣지 않는다. 카드는 이름·수정일만 그린다. */
@@ -243,7 +248,28 @@ public class ResumeService {
     }
 
     private ResumeResponse toResponse(Resume resume) {
-        return ResumeResponse.of(resume, read(resume.getContent()));
+        ResumeContent content = read(resume.getContent());
+        return ResumeResponse.of(resume, content, attachmentMetas(content));
+    }
+
+    /**
+     * 문서가 가리키는 내 첨부의 메타. 편집기가 그려진 뒤 칸마다 메타를 부르던 직렬 단계를 없앤다(설계 1.3 P5).
+     * id 가 아닌 값은 버리고, 남의 것·지워진 것은 소유자 조건에서 빠진다 — 화면은 빠진 칸만 직접 부른다.
+     */
+    private Map<UUID, AttachmentResponse> attachmentMetas(ResumeContent content) {
+        Set<UUID> ids = new LinkedHashSet<>();
+        for (String raw : content.attachmentIds()) {
+            if (raw == null || raw.isBlank()) continue;
+            try {
+                ids.add(UUID.fromString(raw));
+            } catch (IllegalArgumentException ignored) {
+                // 손으로 적은 값이 섞여 있어도 이력서 열기를 막지 않는다. 그 칸은 "파일을 찾을 수 없습니다" 로 보인다.
+            }
+        }
+        if (ids.isEmpty()) return Map.of();
+        Map<UUID, AttachmentResponse> metas = new LinkedHashMap<>();
+        attachmentRepository.findMetas(ids, currentUser.id()).forEach(meta -> metas.put(meta.id(), meta));
+        return metas;
     }
 
     private Set<UUID> ownedPositionIds(List<UUID> rawIds) {

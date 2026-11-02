@@ -14,7 +14,5 @@ export function uploadAttachment(file: File): Promise<AttachmentMeta> {
 
 export const fetchAttachmentMeta = (id: string) => request<AttachmentMeta>(API.attachmentMeta(id))
 
-export const deleteAttachment = (id: string) => request<void>(API.attachment(id), { method: 'DELETE' })
-
 /** img·iframe 의 src. 세션 쿠키로 인증되므로 그대로 쓰면 된다. */
 export const attachmentUrl = (id: string) => API.attachment(id)

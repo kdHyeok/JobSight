@@ -66,7 +66,8 @@ content = {
 ```
 GET    /api/resumes            → [ {id, name, updatedAt} ]      목록엔 content 없음
 POST   /api/resumes            {name, content?, positionIds?}    content 없으면 빈 문서
-GET    /api/resumes/{id}       → {id, name, content, positionIds, version, createdAt, updatedAt}
+GET    /api/resumes/{id}       → {id, name, content, positionIds, version, attachments, createdAt, updatedAt}
+                                 attachments = {첨부 id → {id, filename, contentType, size}}  응답 전용, 내 첨부만
 PUT    /api/resumes/{id}       {name, content?, positionIds?, expectedVersion}   null=유지. 버전이 다르면 409 RESUME_STALE
 POST   /api/resumes/{id}/copy  {name}                            새 버전
 DELETE /api/resumes/{id}
@@ -127,5 +128,6 @@ cd frontend && npm run type-check && npm test
 - **MCP 행 도구는 중첩 표를 실을 수 없다.** `ResumeRowRequest` 는 평평한 문자열 합집합이다. `resume_row_update` 는 기존 행 위에 보낸 필드만 덮으므로(불변 조건 9), 요청이 표현하지 못한 배열 필드(성적표)는 그대로 남는다. 이 병합이 없으면 학력 행 하나를 고칠 때마다 성적표가 조용히 사라진다.
 - `when` 이 붙은 필드는 같은 행의 다른 값에 따라 **숨는다**. 숨어도 값은 문서에 남는다 — 학교 구분을 바꿨다가 되돌리면 그대로 돌아온다.
 - **저장 중인 이력서를 다시 읽을 때는 저장 완료를 기다린다.** `api/resumes.ts` 가 같은 id의 쓰기 순서와 저장 뒤 조회 순서를 보장한다. 다른 id의 조회는 기다리지 않는다. 저장이 실패해도 대기는 풀리고 서버에 남은 문서를 다시 읽을 수 있다. 이 순서는 화면 컴포넌트를 벗어났다가 다시 만들어도 유지된다. 편집기는 조회가 끝날 때까지 숨겨 오래된 문서를 다시 저장하지 못하게 한다. `ResumeSaveRace.spec.ts` 가 A 저장 중 B로 이동 후 A 복귀, 재저장 때 첫 수정 보존, 컴포넌트 재생성, 저장 실패와 같은 id의 연속 저장을 검증한다.
-- **편집기를 열 때 연결 문항은 이력서와 같은 단계에서 부른다.** `ResumeBoard.loadCurrent` 가 이력서·직무·연결 문항을 `Promise.all` 로 함께 보내고 `ResumeEditor` → `ResumeQuestions` 로 `questions` 를 내린다. 문항 칸이 그려진 뒤에 부르면 왕복 하나를 더 기다리는데, 공개 도메인은 한국 요청이 Cloudflare LAX 엣지를 거쳐 서울 터널로 가서 왕복 하나가 약 0.3초다(2026-11 측정, 서버 안 처리는 2ms 미만). 문항 요청이 실패하면 `null` 을 넘기고 문항 칸이 직접 다시 불러 오류를 보여 준다 — 문항 실패가 이력서 열기를 막지 않게. 추가·연결·수정 뒤 다시 부르는 것은 계속 `ResumeQuestions` 가 한다. 첨부 파일이 있는 이력서는 `AttachmentField` 가 그려진 뒤 메타를 부르므로 그 단계는 아직 남아 있다. `ResumeBoard.spec.ts` 가 "문항 요청이 이력서 응답을 기다리지 않는다" 를 고정한다.
+- **편집기를 열 때 연결 문항은 이력서와 같은 단계에서 부른다.** `ResumeBoard.loadCurrent` 가 이력서·직무·연결 문항을 `Promise.all` 로 함께 보내고 `ResumeEditor` → `ResumeQuestions` 로 `questions` 를 내린다. 문항 칸이 그려진 뒤에 부르면 왕복 하나를 더 기다리는데, 공개 도메인은 한국 요청이 Cloudflare LAX 엣지를 거쳐 서울 터널로 가서 왕복 하나가 약 0.3초다(2026-11 측정, 서버 안 처리는 2ms 미만). 문항 요청이 실패하면 `null` 을 넘기고 문항 칸이 직접 다시 불러 오류를 보여 준다 — 문항 실패가 이력서 열기를 막지 않게. 추가·연결·수정 뒤 다시 부르는 것은 계속 `ResumeQuestions` 가 한다. `ResumeBoard.spec.ts` 가 "문항 요청이 이력서 응답을 기다리지 않는다" 를 고정한다.
+- **첨부 메타는 이력서 응답에 함께 온다.** 이력서를 돌려주는 모든 응답(상세·생성·저장·복제·`resume_get`)에 `attachments`(첨부 id → 파일명·형식·크기)가 실린다. `ResumeEditor` → `ResumeSection` → `AttachmentField` 로 `preloaded` 를 내리고, 받은 메타가 있는 칸은 `GET /api/attachments/{id}/meta` 를 부르지 않는다. 전에는 편집기가 그려진 뒤 첨부 칸마다 메타를 불러 첨부가 있는 이력서에 직렬 단계가 하나 남아 있었다(설계 1.3 P5). 남의 것·지워진 id·id 가 아닌 값은 응답에서 빠지고, 그 칸만 전처럼 직접 불러 `파일을 찾을 수 없습니다` 를 보인다. 첨부 칸은 `ResumeContent.attachmentIds()` 가 모으며 `SECTIONS` 의 `kind: 'file'` 필드와 같아야 한다 — 첨부 칸을 더하면 둘 다 고친다. 단위 테스트(`ResumeServiceTest`)가 7칸을, 통합 테스트(`ResumeAttachmentsIntegrationTest`)가 남의 첨부가 빠지는 것을, `AttachmentField.spec.ts` 가 편집기에서 메타 요청이 나가지 않는 것을 본다.
 - **늦게 온 응답은 버린다.** A 를 연 뒤 B 를 열면 A 응답이 B 보다 늦게 올 수 있다. `ResumeBoard.loadCurrent` 와 `ResumeQuestions.load` 는 요청 순번(`loadSeq`)을 두고 마지막 요청의 결과만 반영한다. 저장도 같다: `ResumeBoard.save` 는 시작할 때의 순번을 기억하고, 저장 중에 다른 이력서로 옮겼으면 응답을 편집기에 넣지 않는다. 문항 칸은 이력서 id 가 바뀌면 목록·수정 상태·오류를 바로 비우고, 부모가 문항을 못 받았으면(`null`) 직접 다시 부른다. 순서를 뒤집는 테스트가 `ResumeBoard.spec.ts`·`ResumeQuestions.spec.ts` 에 있다.

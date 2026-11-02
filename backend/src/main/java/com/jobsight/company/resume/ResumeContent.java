@@ -3,7 +3,10 @@ package com.jobsight.company.resume;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * 이력서 문서의 모양. JSON 으로 저장되고 요청·응답에 그대로 실린다.
@@ -53,8 +56,25 @@ public record ResumeContent(
                 projects != null ? projects : stored.projects);
     }
 
+    /** 첨부 id 가 들어가는 칸 전부. 프런트 SECTIONS 의 kind 'file' 필드와 같은 목록이다 — docs/attachments.md. */
+    List<String> attachmentIds() {
+        List<String> ids = new ArrayList<>();
+        if (basic != null) ids.add(basic.portfolioFileId());
+        rows(educations).forEach(row -> { ids.add(row.diplomaId()); ids.add(row.transcriptId()); });
+        rows(trainings).forEach(row -> ids.add(row.fileId()));
+        rows(activities).forEach(row -> ids.add(row.fileId()));
+        rows(awards).forEach(row -> ids.add(row.fileId()));
+        rows(certificates).forEach(row -> ids.add(row.fileId()));
+        return ids;
+    }
+
     private static <T> List<T> orEmpty(List<T> list) {
         return list == null ? List.of() : list;
+    }
+
+    /** null 행은 건너뛴다. 입력 검증이 [null] 을 막지 않고 예전에 저장된 문서에도 있다 — 응답 조립이 500 이 되면 안 된다. */
+    private static <T> Stream<T> rows(List<T> list) {
+        return orEmpty(list).stream().filter(Objects::nonNull);
     }
 
     public record BasicInfo(

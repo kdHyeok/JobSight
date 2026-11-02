@@ -1,5 +1,7 @@
 package com.jobsight.company.resume;
 
+import com.jobsight.company.attachment.AttachmentRepository;
+import com.jobsight.company.attachment.dto.AttachmentResponse;
 import com.jobsight.company.auth.CurrentUser;
 import com.jobsight.company.common.ApiRuleException;
 import com.jobsight.company.common.ResourceNotFoundException;
@@ -20,11 +22,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,6 +38,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class ResumeServiceTest {
@@ -41,6 +47,7 @@ class ResumeServiceTest {
     @Mock private ResumeRepository repository;
     @Mock private CurrentUser currentUser;
     @Mock private PositionRepository positionRepository;
+    @Mock private AttachmentRepository attachmentRepository;
 
     private final JsonMapper mapper = JsonMapper.builder().build();
     private ResumeService service;
@@ -48,7 +55,7 @@ class ResumeServiceTest {
     @BeforeEach
     void setUp() {
         service = new ResumeService(repository, currentUser, mapper,
-                Validation.buildDefaultValidatorFactory().getValidator(), positionRepository);
+                Validation.buildDefaultValidatorFactory().getValidator(), positionRepository, attachmentRepository);
         given(currentUser.id()).willReturn(OWNER_ID);
     }
 
@@ -280,6 +287,68 @@ class ResumeServiceTest {
         assertThatThrownBy(() -> service.copy(id, new ResumeCopyRequest("x"))).isInstanceOf(ResourceNotFoundException.class);
         assertThatThrownBy(() -> service.update(id, new ResumeRequest("x", null, null, 0L)))
                 .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    /**
+     * 편집기가 그려진 뒤 첨부 필드마다 메타를 다시 부르지 않게, 문서가 가리키는 첨부의 메타를 응답에 싣는다(설계 1.3 P5).
+     * 첨부 칸 7개를 모두 모으고 id 가 아닌 값은 버린다. 소유자 조건은 저장소 조회에 들어간다.
+     */
+    @Test
+    void detailCarriesAttachmentMetasOfEveryFileField() {
+        List<UUID> ids = Stream.generate(UUID::randomUUID).limit(7).toList();
+        Resume resume = new Resume(OWNER_ID, "v1", """
+                {"basic":{"portfolioFileId":"%s"},
+                 "educations":[{"school":"대학","diplomaId":"%s","transcriptId":"%s"}],
+                 "trainings":[{"name":"교육","fileId":"%s"}],
+                 "activities":[{"name":"활동","fileId":"%s"}],
+                 "awards":[{"name":"상","fileId":"%s"},{"name":"옛 값","fileId":"첨부 아님"}],
+                 "certificates":[{"name":"자격증","fileId":"%s"},{"name":"빈 칸","fileId":""}]}
+                """.formatted(ids.toArray()));
+        resume.onCreate();
+        given(repository.findByIdAndOwnerId(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
+        AttachmentResponse mine = new AttachmentResponse(ids.get(0), "포트폴리오.pdf", "application/pdf", 2048);
+        // 저장소는 내 것만 돌려준다. 남의 것·지워진 것은 응답에서 빠지고, 화면이 그 칸만 직접 부른다.
+        given(attachmentRepository.findMetas(Set.copyOf(ids), OWNER_ID)).willReturn(List.of(mine));
+
+        ResumeResponse response = service.findById(resume.getId());
+
+        assertThat(response.attachments()).containsExactly(Map.entry(ids.get(0), mine));
+    }
+
+    /**
+     * 컨테이너 요소에 @NotNull 이 없어 [null] 행은 검증을 통과하고 그대로 저장된다. 예전에 저장된 문서에도 있을 수 있다.
+     * 첨부 칸을 모으다가 그 행에서 NPE 가 나면 상세·생성이 500 이 되고 이력서를 열 수 없다.
+     */
+    @Test
+    void nullRowsDoNotBreakTheResponse() {
+        saveReturnsArgument();
+        UUID fileId = UUID.randomUUID();
+        AttachmentResponse meta = new AttachmentResponse(fileId, "이수증.pdf", "application/pdf", 1024);
+        given(attachmentRepository.findMetas(Set.of(fileId), OWNER_ID)).willReturn(List.of(meta));
+        Resume resume = new Resume(OWNER_ID, "v1", """
+                {"trainings":[null,{"name":"교육","fileId":"%s"}],"activities":[null],"awards":[null],"certificates":[null]}
+                """.formatted(fileId));
+        resume.onCreate();
+        given(repository.findByIdAndOwnerId(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
+
+        assertThat(service.findById(resume.getId()).attachments()).containsExactly(Map.entry(fileId, meta));
+
+        ResumeContent withNullRows = new ResumeContent(null, null,
+                Arrays.asList(null, new ResumeContent.Training("교육", null, null, null, null, fileId.toString())),
+                Collections.singletonList(null), null, Collections.singletonList(null),
+                Collections.singletonList(null), null, null);
+        ResumeResponse created = service.create(new ResumeRequest("v2", withNullRows, List.of(), null));
+        assertThat(created.attachments()).containsExactly(Map.entry(fileId, meta));
+    }
+
+    @Test
+    void detailWithoutAttachmentsSkipsTheLookup() {
+        Resume resume = new Resume(OWNER_ID, "v1", "{\"skills\":[{\"name\":\"Java\"}]}");
+        resume.onCreate();
+        given(repository.findByIdAndOwnerId(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
+
+        assertThat(service.findById(resume.getId()).attachments()).isEmpty();
+        verifyNoInteractions(attachmentRepository);
     }
 
     private static Throwable catchThrown(Runnable action) {
