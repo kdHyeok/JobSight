@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
@@ -163,7 +164,10 @@ public record ResumeContent(
             @Size(max = SHORT) String endYm,
             @Size(max = LONG) String description,
             /** 이수증. attachments 의 id 문자열. */
-            @Size(max = SHORT) String fileId
+            @Size(max = SHORT) String fileId,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 
@@ -173,7 +177,10 @@ public record ResumeContent(
             @Size(max = SHORT) String startYm,
             @Size(max = SHORT) String endYm,
             @Size(max = LONG) String description,
-            @Size(max = SHORT) String fileId
+            @Size(max = SHORT) String fileId,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 
@@ -181,7 +188,10 @@ public record ResumeContent(
             @Size(max = SHORT) String company,
             @Size(max = SHORT) String startYm,
             @Size(max = SHORT) String endYm,
-            @Size(max = LONG) String description
+            @Size(max = LONG) String description,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 
@@ -220,7 +230,10 @@ public record ResumeContent(
             @Size(max = URL) String role,
             @Size(max = LONG) String outcome,
             @Size(max = LONG) String description,
-            @Size(max = URL) String url
+            @Size(max = URL) String url,
+            /** 경험 앵커(설계 6.1): 이 행이 쓴 경험 id 와 그 개정 번호. 개정은 링커(ResumeWriter)만 정한다. */
+            UUID experienceId,
+            Integer experienceRevision
     ) {
     }
 }

@@ -2,6 +2,8 @@ package com.jobsight.company.resume.dto;
 
 import jakarta.validation.constraints.Size;
 
+import java.util.UUID;
+
 /**
  * MCP 행 도구의 입력. 8개 섹션 필드의 합집합이다 — MCP 스키마 생성기가 Map 을 그리지 못하고,
  * 섹션마다 도구를 만들면 24개가 된다. 어느 필드가 어느 섹션 것인지는 서비스가 섹션 record 로
@@ -37,6 +39,11 @@ public record ResumeRowRequest(
         @Size(max = 500) String role,
         @Size(max = 5000) String outcome,
         @Size(max = 5000) String description,
-        @Size(max = 500) String url
+        @Size(max = 500) String url,
+        /**
+         * 경험 섹션(projects·activities·experiences·trainings) 행의 경험 앵커. 개정 번호는 받지 않는다 —
+         * 서버가 저장된 행에서 이어받거나 새 연결이면 지금 개정을 쓴다(설계 6.2). 다른 섹션에 보내면 UNKNOWN_ROW_FIELD.
+         */
+        UUID experienceId
 ) {
 }

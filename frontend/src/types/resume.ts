@@ -19,8 +19,14 @@ export interface BasicInfo {
 /** 행 안의 표 한 줄(학년별 이수 내역 등). 값은 전부 문자열이다. */
 export type TermRow = Record<string, string>
 
-/** 섹션 행의 값 — 보통은 문자열, 중첩 표(kind: 'terms')만 배열이다. */
-export type RowValue = string | TermRow[]
+/** 섹션 행의 값 — 보통은 문자열, 중첩 표(kind: 'terms')만 배열이다. 경험 앵커의 개정 번호만 숫자다. */
+export type RowValue = string | number | TermRow[]
+
+/**
+ * 경험 섹션 행의 앵커 — 행이 어느 경험(id)의 몇 번째 개정을 보고 쓴 것인가(docs/experiences.md).
+ * 화면에 칸이 없지만 저장 payload 로 그대로 돌려보낸다. 지우면 서버가 연결을 잃는다.
+ */
+export const ANCHOR_KEYS = ['experienceId', 'experienceRevision'] as const
 
 /** 섹션 행. 키는 SECTIONS 의 field.key. */
 export type Row = Record<string, RowValue>
@@ -278,6 +284,10 @@ function fillRow(section: SectionConfig, row: Row): Row {
     } else {
       filled[field.key] = text(row, field.key)
     }
+  }
+  // 앵커는 SECTIONS 의 칸이 아니라서 위 반복이 버린다. 있는 것만 그대로 옮긴다(없는 행에 키를 만들지 않는다).
+  for (const key of ANCHOR_KEYS) {
+    if (row[key] !== undefined && row[key] !== null) filled[key] = row[key]
   }
   return filled
 }
