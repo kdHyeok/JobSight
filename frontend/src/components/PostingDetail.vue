@@ -9,6 +9,7 @@ import {
   stepResultLabels,
 } from '../types/posting'
 import MarkdownMemo from './MarkdownMemo.vue'
+import SubmissionRecords from './SubmissionRecords.vue'
 import { opensEditor } from '../utils/doubleClick'
 
 // 수정·보관·삭제는 드로어 헤더가 가진다. 여기서 바로 바꾸는 건 내 상태와 절차 결과 — 가장 잦은 조작.
@@ -45,6 +46,8 @@ const formatDate = (value: string | null) =>
         </select>
       </label>
     </section>
+
+    <SubmissionRecords v-if="posting.status !== 'INTERESTED' && posting.status !== 'DRAFTING'" :posting-id="posting.id" :revision="posting.updatedAt" />
 
     <section class="detail-section">
       <p class="label">채용 절차 <small>노드를 누르면 결과가 바뀝니다</small></p>

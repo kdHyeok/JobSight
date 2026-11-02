@@ -35,6 +35,10 @@ public final class ApiPaths {
     public static final String COMPANIES = API + "/companies";
     public static final String COMPANY_CONTENTS = COMPANIES + "/{companyId}/contents";
     public static final String POSTINGS = API + "/postings";
+    /** 공고별 제출 기록(설계 6.6). */
+    public static final String POSTING_SUBMISSIONS = POSTINGS + "/{postingId}/submissions";
+    /** 계정당 작성 기준 하나(설계 6.7). */
+    public static final String WRITING_GUIDE = API + "/writing-guide";
     public static final String POSITIONS = API + "/positions";
     public static final String REFERENCES = API + "/references";
     public static final String RESUMES = API + "/resumes";

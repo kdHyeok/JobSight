@@ -1,5 +1,6 @@
 package com.jobsight.company.selfintro.dto;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import com.jobsight.company.common.LinkSource;
 import com.jobsight.company.selfintro.Competency;
 import com.jobsight.company.selfintro.SelfIntroduction;
@@ -17,7 +18,9 @@ import java.util.UUID;
 public record SelfIntroductionResponse(UUID id, List<UUID> resumeIds, String question, String answer,
                                        Instant createdAt, Instant updatedAt,
                                        List<PositionLinkView> positionLinks, List<QuestionTypeView> questionTypes,
-                                       long version, List<ExperienceLinkView> experiences) {
+                                       long version, List<ExperienceLinkView> experiences,
+                                       /** MCP 로 저장했을 때의 재현 정보(설계 6.7). 웹으로만 저장한 문항은 null. */
+                                       @JsonRawValue String writingContext) {
     public record PositionLinkView(UUID positionId, LinkSource source) {}
     /** 작성 근거 (경험 id, 개정) 쌍과 출처. 저장된 쌍 그대로다(지금 개정으로 다시 계산하지 않는다, 설계 6.8). */
     public record ExperienceLinkView(UUID experienceId, int experienceRevision, LinkSource source) {}
@@ -33,6 +36,7 @@ public record SelfIntroductionResponse(UUID id, List<UUID> resumeIds, String que
                 value.getVersion(),
                 value.getExperienceLinks().stream()
                         .map(link -> new ExperienceLinkView(link.experienceId(), link.experienceRevision(), link.source()))
-                        .sorted(Comparator.comparing(ExperienceLinkView::experienceId)).toList());
+                        .sorted(Comparator.comparing(ExperienceLinkView::experienceId)).toList(),
+                value.getWritingContext());
     }
 }

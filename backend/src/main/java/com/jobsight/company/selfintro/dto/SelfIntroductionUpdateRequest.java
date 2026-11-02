@@ -1,5 +1,6 @@
 package com.jobsight.company.selfintro.dto;
 
+import com.jobsight.company.experience.dto.ExperienceSearchResult;
 import com.jobsight.company.selfintro.Competency;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -27,10 +28,20 @@ public record SelfIntroductionUpdateRequest(
          * 작성 근거 (경험 id, 개정) 쌍(설계 6.8). null 은 유지. 웹은 목록으로 맞추고([] 는 비움), MCP 는 더하기만 한다 —
          * 이미 연결된 경험은 건너뛰고, 빼기와 개정 바꾸기는 웹에서만 한다.
          */
-        @Size(max = 10, message = "작성 근거 경험은 10개 이하여야 합니다.") List<ExperienceRef> experiences
+        @Size(max = 10, message = "작성 근거 경험은 10개 이하여야 합니다.") List<ExperienceRef> experiences,
+        /**
+         * MCP 전용 재현 정보(설계 6.7): 이 답변을 쓰기 전에 받은 experience_search 응답의 context 를 그대로 넘긴다(선택).
+         * 서버가 작성 기준 version·쓴 경험 개정과 함께 writing_context 에 남긴다. 웹 저장은 이 값을 쓰지 않는다.
+         */
+        ExperienceSearchResult.Context searchContext
 ) {
     public SelfIntroductionUpdateRequest(List<UUID> resumeIds, List<UUID> positionIds, List<Competency> questionTypes,
                                          String question, String answer, Long expectedVersion) {
-        this(resumeIds, positionIds, questionTypes, question, answer, expectedVersion, null);
+        this(resumeIds, positionIds, questionTypes, question, answer, expectedVersion, null, null);
+    }
+
+    public SelfIntroductionUpdateRequest(List<UUID> resumeIds, List<UUID> positionIds, List<Competency> questionTypes,
+                                         String question, String answer, Long expectedVersion, List<ExperienceRef> experiences) {
+        this(resumeIds, positionIds, questionTypes, question, answer, expectedVersion, experiences, null);
     }
 }

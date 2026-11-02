@@ -14,6 +14,7 @@ import com.jobsight.company.resume.ResumeRepository;
 import com.jobsight.company.resume.dto.ResumePositionRow;
 import com.jobsight.company.selfintro.dto.SelfIntroductionList;
 import com.jobsight.company.embedding.DenseIndex;
+import com.jobsight.company.submission.SubmissionService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -48,6 +49,8 @@ public class SelfIntroductionAgentService {
     private static final int RRF_K = 60;
     /** 의미 검색 후보 수(설계 4.2 PAST_QUESTION 의 상위 30 과 같다). */
     private static final int DENSE_TOP = 30;
+    /** 그 공고에 사용자 확인 제출 기록이 없어 지금 연결(written_for)로 판단한 사용처. */
+    static final String UNCONFIRMED = "제출본 미확인";
 
     private final SelfIntroductionRepository repository;
     private final PositionRepository positions;
@@ -59,12 +62,15 @@ public class SelfIntroductionAgentService {
     private final ExperienceRevisions revisions;
     private final DenseIndex dense;
     private final TransactionTemplate readOnly;
+    private final SubmissionService submissions;
 
     public SelfIntroductionAgentService(SelfIntroductionRepository repository, PositionRepository positions,
                                         ResumeRepository resumes, JobPostingRepository postings,
                                         CompanyRepository companies, CurrentUser currentUser,
                                         ExperienceRepository experiences, ExperienceRevisions revisions,
-                                        DenseIndex dense, PlatformTransactionManager transactions) {
+                                        DenseIndex dense, PlatformTransactionManager transactions,
+                                        SubmissionService submissions) {
+        this.submissions = submissions;
         this.dense = dense;
         this.readOnly = new TransactionTemplate(transactions);
         this.readOnly.setReadOnly(true);
@@ -89,6 +95,8 @@ public class SelfIntroductionAgentService {
         private final Map<UUID, List<UUID>> resumePositions = new HashMap<>();
         private final Map<UUID, String> experienceTitles = new HashMap<>();
         private Map<UUID, List<ExperienceRevisions.Rev>> experienceHistory = Map.of();
+        /** 공고 id → 사용자 확인 이상 최신 제출 기록. */
+        private Map<UUID, SubmissionService.Confirmed> confirmed = Map.of();
 
         void addPositions(Collection<PositionLabel> labels) {
             labels.forEach(label -> positionLabels.put(label.id(), label));
@@ -104,12 +112,20 @@ public class SelfIntroductionAgentService {
             }
         }
 
-        /** 문항들의 직접·간접 출처를 그리는 데 필요한 이름: 이력서 1회, 직무 1회. */
+        /**
+         * 문항들의 직접·간접 출처를 그리는 데 필요한 이름: 이력서 1회, 사용자 확인 제출 기록 1회(alreadyUsedFor, 설계 6.6), 직무 1회.
+         */
         void loadFor(Collection<SelfIntroduction> values) {
+            if (values.isEmpty()) return;
             loadResumes(values.stream().flatMap(value -> value.getResumeIds().stream()));
-            List<UUID> missing = Stream.concat(
+            confirmed = submissions.confirmedByPosting(owner);
+            Set<UUID> ids = values.stream().map(SelfIntroduction::getId).collect(Collectors.toSet());
+            List<UUID> missing = Stream.of(
                             values.stream().flatMap(value -> value.getPositionLinks().stream().map(SelfIntroduction.PositionLink::positionId)),
-                            values.stream().flatMap(value -> value.getResumeIds().stream()).flatMap(this::positionsOf))
+                            values.stream().flatMap(value -> value.getResumeIds().stream()).flatMap(this::positionsOf),
+                            confirmed.values().stream().flatMap(c -> c.selfIntros().entrySet().stream())
+                                    .filter(entry -> ids.contains(entry.getKey())).flatMap(entry -> entry.getValue().stream()))
+                    .flatMap(s -> s)
                     .distinct().filter(id -> !positionLabels.containsKey(id)).toList();
             if (!missing.isEmpty()) addPositions(positions.findLabels(missing, owner));
             // 작성 근거가 있는 문항이 있을 때만 경험 이름과 개정 이력을 읽는다(각 1회).
@@ -267,11 +283,29 @@ public class SelfIntroductionAgentService {
         List<SelfIntroductionList.QuestionType> types = questionTypes(value);
         boolean fit = types.stream().anyMatch(type -> type.code().searchMode() == Competency.SearchMode.FIT);
         UUID targetCompany = target == null ? null : target.companyId();
-        List<SelfIntroductionList.UsedFor> usedFor = direct.stream()
-                .map(d -> new SelfIntroductionList.UsedFor(d.companyId(), d.company(), d.position(),
-                        targetCompany == null ? null : targetCompany.equals(d.companyId()),
-                        fit && (targetCompany == null || !targetCompany.equals(d.companyId()))))
-                .toList();
+        List<SelfIntroductionList.UsedFor> usedFor = new ArrayList<>();
+        // 설계 6.6: 공고에 사용자 확인 이상 제출 기록이 있으면 그 스냅샷을 쓴다 — 스냅샷에 없는 답변은 그 공고에 낸 것이 아니다.
+        Set<UUID> coveredPostings = new java.util.HashSet<>();
+        for (SelfIntroductionList.Direct d : direct) {
+            UUID posting = context.positionLabels.get(d.positionId()).postingId();
+            SubmissionService.Confirmed confirmed = context.confirmed.get(posting);
+            if (confirmed != null && !confirmed.selfIntros().containsKey(value.getId())) continue;
+            if (confirmed != null) coveredPostings.add(posting);
+            usedFor.add(usedFor(d.companyId(), d.company(), d.position(), targetCompany, fit,
+                    confirmed == null ? UNCONFIRMED : SubmissionService.label(confirmed.level())));
+        }
+        // 확인한 제출본에는 있는데 지금 그 공고로 직접 출처가 없는 답변(연결을 지웠거나 처음부터 없던 것).
+        for (SubmissionService.Confirmed confirmed : context.confirmed.values()) {
+            List<UUID> snapshotPositions = confirmed.selfIntros().get(value.getId());
+            if (snapshotPositions == null || coveredPostings.contains(confirmed.postingId())) continue;
+            List<PositionLabel> labels = snapshotPositions.stream().map(context.positionLabels::get).filter(Objects::nonNull).toList();
+            String level = SubmissionService.label(confirmed.level());
+            if (labels.isEmpty()) {
+                usedFor.add(usedFor(confirmed.companyId(), confirmed.company(), confirmed.postingTitle(), targetCompany, fit, level));
+            } else {
+                labels.forEach(p -> usedFor.add(usedFor(p.companyId(), p.companyName(), p.name(), targetCompany, fit, level)));
+            }
+        }
 
         String answer = value.getAnswer() == null ? "" : value.getAnswer();
         String preview = full ? null : answer.length() > PREVIEW ? answer.substring(0, PREVIEW) + "…" : answer;
@@ -285,7 +319,15 @@ public class SelfIntroductionAgentService {
                                 context.experienceTitles.get(link.experienceId()), link.source().trust(),
                                 ExperienceRevisions.needsReview(context.experienceHistory.getOrDefault(link.experienceId(),
                                         List.of()), link.experienceRevision())))
-                        .sorted(Comparator.comparing(SelfIntroductionList.ExperienceUse::experienceId)).toList());
+                        .sorted(Comparator.comparing(SelfIntroductionList.ExperienceUse::experienceId)).toList(),
+                full ? value.getWritingContext() : null);
+    }
+
+    private static SelfIntroductionList.UsedFor usedFor(UUID companyId, String company, String position, UUID targetCompany,
+                                                        boolean fit, String submission) {
+        return new SelfIntroductionList.UsedFor(companyId, company, position,
+                targetCompany == null ? null : targetCompany.equals(companyId),
+                fit && (targetCompany == null || !targetCompany.equals(companyId)), submission);
     }
 
     /**

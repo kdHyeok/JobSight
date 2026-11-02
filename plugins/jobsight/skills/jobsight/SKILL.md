@@ -79,6 +79,11 @@ id와 이력서·자기소개 연결을 유지한다. 어느 항목과도 맞지
 
 상태 변경: `posting_set_status({id,request:{status}})`.
 
+**제출 기록.** 공고가 SUBMITTED 가 되면(상태 변경·생성·수정 어느 경로든) 서버가 그 공고 직무에 연결된 이력서와 그 직무용 자기소개를
+제출 기록으로 남기고 응답에 `submission:{id, level}` 을 싣는다. 같은 요청을 다시 보내도 기록은 하나다.
+`level:"LINKED"` 는 **"기록 당시 연결 자료"이지 제출본이 아니다** — "제출한 이력서"라고 말하지 않는다. 실제로 낸 것은 사용자가
+웹 공고 상세의 "실제로 낸 것 확인"에서 고른다(USER_CONFIRMED, 접수 근거를 붙이면 RECEIPT_VERIFIED). 확인 도구는 MCP 에 없다.
+
 | 화면 | 상태 |
 |---|---|
 | 관심 공고: 관심 / 작성 중 | INTERESTED / DRAFTING |
@@ -234,6 +239,8 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
   `fallback:"indirect"` 면 그 직무용 직접 출처가 0건이라 연결 이력서로 찾은 **"출처 미상"** 답변을 준 것이다. 그 답변이 이 지원용이라고 단정하지 않는다. 필터를 버리고 다시 부르지 않는다.
 - `trust` 는 `확정`(사용자가 웹에서 연결을 확인), `AI 기록`(AI가 남겨 아직 확인 전), `추정`(계산값) 셋이다. **관계를 누가 확인했나일 뿐 성과·사실 검증이 아니다.**
 - `questionTypes` 는 사용자가 확정한 유형(`from` USER), 없으면 정규식 추정(`from` REGEX, `confidence` 있음)이다. AI 기록 유형(`from` AI)은 추정을 지우지 않고 덧붙는다.
+- `alreadyUsedFor[].submission` 은 그 사용처의 근거다. `사용자가 확인한 제출본`·`접수 근거와 대조한 제출본` 이면 사용자가 실제로 낸 것으로 확인했고,
+  `제출본 미확인` 이면 지금 연결만 보고 판단한 것이라 "그 회사에 낸 답변"이라고 단정하지 않는다.
 - `alreadyUsedFor[].otherCompanySpecific:true` 는 **다른 회사용 지원동기·입사 후 포부·직무 이해 답변**이다. 그 본문을 다른 회사 지원서에 재사용하지 않는다(경험 소재만 참고). `sameCompany:true` 면 같은 회사에 낸 답변이다.
 
 **저장한 연결은 "AI 기록"이다.** MCP로 보낸 `positionIds`·`questionTypes` 는 항상 AI 기록으로 저장되고, 확정은 사용자가 웹 `/introductions` 에서만 한다(✓ 확정, ✗ 해제).
@@ -241,6 +248,10 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 수정에서 연결을 바꾸지 않으면 `positionIds`·`questionTypes` 를 뺀다. **MCP 수정은 연결을 더하기만 한다** — 목록에서 빼도 기존 연결(확정·AI 기록)은 지워지지 않는다.
 연결을 빼야 하면(잘못 단 직무 포함) 사용자에게 웹 `/introductions` 에서 ✗ 로 해제하라고 안내한다. 더한 결과가 직무 10개·유형 3개·경험 10개를 넘으면 `TOO_MANY_LINKS` 다.
 작성 근거 `experiences` 도 더하기만 한다 — 이미 연결된 경험은 건너뛰고(개정도 그대로), 빼기·개정 바꾸기는 웹에서 한다.
+**작성 기준.** 자기소개·이력서 문구를 쓰기 전에 `writing_guide_get` 으로 사용자의 작성 기준(선호 문체·피할 표현·성과 설명 범위, Markdown)을 읽고 따른다.
+경험별 주의사항은 `experience_index` 상세의 `dossier.cautions` 다. 작성 기준 수정은 웹 `/introductions` 의 "작성 기준"에서 사용자가 한다.
+`self_intro_create`·`self_intro_update` 의 `request.searchContext` 에는 그 답변을 쓰려고 받은 `experience_search` 응답의 `context` 를 그대로 넣는다(선택).
+서버가 작성 기준 version·작성 근거 개정과 함께 `writingContext` 로 남기고 `self_intro_get` 이 돌려준다.
 다른 회사용 답변을 고쳐 쓸 때는 기존 문항을 수정하지 말고 새 문항으로 만든다 — 원래 회사의 직접 출처가 남아 있어야 재사용 금지 표시가 유지된다.
 
 ## 계정과 관리자

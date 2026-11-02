@@ -122,6 +122,8 @@ check "GET /api/postings"                   "401"  "$(code "$BASE/api/postings")
 check "GET /api/positions"                  "401"  "$(code "$BASE/api/positions")"
 check "GET /api/resumes"                    "401"  "$(code "$BASE/api/resumes")"
 check "GET /api/self-introductions"         "401"  "$(code "$BASE/api/self-introductions")"
+check "GET /api/writing-guide"              "401"  "$(code "$BASE/api/writing-guide")"
+check "GET /api/postings/{id}/submissions"  "401"  "$(code "$BASE/api/postings/00000000-0000-0000-0000-000000000000/submissions")"
 check "GET /api/attachments/x"              "401"  "$(code "$BASE/api/attachments/x")"
 check "GET /api/references"                 "401"  "$(code "$BASE/api/references")"
 check "GET /api/requests"                   "401"  "$(code "$BASE/api/requests")"

@@ -26,6 +26,8 @@ public final class ApiErrors {
     /** 경험 쪽을 가리키는 지연 FK 셋(V25). 삭제 쪽 위반 = 쓰이는 경험을 지움, 삽입 쪽 위반 = 확인 뒤 경험이 지워짐. */
     private static final Set<String> EXPERIENCE_FKS = Set.of("resume_experiences_experience_fk",
             "resume_experiences_revision_fk", "self_introduction_experiences_revision_fk");
+    /** 제출 기록 → 첨부 지연 FK(V28). */
+    private static final String SUBMISSION_ATTACHMENT_FK = "submission_attachments_attachment_fk";
 
     private ApiErrors() {
     }
@@ -110,6 +112,10 @@ public final class ApiErrors {
             return insertSide
                     ? error(HttpStatus.CONFLICT, "EXPERIENCE_CHANGED", "확인한 뒤 경험이나 그 개정이 지워졌습니다. 경험을 다시 읽고 시도하세요.")
                     : error(HttpStatus.CONFLICT, "EXPERIENCE_IN_USE", "이력서나 자기소개가 쓰고 있는 경험입니다. 연결을 먼저 정리하세요.");
+        }
+        if (!insertSide && SUBMISSION_ATTACHMENT_FK.equals(constraint)) {
+            // 제출 기록이 가리키는 첨부를 지우려 함(설계 6.6·6.9). DB 가 막는 방어선이다.
+            return error(HttpStatus.CONFLICT, "ATTACHMENT_IN_USE", "제출 기록이 가리키는 파일이라 지울 수 없습니다.");
         }
         if (insertSide && constraint.contains("owner_id")) {
             // 소유자 복합 FK(설계 2.4): 남의 노드를 잇는 행. 존재를 알리지 않도록 404.

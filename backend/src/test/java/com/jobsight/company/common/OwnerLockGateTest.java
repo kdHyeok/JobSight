@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OwnerLockGateTest {
     private static final Path MAIN = Path.of("src/main/java/com/jobsight/company");
     private static final List<String> SERVICES = List.of("resume/ResumeService.java", "selfintro/SelfIntroductionService.java",
-            "experience/ExperienceBankService.java", "experience/ExperienceImportService.java");
+            "experience/ExperienceBankService.java", "experience/ExperienceImportService.java", "submission/SubmissionService.java");
     /**
      * 예외: 자소서 확정은 직무·문항 유형만 바꾸고, 자소서 삭제는 작성 근거를 줄이기만 한다(CASCADE) — 경험 쪽 확인과 엇갈려도
      * 없는 연결을 만들지 않는다.

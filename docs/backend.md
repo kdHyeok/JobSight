@@ -12,7 +12,7 @@
 | 현재 사용자 읽기 | `auth/CurrentUser.java` — 서비스가 직접 호출, 컨트롤러는 소유자를 넘기지 않는다 |
 | Google 클라이언트 등록 (조건부) | `config/GoogleOAuthConfig.java` |
 | 에러 응답 형식 | `common/GlobalExceptionHandler.java`, `common/ApiError`, `common/ApiRuleException`. 도메인 예외 → 상태·코드는 `common/ApiErrors.translate` 하나가 REST 와 MCP 에 같이 정한다 — docs/mcp-plugin.md |
-| 스키마 | `resources/db/migration/V1~V27` — Flyway, `ddl-auto: validate` |
+| 스키마 | `resources/db/migration/V1~V28` — Flyway, `ddl-auto: validate` |
 | 의미 검색(5단계) | `embedding/` — `EmbedderClient`(embedder 호출), `EmbeddingSweeper`(dirty 스위퍼, 유일한 `@Scheduled`), `SystemEmbeddingSweepRepository`(소유자 조건 없는 유일한 저장소, 패키지 전용), `DenseIndex`(소유자로 거른 벡터·cosine) — docs/experience-graph-search.md |
 | 계정 단위 직렬화(T9) | `common/OwnerLock.acquire(owner)` — 경험 관계를 바꾸는 쓰기의 맨 앞. 아래 「경험 관계 쓰기의 잠금과 관문」 |
 | 이력서 content 쓰기 관문 | `resume/ResumeWriter` — 이력서 JSON 을 쓰는 유일한 곳(검증 → 링커 → 저장 → `resume_experiences` → `SET CONSTRAINTS ALL IMMEDIATE`) — docs/experiences.md |
@@ -52,6 +52,8 @@ EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, 
   읽지 않고, 연결된 것의 이름만 constructor projection(`PositionRepository.findLabels`·`findAllLabels`, `ResumeRepository.findPositionRows`)으로 읽는다.
   `SelfIntroductionRelationsIntegrationTest.agentReadsOnlyLabelsWithinStatementLimit` 가 상한(실측 상세 6·목록 6·직무 필터 7·기업 필터 7, 4단계에서 작성 근거 컬렉션 1회가 더해져 7·7·8·8. 작성 근거가 있는 문항이 쪽에 있으면 경험 이름·개정 이력 2회가 더 붙는다)과
   `Resume`·`Position`·`JobPosting`·`Company` 엔티티 로드 0을 단언한다. 공고·기업 소유 확인은 `existsByIdAndOwnerId` 다.
+  함정: 이 상한은 Hibernate 통계(`getPrepareStatementCount`)라 `JdbcTemplate` 문장은 세지 않는다. 제출·작성 기준 트랙에서 쪽이 비어 있지 않으면
+  `SubmissionService.confirmedByPosting` 의 JDBC 1회(사용자 확인 제출 기록, alreadyUsedFor)가 더 돈다 — 실제 SQL 은 상한보다 1 많다.
 
 ## 요청 한 번의 흐름
 

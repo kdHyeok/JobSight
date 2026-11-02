@@ -1,3 +1,5 @@
+import type { SubmissionLevel } from './submission'
+
 export type EmploymentType = 'FULL_TIME' | 'CONTRACT' | 'INTERN' | 'PART_TIME' | 'DISPATCH'
 
 /** 내 참여 상태. 회사 절차(RecruitmentStep)와는 다른 축 — docs/job-postings.md. */
@@ -59,6 +61,8 @@ export interface JobPosting {
   updatedAt: string
   /** 상세에서만 온다(목록·수정 응답은 null) — 이 공고를 지우면 직접 출처가 사라질 자소서 수. 삭제 확인창이 쓴다. */
   linkedSelfIntroCount?: number | null
+  /** 이 응답을 만든 쓰기의 결과가 제출 완료일 때만 온다 — 그때 남긴 제출 기록. LINKED 는 제출본이 아니다(설계 6.6). */
+  submission?: { id: string; level: SubmissionLevel } | null
 }
 
 export interface JobPostingPayload {

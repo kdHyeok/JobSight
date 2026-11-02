@@ -25,6 +25,7 @@ import {
 import { opensEditor } from '../utils/doubleClick'
 import { highlightMatches } from '../utils/highlight'
 import ConfirmDialog from './ConfirmDialog.vue'
+import WritingGuideEditor from './WritingGuideEditor.vue'
 
 const items = ref<SelfIntroduction[]>([])
 const resumes = ref<ResumeSummary[]>([])
@@ -330,6 +331,8 @@ onUnmounted(() => {
       <button type="submit" class="button secondary">검색</button>
       <button v-if="activeQuery" type="button" class="button ghost" @click="query = ''; load()">초기화</button>
     </form>
+
+    <WritingGuideEditor />
 
     <div v-if="errorMessage" class="notice error" role="alert">{{ errorMessage }}</div>
     <div v-if="resumes.length === 0 && positions.length === 0" class="notice">먼저 이력서나 지원 직무를 만든 뒤 자기소개 문항을 추가할 수 있습니다.</div>

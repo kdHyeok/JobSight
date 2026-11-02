@@ -10,6 +10,9 @@ import com.jobsight.company.experience.Experience;
 import com.jobsight.company.experience.ExperienceRepository;
 import com.jobsight.company.selfintro.dto.ExperienceRef;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.jobsight.company.experience.dto.ExperienceSearchResult;
+import com.jobsight.company.writingguide.WritingGuideService;
+import tools.jackson.databind.ObjectMapper;
 import com.jobsight.company.position.Position;
 import com.jobsight.company.position.PositionRepository;
 import com.jobsight.company.resume.Resume;
@@ -51,10 +54,13 @@ public class SelfIntroductionService {
     private final OwnerLock ownerLock;
     private final ExperienceRepository experienceRepository;
     private final JdbcTemplate jdbc;
+    private final WritingGuideService writingGuides;
+    private final ObjectMapper mapper;
 
     public SelfIntroductionService(SelfIntroductionRepository repository, ResumeRepository resumeRepository,
                                    PositionRepository positionRepository, CurrentUser currentUser, OwnerLock ownerLock,
-                                   ExperienceRepository experienceRepository, JdbcTemplate jdbc) {
+                                   ExperienceRepository experienceRepository, JdbcTemplate jdbc,
+                                   WritingGuideService writingGuides, ObjectMapper mapper) {
         this.repository = repository;
         this.resumeRepository = resumeRepository;
         this.positionRepository = positionRepository;
@@ -62,6 +68,8 @@ public class SelfIntroductionService {
         this.ownerLock = ownerLock;
         this.experienceRepository = experienceRepository;
         this.jdbc = jdbc;
+        this.writingGuides = writingGuides;
+        this.mapper = mapper;
     }
 
     public List<SelfIntroductionResponse> findAll(String query, UUID resumeId) {
@@ -88,6 +96,7 @@ public class SelfIntroductionService {
         value.linkPositions(positionIds, source);
         value.linkQuestionTypes(codes(request.questionTypes()), source);
         if (experiences != null) value.linkExperiences(experiences, source);
+        if (source == LinkSource.AI) recordWritingContext(value, request.searchContext());
         // flush 뒤의 version 을 싣는다. id 를 미리 정한 엔티티라 save 가 merge 로 가고, 연결 컬렉션을 옮겨 담는 flush 에서
         // version 이 한 번 더 오른다 — flush 전에 응답을 만들면 MCP 가 생성 직후 수정할 때 거짓 409 를 받는다.
         return SelfIntroductionResponse.of(saveAndCheck(value, experiences != null));
@@ -120,7 +129,23 @@ public class SelfIntroductionService {
         if (positionIds != null) value.linkPositions(positionIds, source);
         if (types != null) value.linkQuestionTypes(types, source);
         if (experiences != null) value.linkExperiences(experiences, source);
+        if (source == LinkSource.AI) recordWritingContext(value, request.searchContext());
         return SelfIntroductionResponse.of(saveAndCheck(value, experiences != null));
+    }
+
+    /**
+     * MCP 저장의 재현 정보(설계 6.7): 작성 기준 version, 저장 뒤의 작성 근거 (경험, 개정) 쌍, 클라이언트가 넘긴 검색 context.
+     * 저장할 때마다 덮는다 — 가장 최근 AI 작성의 기준이다. 웹 저장은 부르지 않는다.
+     */
+    private void recordWritingContext(SelfIntroduction value, ExperienceSearchResult.Context searchContext) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("writingGuideVersion", writingGuides.version(currentUser.id()));
+        context.put("experiences", value.getExperienceLinks().stream()
+                .sorted(Comparator.comparing(SelfIntroduction.ExperienceLink::experienceId))
+                .map(link -> Map.of("experienceId", link.experienceId(), "experienceRevision", link.experienceRevision()))
+                .toList());
+        context.put("searchContext", searchContext);
+        value.recordWritingContext(mapper.writeValueAsString(context));
     }
 
     /**

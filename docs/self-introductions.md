@@ -58,6 +58,14 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
     null 은 유지, 웹은 목록으로 맞추고(남는 쌍은 출처 유지), MCP 는 더하기만 한다(이미 연결된 경험은 건너뜀). 쓰기는 계정 잠금(`OwnerLock`) 아래에서 하고 저장 뒤
     `SET CONSTRAINTS ALL IMMEDIATE` 로 지연 FK 위반을 당긴다. 응답(`experiences[{experienceId, experienceRevision, source}]`)과 MCP 항목
     (`experiences[{…, title, trust, needsReview}]`)에 실린다 — docs/experiences.md.
+14. **`alreadyUsedFor` 는 사용자가 확인한 제출본을 우선한다**(설계 6.6). 공고에 `USER_CONFIRMED` 이상 제출 기록이 있으면 그 최신 스냅샷에 든 답변만
+    그 공고에 "낸 것"이다 — 직접 출처가 있어도 스냅샷에 없으면 빼고, 직접 출처가 없어도 스냅샷에 있으면 넣는다(그때의 written_for 직무, 없으면 공고 제목).
+    항목의 `submission` 은 `사용자가 확인한 제출본`·`접수 근거와 대조한 제출본`·`제출본 미확인`(확인 기록이 없어 지금 연결로 판단) 중 하나다.
+    LINKED 기록은 제출본이 아니라서 쓰지 않는다. PAST_USE 신호는 아직 없다(6단계) — 들어오면 같은 규칙을 쓴다.
+15. **작성 기준과 재현 정보**(설계 6.7, V28). 계정당 Markdown 하나(`writing_guides`, 20,000자)를 웹 `/introductions` 맨 위 "작성 기준"에서
+    `expectedVersion`(처음 0)으로 고친다. 다르면 409 `WRITING_GUIDE_STALE`. MCP 는 `writing_guide_get` 으로 읽기만 한다.
+    MCP 로 자소서를 만들거나 고치면 `self_introductions.writing_context` 에 `{writingGuideVersion, experiences[{experienceId, experienceRevision}], searchContext}` 를 덮어쓴다.
+    `searchContext` 는 클라이언트가 `request.searchContext` 로 넘긴 `experience_search` 의 `context` 다(선택). 웹 저장은 이 값을 바꾸지 않는다 — "AI 가 쓸 때" 본 기준이다.
 
 ## API (상세는 Swagger)
 
@@ -91,10 +99,11 @@ DELETE /api/self-introductions/{id}
 | `self_intro_get` | `McpActions.getSelfIntro` | 같은 항목 모양에 `answer` 전문 |
 | `self_intro_create` / `_update` | `SelfIntroductionController` | 위 DTO 그대로. MCP 로 남긴 연결은 항상 `AI`. `_update` 의 연결은 더하기만(불변 조건 8). `_update` 의 `request.expectedVersion` 은 질문·답변·이력서를 바꿀 때 필수(불변 조건 12) |
 | `self_intro_delete` | `SelfIntroductionController` | — |
+| `writing_guide_get` | `WritingGuideController.get` | `{version, body, updatedAt}`. 아직 없으면 version 0·빈 body. 수정 도구는 없다 |
 
 목록 항목: `version`, `answerPreview`(300자 + `…`), `answerLength`, `score`·`matchedTerms`(q 가 있을 때), `sourceStatus`(`직접 출처`/`출처 미상`),
 `sources{direct[{position, company, trust}], indirect[{resume, position, company}]}`, `questionTypes[{code, name, confidence, from, trust}]`,
-`alreadyUsedFor[{company, position, sameCompany, otherCompanySpecific}]`.
+`alreadyUsedFor[{company, position, sameCompany, otherCompanySpecific, submission}]`. `self_intro_get` 은 `writingContext` 도 싣는다(불변 조건 15).
 
 - 직무·공고·기업 필터는 그 직무에 written_for 로 쓴 답변을 준다(USER·AI 모두, 항목마다 `trust`).
   **직접 출처가 0건이면** 빈 배열 대신 `fallback:"indirect"` 로, 연결 이력서가 그 직무를 지원하는 답변 중 **직접 출처가 없는 것**만 준다.
@@ -115,6 +124,8 @@ DELETE /api/self-introductions/{id}
 | 삭제 전 안내 | `PositionRepository.countSelfIntrosWrittenFor*` → 직무·공고·기업 상세 `linkedSelfIntroCount` · `utils/writtenFor.ts` |
 | 백엔드 | `selfintro/SelfIntroduction*` · `Competency`(코드·정규식) · `CompetencyCatalogCheck` · `common/LinkSource` · `ApiPaths.SELF_INTRODUCTIONS` |
 | MCP 모양 | `selfintro/SelfIntroductionAgentService` · `dto/SelfIntroductionList` · `mcp/McpActions` |
+| 작성 기준 | `V28__submissions_and_guides.sql` · `writingguide/WritingGuideService` `WritingGuideController` — `ApiPaths.WRITING_GUIDE` · 화면 `WritingGuideEditor.vue` |
+| 제출본 우선 | `submission/SubmissionService.confirmedByPosting`(JDBC 1회, 답변 원문은 읽지 않음) → `SelfIntroductionAgentService.Context` |
 | 출처 판정 | `auth/CurrentUser.viaMcp()` — MCP 토큰이면 AI |
 | 화면 | `SelfIntroductionBoard.vue` (`/introductions`) · `ResumeQuestions.vue`(이력서 안에서 문항 추가) |
 | 검색·강조 | `SelfIntroductionService.rank()` · `utils/highlight.ts` |
@@ -140,6 +151,8 @@ cd frontend && npm run type-check && npm test
   미리보기 301자·정확히 300자는 말줄임 없음, limit 기본 10·상한 50·0 이하 1, **REST 목록은 답변 전문**, `q` 100자 통과·101자 400 `QUERY_TOO_LONG`(MCP `tools/call` 도 같은 코드의 도구 오류).
   다른 회사용 지원동기 `otherCompanySpecific`, 두 회사에 연결한 답변의 연결별 `sameCompany`·FIT 여부. **AI 태그가 정규식 FIT 를 가리지 않고 확정 태그는 앞선다.**
   **MCP 목록·상세가 이력서·직무·공고·기업 엔티티를 읽지 않고 SQL 상한(6·6·7·7) 안.** 직무 삭제 시 연결 CASCADE 와 0개 연결 수정. 표와 enum 일치.
+- `SubmissionIntegrationTest`: `alreadyUsedForPrefersConfirmedSnapshot`(확인한 제출본에 든 답변·빠진 답변·연결 없이 낸 답변·확인 기록 없는 공고의 "제출본 미확인"),
+  `writingGuideVersionLandsInWritingContext`(웹 수정 409, MCP `writing_guide_get`, MCP 생성의 `writingContext`, 웹 저장 뒤에도 유지). `Submission.spec.ts`: 작성 기준 저장 version·409 재조회.
 - `McpToolsTest`: `self_intro_list`·`get` 이 래퍼로 가고 REST 목록을 부르지 않음, 스키마의 `maxLength:100`·필터·enum, 생성 요청의 직무·유형 전달과 연결 0개 생성 거부, 확정 도구 없음.
 - `SelfIntroduction.spec.ts`: 직무만으로 생성·연결 없는 생성 차단, 수정 0개 허용, "어느 지원용?" 후보(연결 이력서들의 직무 전부), AI 기록 ✓ 확정·✗ 해제, 카드의 AI 기록 표시, **같은 회사·같은 이름 직무를 공고명으로 구분**.
   **수정은 읽은 `expectedVersion` 을 보내고, ✓ 뒤 저장은 확정 응답의 version 을 보낸다. 409 면 안내·초안 유지·목록만 재조회.**
