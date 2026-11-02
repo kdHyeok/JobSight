@@ -43,7 +43,8 @@ class PositionListQueryCountIntegrationTest {
     private static final int POSTINGS = 5;
     /**
      * 배치 페치 없이 39회, 있으면 9회였다(docs/backend.md). 9회는 직무·공고·기업·참고 정보 조회 4회와
-     * EAGER 컬렉션 5종을 한 번씩 묶어 읽은 5회다. 컬렉션당 100건 이하면 데이터 수와 무관하다.
+     * EAGER 컬렉션 5종을 한 번씩 묶어 읽은 5회다. 배치 크기 100은 SQL 하나에 묶는 소유 엔티티 수라서,
+     * 종류마다 소유 엔티티(직무·공고·기업)가 100개 이하면 데이터 수와 무관하다. 컬렉션 원소 수와는 상관없다.
      */
     private static final long MAX_STATEMENTS = 9;
 
