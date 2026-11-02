@@ -98,7 +98,7 @@ bash scripts/smoke.sh                       # /api/positions /api/references 미
 cd frontend && npm run type-check && npm test
 ```
 
-자동 검증(불변 조건 9): `JobPostingServiceTest` 의 null 유지·이름 맞춤·`[]` 비움 3건, `JobPostingUpdateIntegrationTest`(Testcontainers — 이름만 보낸 수정 뒤에도 직무 id 와 `resume_positions` 행이 남는다), `McpToolsTest.postingUpdateKeepsOmittedListsAsNull`(MCP 가 빠진 배열을 null 로 넘기고 "전체 교체" 문구를 붙이지 않는다), `PostingForm.spec.ts`(폼은 다 지운 직무·절차를 `[]` 로 보낸다).
+자동 검증(불변 조건 9): `JobPostingServiceTest` 의 null 유지·이름 맞춤·`[]` 비움 3건과 id 경로 4건(id 우선 맞춤, id 로 이름 변경·빠진 직무 삭제·지원 직무 비움, 이름 맞춤 시 지원 직무 유지, 같은 id 반복·남의 id), `JobPostingUpdateIntegrationTest`(Testcontainers — 이름만 보낸 수정과 웹 폼처럼 id 를 담은 수정 뒤에도 직무 id 와 `resume_positions` 행이 맞는 이름에 남는다), `McpToolsTest.postingUpdateKeepsOmittedListsAsNull`(MCP 가 빠진 배열을 null 로 넘기고 "전체 교체" 문구를 붙이지 않는다), `PostingForm.spec.ts`(폼은 다 지운 직무·절차를 `[]` 로 보낸다).
 
 로그인 뒤 브라우저에서:
 1. 공고 추가 → 기업을 직접 입력 → 기업 탭에 생겼는가
@@ -134,7 +134,7 @@ cd frontend && npm run type-check && npm test
 - 새 공고와 새 절차 단계의 시각 기본값은 폼을 여는 시점의 현재 분이다. 기존 행의 빈 시각을 임의로 채우지는 않는다.
 - **D-day 는 서버가 내려주지 않는다.** 프런트가 사용자 시계로 계산한다.
 - **기업 목록 응답의 `openPostings` 는 비어 있다**(N+1 회피). 상세에서만 채워진다.
-- **공고 PUT 의 직무 목록은 "그 목록으로 맞춤"이다.** `id` 가 있는 항목은 그 직무, 없는 항목은 같은 이름의 남은 기존 직무를 쓰고 이름만 갱신한다. 둘 다 없으면 생성, 어느 항목과도 맞지 않은 기존 직무는 삭제된다. id 를 먼저 다 고른 뒤 이름으로 맞추므로 이름 맞춤이 id 로 지목된 직무를 가져가지 않는다. 이름이 같은 기존 직무가 둘이면 그중 하나만 맞춰지고 나머지는 삭제 대상이다 — 직무 상세(팀·역량 등)는 직무 페이지에서 편집하므로 공고 폼은 `id`+`name` 만 다룬다.
+- **공고 PUT 의 직무 목록은 "그 목록으로 맞춤"이다.** `id` 가 있는 항목은 그 직무, 없는 항목은 같은 이름의 남은 기존 직무를 쓰고 이름만 갱신한다. 둘 다 없으면 생성, 어느 항목과도 맞지 않은 기존 직무는 삭제된다. id 를 먼저 다 고른 뒤 이름으로 맞추므로 이름 맞춤이 id 로 지목된 직무를 가져가지 않는다. 이름이 같은 기존 직무가 둘이면 그중 하나만 맞춰지고 나머지는 삭제 대상이다. 같은 id 가 두 번 오면 두 번째는 새 직무가 되고, 이 공고의 직무가 아닌 id 는 없는 것으로 보고 이름으로 맞춘다. 삭제되는 직무가 지원 직무(`targetPositionId`)면 비운다 — 직무 상세(팀·역량 등)는 직무 페이지에서 편집하므로 공고 폼은 `id`+`name` 만 다룬다.
 - **웹 공고 폼은 직무·절차를 항상 배열로 보낸다**(행을 다 지우면 `[]`). 필드를 빼면 서버가 "유지"로 읽어 지운 행이 조용히 남는다. `PostingForm.spec.ts` 가 이것을 지킨다. 전에는 폼이 지웠다 같은 이름으로 다시 추가한 직무가 새 행이 됐지만, 이제는 기존 행을 다시 쓴다.
 - 공고 PUT의 절차 목록은 배열이면 값 기준 통째 교체(null 이면 유지)지만, 영속화할 때는 같은 순번의 엔티티를 갱신하고 끝에서만 추가·삭제한다. 전부 지운 뒤 다시 넣으면 Hibernate flush 순서에 따라 `(posting_id, seq)` 고유키가 충돌한다.
 - 절차 `seq` 는 재정렬하면 바뀐다. step 을 밖에서 id 로 참조하지 않는다.

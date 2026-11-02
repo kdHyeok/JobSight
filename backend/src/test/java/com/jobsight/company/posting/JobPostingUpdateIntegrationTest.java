@@ -64,6 +64,11 @@ class JobPostingUpdateIntegrationTest {
                 ApplicationStatus.INTERESTED, null, null, positions, steps);
     }
 
+    private static UUID idOf(JobPostingResponse posting, String positionName) {
+        return posting.positions().stream().filter(p -> p.name().equals(positionName))
+                .findFirst().orElseThrow().id();
+    }
+
     @Test
     void nameOnlyUpdateKeepsPositionIdAndResumeLink() {
         JobPostingResponse created = postings.create(request(
@@ -80,5 +85,30 @@ class JobPostingUpdateIntegrationTest {
         assertThat(resumes.findById(resumeId).positionIds()).containsExactly(positionId);
         assertThat(jdbc.queryForObject("select count(*) from resume_positions where resume_id = ? and position_id = ?",
                 Integer.class, resumeId, positionId)).isEqualTo(1);
+    }
+
+    /**
+     * 웹 폼처럼 id 를 담아 보낸 수정. id 로 지목한 직무는 앞 항목의 이름 맞춤에 뺏기지 않고 이름만 바뀌며,
+     * 그 직무의 이력서 연결도 바뀐 이름에 그대로 붙어 있다. 빠진 직무는 지워지고 지원 직무였다면 비워진다.
+     */
+    @Test
+    void idUpdateRenamesClaimedPositionAndDropsMissingOne() {
+        JobPostingResponse created = postings.create(request(List.of(
+                new PositionNameRequest(null, "백엔드"), new PositionNameRequest(null, "프론트엔드")), List.of()));
+        UUID backendId = idOf(created, "백엔드");
+        UUID frontendId = idOf(created, "프론트엔드");
+        jdbc.update("update job_postings set target_position_id = ? where id = ?", backendId, created.id());
+        UUID resumeId = resumes.create(new ResumeRequest("지원용", null, List.of(frontendId), null)).id();
+
+        JobPostingResponse updated = postings.update(created.id(), request(List.of(
+                new PositionNameRequest(null, "프론트엔드"), new PositionNameRequest(frontendId, "웹 프론트엔드")), null));
+
+        assertThat(updated.positions()).filteredOn(p -> p.id().equals(frontendId))
+                .extracting(PositionSummary::name).containsExactly("웹 프론트엔드");
+        assertThat(updated.positions()).extracting(PositionSummary::name)
+                .containsExactlyInAnyOrder("프론트엔드", "웹 프론트엔드");
+        assertThat(updated.positions()).extracting(PositionSummary::id).doesNotContain(backendId);
+        assertThat(updated.targetPositionId()).isNull();
+        assertThat(resumes.findById(resumeId).positionIds()).containsExactly(frontendId);
     }
 }
