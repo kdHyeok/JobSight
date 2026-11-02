@@ -24,6 +24,7 @@ OAuth가 필요하면 클라이언트의 연결 흐름을 사용한다. access t
   `id`, `createdAt`, `updatedAt`, 계산된 요약 등 응답 전용 필드는 `request`에 복사하지 않는다.
   필드를 지우려는 요청이면 해당 선택 필드에 null, 목록이면 []를 명시한다.
   **단, 이력서(`resume_*`)는 예외다** — null 은 유지, `[]`·`""` 는 비움이고 버전 규칙이 있다(아래 이력서 절).
+  `posting_update` 의 `positions`·`steps` 도 null(생략)은 유지, `[]` 는 비움이다. 나머지 공고 필드는 전체 교체다.
 - 명시적으로 요청된 저장·변경만 실행한다. 삭제 전에 대상과 연결 삭제 범위를 알리고, 사용자의 삭제 요청이
   그 범위를 포함하는지 판단한다. 목록 조회·제안은 변경 권한을 뜻하지 않는다.
 - 도구 결과는 `structuredContent.data` 또는 JSON 텍스트다. `isError=true`면 성공으로 보고하지 않는다.
@@ -65,8 +66,10 @@ OAuth가 필요하면 클라이언트의 연결 흐름을 사용한다. access t
 날짜는 시간대를 확인하여 ISO 8601 UTC로 보낸다. 예: 한국 2026-09-10 오후 11시는 `2026-09-10T14:00:00Z`.
 `deadlineAt:null`은 상시채용이다. 사용자가 주지 않은 마감일을 임의로 만들어 저장하지 않는다.
 `positions:[{id?,name}]`가 비어 있으면 공고 제목으로 직무 하나가 생성된다.
-공고 수정 시 빠진 기존 직무는 삭제되므로 **기존 positions의 id와 name을 보존**한다.
-`steps:[{name,result?,scheduledAt?,memo?}]` 역시 배열 전체 교체이고 순서가 곧 절차 순서다.
+공고 수정에서 직무를 바꾸지 않으면 **`positions`를 빼거나 null**로 보낸다. 기존 직무가 그대로 남는다.
+`positions` 배열을 보내면 그 목록으로 맞춘다. 항목은 id로, id가 없으면 이름(공백·대소문자 무시)으로 기존 직무와 맞춰
+id와 이력서·자기소개 연결을 유지한다. 어느 항목과도 맞지 않은 기존 직무는 삭제되고, `[]`면 제목 이름의 직무 하나만 남는다.
+`steps:[{name,result?,scheduledAt?,memo?}]`도 빼거나 null이면 유지, 배열이면 그 배열로 교체(`[]`는 전부 삭제)이고 순서가 곧 절차 순서다.
 
 상태 변경: `posting_set_status({id,request:{status}})`.
 
@@ -86,7 +89,8 @@ INTERVIEW_PREP→INTERVIEW_REJECTED. 관심·작성 중은 상태 유지 후 보
 
 절차 체크: `posting_set_step_result({id,seq,request:{result}})`. `seq`는 **0부터**이며 정렬 후 재조회한다.
 예정은 UPCOMING, 완료는 PASSED다. PASSED는 이 절차를 끝냈다는 뜻이며 채용 합격과 다르다.
-절차 추가·삭제·재정렬은 공고 상세 조회 후 다른 공고 필드와 직무를 보존해 `posting_update`한다.
+절차 추가·삭제·재정렬은 공고 상세 조회 후 다른 공고 필드를 보존하고 바뀐 `steps` 전체 배열로 `posting_update`한다.
+직무를 건드리지 않으면 `positions`는 뺀다.
 공고 삭제는 모집 직무와 절차도 지운다.
 
 ## 모집 직무

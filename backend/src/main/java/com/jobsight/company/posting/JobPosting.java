@@ -106,7 +106,9 @@ public class JobPosting {
         this.status = attributes.status();
         this.qualifications = attributes.qualifications();
         this.memo = attributes.memo();
-        replaceSteps(attributes.steps());
+        if (attributes.steps() != null) {
+            replaceSteps(attributes.steps());
+        }
     }
 
     /** 같은 seq는 갱신하고 끝에서만 추가·삭제해 (posting_id, seq) flush 충돌을 피한다. */

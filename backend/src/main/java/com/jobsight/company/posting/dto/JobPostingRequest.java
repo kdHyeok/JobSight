@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 공고 생성·수정 요청. positions 와 steps 는 통째로 받아 교체한다.
+ * 공고 생성·수정 요청. positions 와 steps 는 null 이면 유지, 배열이면 그 목록으로 맞춘다([] 는 비움).
  * deadlineAt 은 UTC Instant. 프런트가 datetime-local 값을 toISOString() 으로 변환해 보낸다.
  */
 public record JobPostingRequest(
@@ -46,7 +46,7 @@ public record JobPostingRequest(
         @Size(max = 5000, message = "메모는 5,000자 이하여야 합니다.")
         String memo,
 
-        /** 비우면 title 과 같은 이름의 직무 하나를 만든다. */
+        /** 생성 때 비우거나 수정 때 [] 면 title 이름의 직무 하나만 남는다. 수정 때 null 이면 기존 직무 유지. */
         @Size(max = 30, message = "직무는 30개 이하여야 합니다.")
         List<@Valid PositionNameRequest> positions,
 

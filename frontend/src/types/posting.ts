@@ -70,7 +70,10 @@ export interface JobPostingPayload {
   status: ApplicationStatus
   qualifications: string
   memo: string
-  /** id 가 있으면 이름 갱신, 없으면 생성. 빠진 기존 직무는 삭제된다. 비우면 제목 이름의 직무 하나. */
+  /**
+   * id 가 있으면 이름 갱신, 없으면 같은 이름의 기존 직무를 쓰거나 생성. 빠진 기존 직무는 삭제된다. 비우면 제목 이름의 직무 하나.
+   * 서버는 이 필드가 없으면(null) 기존 직무를 유지하므로 항상 배열로 보낸다. steps 도 같다.
+   */
   positions: Array<{ id: string | null; name: string }>
   steps: StepPayload[]
 }

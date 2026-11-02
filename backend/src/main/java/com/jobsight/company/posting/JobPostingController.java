@@ -59,7 +59,10 @@ public class JobPostingController {
     }
 
     @Operation(summary = "공고 수정",
-            description = "positions·steps 는 통째로 교체된다. 요청에 빠진 기존 직무는 삭제된다.")
+            description = "positions·steps 를 빼거나 null 로 보내면 기존 값을 그대로 둔다. 배열을 보내면 그 목록으로 맞춘다: "
+                    + "[] 면 절차는 비우고 직무는 제목 이름 하나만 남긴다. 직무는 id 로, id 가 없으면 이름(공백·대소문자 무시)으로 "
+                    + "기존 직무와 맞춰 id 와 이력서·자소서 연결을 유지하고, 어느 항목과도 맞지 않은 기존 직무는 삭제한다. "
+                    + "그 밖의 필드는 보낸 값으로 바뀌므로 먼저 조회해 유지할 값도 보낸다.")
     @PutMapping("/{id}")
     public JobPostingResponse update(@PathVariable UUID id,
                                      @Valid @RequestBody JobPostingRequest request) {

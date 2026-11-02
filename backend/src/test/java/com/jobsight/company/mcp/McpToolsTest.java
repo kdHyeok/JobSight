@@ -106,6 +106,15 @@ class McpToolsTest {
         tools.call("company_content_delete", Map.of("companyId", id.toString(), "id", reference.toString()), principal);
         verify(contents).delete(id, reference);
     }
+    /** posting_update 는 빠진 positions·steps 를 null(유지) 그대로 넘기고, "전체 교체" 안내를 붙이지 않는다(설계 5.3). */
+    @Test void postingUpdateKeepsOmittedListsAsNull() {
+        UUID id = UUID.randomUUID();
+        tools.call("posting_update", Map.of("id", id.toString(), "request", Map.of("companyName", "회사", "title", "공채",
+                "employmentType", "FULL_TIME", "status", "INTERESTED")), principal);
+        verify(postings).update(eq(id), argThat(r -> r.positions() == null && r.steps() == null));
+        var update = tools.list(principal).stream().filter(t -> t.get("name").equals("posting_update")).findFirst().orElseThrow();
+        assertThat(update.get("description").toString()).doesNotContain("전체 교체").contains("null", "이름");
+    }
     /** 행 도구는 섹션 enum·0-based index·expectedVersion 을 그대로 서비스에 넘긴다. 추가는 버전이 선택이다. */
     @Test void resumeRowToolsPassSectionAndIndex() {
         UUID id = UUID.randomUUID();
