@@ -179,6 +179,70 @@ class JobPostingServiceTest {
         assertThat(positions.getValue()).extracting(Position::getName).containsExactly("2026 신입 공채");
     }
 
+    private void givenOwnedPosting(JobPosting posting, Position... positions) {
+        given(currentUser.id()).willReturn(OWNER_ID);
+        given(repository.findByIdAndOwnerId(posting.getId(), OWNER_ID)).willReturn(Optional.of(posting));
+        given(repository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        given(companyRepository.findByIdAndOwnerId(COMPANY_ID, OWNER_ID))
+                .willReturn(Optional.of(new Company(OWNER_ID, CompanyAttributes.nameOnly("회사"))));
+        given(positionRepository.findAllByPostingIdAndOwnerId(posting.getId(), OWNER_ID)).willReturn(List.of(positions));
+    }
+
+    /** positions·steps 를 빼고 보낸 수정은 기존 직무와 절차를 그대로 둔다 — null 은 "유지"다(설계 1.4 T3). */
+    @Test
+    void nullPositionsAndStepsKeepExisting() {
+        JobPosting existing = new JobPosting(OWNER_ID, new JobPostingAttributes(
+                COMPANY_ID, "2026 신입 공채", null, EmploymentType.FULL_TIME, null, ApplicationStatus.SUBMITTED, null, null,
+                List.of(new RecruitmentStep("서류", null, null, null), new RecruitmentStep("면접", null, null, null))));
+        Position backend = new Position(OWNER_ID, existing.getId(), "백엔드 개발");
+        givenOwnedPosting(existing, backend);
+
+        service.update(existing.getId(), request(COMPANY_ID, null, null, null));
+
+        assertThat(existing.getSteps()).extracting(RecruitmentStep::getName).containsExactly("서류", "면접");
+        verify(positionRepository, never()).saveAll(any());
+        verify(positionRepository, never()).deleteAll(any());
+    }
+
+    /**
+     * id 없이 이름만 보내도 같은 이름(공백·대소문자 무시)의 기존 직무를 그대로 쓴다.
+     * 지웠다 다시 만들면 resume_positions·자소서 직무 연결이 ON DELETE CASCADE 로 끊긴다.
+     */
+    @Test
+    void nameOnlyPositionKeepsExistingPosition() {
+        JobPosting existing = posting(null, ApplicationStatus.INTERESTED);
+        Position backend = new Position(OWNER_ID, existing.getId(), "백엔드 개발");
+        Position frontend = new Position(OWNER_ID, existing.getId(), "프론트엔드");
+        givenOwnedPosting(existing, backend, frontend);
+
+        service.update(existing.getId(), request(COMPANY_ID, null, List.of(
+                new PositionNameRequest(null, " 백엔드개발 "), new PositionNameRequest(null, "데이터 엔지니어")), null));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Position>> saved = ArgumentCaptor.forClass(List.class);
+        verify(positionRepository).saveAll(saved.capture());
+        assertThat(saved.getValue().get(0)).isSameAs(backend);
+        assertThat(saved.getValue()).extracting(Position::getName).containsExactly("백엔드개발", "데이터 엔지니어");
+        verify(positionRepository).deleteAll(List.of(frontend));
+    }
+
+    /** [] 는 비움이다. 절차는 사라지고 직무는 제목 이름 하나만 남는데, 그 이름의 기존 직무가 있으면 그것을 쓴다. */
+    @Test
+    void emptyListsClearStepsAndLeaveOnlyTitlePosition() {
+        JobPosting existing = new JobPosting(OWNER_ID, new JobPostingAttributes(
+                COMPANY_ID, "2026 신입 공채", null, EmploymentType.FULL_TIME, null, ApplicationStatus.INTERESTED, null, null,
+                List.of(new RecruitmentStep("서류", null, null, null))));
+        Position titled = new Position(OWNER_ID, existing.getId(), "2026 신입 공채");
+        Position other = new Position(OWNER_ID, existing.getId(), "프론트엔드");
+        givenOwnedPosting(existing, titled, other);
+
+        service.update(existing.getId(), request(COMPANY_ID, null, List.of(), List.of()));
+
+        assertThat(existing.getSteps()).isEmpty();
+        verify(positionRepository).saveAll(List.of(titled));
+        verify(positionRepository).deleteAll(List.of(other));
+    }
+
     /** 다른 계정 소유의 공고는 존재를 알리지 않고 404. */
     @Test
     void otherOwnersPostingIsNotReachable() {

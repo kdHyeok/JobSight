@@ -20,11 +20,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -145,38 +144,44 @@ public class JobPostingService {
     }
 
     /**
-     * 직무 목록을 요청 그대로 맞춘다: id 있는 항목은 이름 갱신, 없는 항목은 생성, 빠진 기존 직무는 삭제.
-     * 비어 있으면 제목 이름의 직무 하나 — 공고는 직무가 1개 이상이다.
+     * 직무 목록을 요청에 맞춘다. null 은 유지, [] 는 제목 이름의 직무 하나 — 공고는 직무가 1개 이상이다.
+     * id 로 먼저 맞추고, id 없는 항목은 이름(공백 제거·소문자)으로 남은 기존 직무와 맞춘다. 못 맞춘 항목은 생성,
+     * 아무 항목도 가리키지 않은 기존 직무는 삭제. 지웠다 다시 만들면 resume_positions·자소서 직무 연결이
+     * CASCADE 로 끊기므로 같은 직무는 반드시 같은 행을 쓴다(설계 1.4 T3).
      */
     private void syncPositions(JobPosting posting, List<PositionNameRequest> requested) {
         UUID ownerId = currentUser.id();
-        List<PositionNameRequest> wanted = requested == null ? List.of() : requested;
-        if (wanted.isEmpty()) {
-            wanted = List.of(new PositionNameRequest(null, posting.getTitle()));
-        }
-
-        Map<UUID, Position> existing = new HashMap<>();
+        Map<UUID, Position> unclaimed = new LinkedHashMap<>();
         positionRepository.findAllByPostingIdAndOwnerId(posting.getId(), ownerId)
-                .forEach(position -> existing.put(position.getId(), position));
+                .forEach(position -> unclaimed.put(position.getId(), position));
+        // 새 공고는 기존 직무가 없으니 null 이어도 아래에서 제목 직무를 만든다.
+        if (requested == null && !unclaimed.isEmpty()) {
+            return;
+        }
+        List<PositionNameRequest> wanted = requested == null || requested.isEmpty()
+                ? List.of(new PositionNameRequest(null, posting.getTitle()))
+                : requested;
 
-        Set<UUID> keep = new HashSet<>();
+        // id 로 지목된 직무를 이름 맞춤이 먼저 가져가지 않도록 id 부터 고른다.
+        Position[] matched = new Position[wanted.size()];
+        for (int i = 0; i < wanted.size(); i++) {
+            UUID id = wanted.get(i).id();
+            matched[i] = id == null ? null : unclaimed.remove(id);
+        }
         List<Position> toSave = new ArrayList<>();
-        for (PositionNameRequest item : wanted) {
-            String name = item.name().trim();
-            Position position = item.id() == null ? null : existing.get(item.id());
+        for (int i = 0; i < wanted.size(); i++) {
+            String name = wanted.get(i).name().trim();
+            Position position = matched[i] != null ? matched[i] : claimByName(unclaimed, name);
             if (position == null) {
                 position = new Position(ownerId, posting.getId(), name);
             } else {
                 position.rename(name);
             }
-            keep.add(position.getId());
             toSave.add(position);
         }
         positionRepository.saveAll(toSave);
 
-        List<Position> orphaned = existing.values().stream()
-                .filter(position -> !keep.contains(position.getId()))
-                .toList();
+        List<Position> orphaned = List.copyOf(unclaimed.values());
         if (!orphaned.isEmpty()) {
             if (posting.getTargetPositionId() != null
                     && orphaned.stream().anyMatch(p -> p.getId().equals(posting.getTargetPositionId()))) {
@@ -184,6 +189,17 @@ public class JobPostingService {
             }
             positionRepository.deleteAll(orphaned);
         }
+    }
+
+    private static Position claimByName(Map<UUID, Position> unclaimed, String name) {
+        String key = Company.nameKey(name);
+        Position found = unclaimed.values().stream()
+                .filter(position -> Company.nameKey(position.getName()).equals(key))
+                .findFirst().orElse(null);
+        if (found != null) {
+            unclaimed.remove(found.getId());
+        }
+        return found;
     }
 
     /**
@@ -215,9 +231,11 @@ public class JobPostingService {
                 .toList();
     }
 
+    /** steps 가 null 이면 null 로 넘겨 기존 절차를 유지한다. */
     private JobPostingAttributes toAttributes(JobPostingRequest request) {
-        List<RecruitmentStep> steps = new ArrayList<>();
+        List<RecruitmentStep> steps = null;
         if (request.steps() != null) {
+            steps = new ArrayList<>();
             for (StepRequest step : request.steps()) {
                 steps.add(new RecruitmentStep(step.name().trim(), step.result(), step.scheduledAt(), normalize(step.memo())));
             }

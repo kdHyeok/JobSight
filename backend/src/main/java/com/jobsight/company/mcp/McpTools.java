@@ -120,8 +120,10 @@ public class McpTools {
             var tool = entry.getValue();
             var operation = tool.operation;
             String description = operation.summary() + ". " + operation.description();
-            // 이력서는 null=유지라 이 문구가 틀린다 — 규칙은 ResumeController 설명에 있다(docs/resumes.md 불변 조건 9).
-            if (tool.method.getName().equals("update") && !entry.getKey().startsWith("resume_")) {
+            // 이력서와 공고 수정은 null=유지라 이 문구가 틀린다 — 규칙은 ResumeController·JobPostingController 설명에 있다
+            // (docs/resumes.md 불변 조건 9, docs/job-postings.md 불변 조건 9).
+            if (tool.method.getName().equals("update") && !entry.getKey().startsWith("resume_")
+                    && !entry.getKey().equals("posting_update")) {
                 description += " 전체 교체: 먼저 조회하고 유지할 필드도 request에 포함하세요.";
             }
             List<String> scopes = new ArrayList<>(List.of(tool.scope));

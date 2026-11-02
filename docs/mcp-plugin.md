@@ -67,7 +67,9 @@ client ID의 Console 등록값을 대조한다. Google 등록값만 수정했다
 
 로컬 loopback·tailnet 전용 주소는 ChatGPT 클라우드에서 바로 접근할 수 없다. 공개 HTTPS 배포 또는
 클라이언트가 지원하는 사설 네트워크 연결이 필요하다. 등록 가능한 패키지 작성과 공개 배포/스토어 승인은 별개다.
-공고 수정의 positions/steps, 직무 참고 연결은 전체 교체다. 변경 전에 조회하고 유지할 값을 포함해야 한다.
+직무 참고 연결은 전체 교체다. 변경 전에 조회하고 유지할 값을 포함해야 한다. 공고 수정의 positions/steps 는
+null 이면 유지, 배열이면 그 목록으로 맞추고 id 없는 직무는 이름으로 기존 직무와 맞춘다 — docs/job-postings.md 불변 조건 9.
+그래서 `McpTools` 는 `posting_update` 에도 "전체 교체" 문구를 붙이지 않고, 규칙은 `JobPostingController` 설명에 둔다.
 
 공식 근거: https://developers.openai.com/plugins/build/auth
 및 https://docs.spring.io/spring-security/reference/servlet/oauth2/authorization-server/configuration-model.html

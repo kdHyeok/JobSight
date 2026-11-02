@@ -1,6 +1,6 @@
 # JobSight 경험-지원 관계 구조 최종 설계
 
-작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
+작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b. 1.4 의 공고 쪽 T3 와 5.3 `posting_update` 적용 — 1단계 1c) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
 
 아래에서 `B/` 는 `backend/src/main/java/com/jobsight/company/`, `M/` 은 `backend/src/main/resources/db/migration/`, `F/` 는 `frontend/src/components/` 를 줄여 쓴 것이다.
 
@@ -758,7 +758,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 | `resume_row_*` | `FOR UPDATE` 로 직렬화한다. `update`·`delete` 는 `expectedVersion` **필수**, `add` 는 선택이다. 다르면 409 `RESUME_STALE`. update는 병합한다(`experienceId` 보존). 반환은 개요와 새 `version` 이다. 모두 1단계 |
 | `self_intro_list` | 필터 `positionId?`·`postingId?`·`companyId?`·`questionType?`·`unlinked?` 와 `limit?=10` 을 둔다. 반환은 `answerPreview`(300자), `score`, `matchedTerms`, 출처 `{direct:[{position, company, trust}], indirect:[{resume, position, company}]}`, `questionTypes`, `episodes[{id,title,experienceId,experienceRevision}]`, `alreadyUsedFor[]` 다. **직접 출처가 0건이면** 빈 배열 대신 `{fallback:"indirect", results:[…각 항목 "출처 미상"]}` 을 준다. `q` 의 100자 제한을 스키마에 드러내고, 넘으면 400을 준다. 원문은 `self_intro_get` 으로 읽는다. 웹 REST 목록은 그대로 둔다 |
 | `self_intro_create` / `_update` | `positionIds?`, `episodes?[{id, experienceId, experienceRevision}]`, `questionTypes?`, `writingContext?`(6.7) 를 추가한다. `episodes` 를 보내면 항목의 세 키가 모두 필수다. 경험 id를 사건의 현재 소속에서 추론하거나 병합 target으로 치환하지 않는다. 소유자, 개정 존재, 사건과 경험의 정체성 검사는 6.8을 따른다. 이 필드는 REST에도 생기지만 선택이고 null=유지라 웹이 새 필드를 보내지 않는 기존 경로에는 영향이 없다. 규칙: 생성 시 "이력서 또는 직무 1개 이상", 수정 시 0개 허용. 지금은 생성과 수정이 같은 DTO의 `@Size(min = 1)` 을 공유하므로(`B/selfintro/dto/SelfIntroductionRequest.java:12`) 생성용과 수정용 요청을 분리한다. 빈 목록에서 `ids.get(0)` 로 `IndexOutOfBoundsException` 을 던지는 `requireOwnedResumes`(`SelfIntroductionService.java:118-123`)도 함께 고친다 |
-| `posting_update` | `positions`·`steps` 가 null이면 유지한다. id 없는 직무는 이름으로 기존 직무와 맞춘다(1단계) |
+| `posting_update` | `positions`·`steps` 가 null이면 유지한다. id 없는 직무는 이름으로 기존 직무와 맞춘다(1단계). **적용함(1c)**: 래퍼가 아니라 `JobPostingService` 에 두어 REST PUT 도 같다. 웹 폼은 항상 배열을 보내 동작이 그대로이고, 웹에서 지웠다 같은 이름으로 다시 넣은 직무도 행을 유지해야 연결이 끊기지 않기 때문이다 |
 | `self_intro_get` | 사건 연결을 `episodes[{id,title,experienceId,experienceRevision}]` 로 돌려준다. 저장된 작성 근거 쌍을 그대로 반환한다. 조회나 재저장 때 현재 사건 소속에서 경험 id를 다시 계산하지 않는다(6.8) |
 | `posting_set_status` | `SUBMITTED` 로 바꾸면 그 공고의 기록 당시 연결 자료로 제출 기록(LINKED)을 남기고 응답에 `submission{id, level}` 을 싣는다. 같은 요청을 다시 보내면 같은 기록을 돌려준다(6.6). 제출본 확인은 웹에서 한다 |
 | 리소스 설명 | 스킬 설명(`SKILL.md:3`)과 `resources/list` 설명(`McpController.java:54-55`)에 자기소개와 경험을 넣는다 |
