@@ -115,6 +115,49 @@ describe('경험 원본 화면', () => {
     expect(payload.facts!.results![1].id).toBeUndefined()
   })
 
+  it('수정 저장이 EXPERIENCE_STALE 이면 상세를 새로 읽어 보기로 돌아가고, 다시 수정하면 새 version 을 보낸다', async () => {
+    vi.mocked(api.updateExperience).mockRejectedValueOnce(new ApiClientError(409, 'EXPERIENCE_STALE', '다른 곳에서 먼저 저장했습니다.'))
+    const wrapper = await mountBoard('e1')
+    vi.mocked(api.getExperience).mockResolvedValue(detail({ version: 6, revision: 4, memo: 'AI 가 고친 메모' }))
+    await button(wrapper, '수정').trigger('click')
+    await wrapper.get('#experience-form textarea[maxlength="2000"]:not([aria-label])').setValue('새 메모')
+    await wrapper.get('#experience-form').trigger('submit')
+    await flushPromises()
+    expect(api.getExperience).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('#experience-form').exists()).toBe(false)
+    expect(drawer(wrapper).text()).toContain('다른 곳에서 바뀌었습니다. 새 내용으로 다시 수정하세요')
+    expect(drawer(wrapper).text()).toContain('AI 가 고친 메모')
+
+    await button(wrapper, '수정').trigger('click')
+    await wrapper.get('#experience-form').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(api.updateExperience).mock.calls[1][1].expectedVersion).toBe(6)
+  })
+
+  it('그 밖의 저장 오류는 폼과 입력을 남기고 이유를 보인다', async () => {
+    vi.mocked(api.updateExperience).mockRejectedValueOnce(new ApiClientError(409, 'EXPERIENCE_IN_USE', '이력서 행이 쓰고 있는 경험은 종류를 바꿀 수 없습니다.'))
+    const wrapper = await mountBoard('e1')
+    await button(wrapper, '수정').trigger('click')
+    await wrapper.get('#experience-form textarea[maxlength="2000"]:not([aria-label])').setValue('새 메모')
+    await wrapper.get('#experience-form').trigger('submit')
+    await flushPromises()
+    expect(drawer(wrapper).text()).toContain('종류를 바꿀 수 없습니다')
+    expect((wrapper.get('#experience-form textarea[maxlength="2000"]:not([aria-label])').element as HTMLTextAreaElement).value).toBe('새 메모')
+    expect(api.getExperience).toHaveBeenCalledTimes(1)
+  })
+
+  it('검토 확정이 409 면 상세를 새로 읽고 이유를 보인다', async () => {
+    vi.mocked(api.reviewExperience).mockRejectedValueOnce(new ApiClientError(409, 'EXPERIENCE_STALE', '그사이 개정이 올랐습니다.'))
+    const wrapper = await mountBoard('e1')
+    vi.mocked(api.getExperience).mockResolvedValue(detail({ revision: 4 }))
+    await button(wrapper, '검토 확정').trigger('click')
+    await flushPromises()
+    expect(api.reviewExperience).toHaveBeenCalledWith('e1', 3)
+    expect(api.getExperience).toHaveBeenCalledTimes(2)
+    expect(drawer(wrapper).text()).toContain('그사이 개정이 올랐습니다.')
+    expect(drawer(wrapper).text()).toContain('개정 4')
+  })
+
   it('중복 처리 흐름: 이력서가 쓰면 409 사유를 보여 주고, 자소서 근거만 남으면 끊고 지울지 물어 detach=true 로 지운다', async () => {
     const inUse = new ApiClientError(409, 'EXPERIENCE_IN_USE', '이력서가 쓰고 있는 경험입니다: [백엔드].')
     vi.mocked(api.deleteExperience).mockRejectedValueOnce(inUse)

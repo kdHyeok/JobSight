@@ -85,7 +85,13 @@ async function save(payload: ExperiencePayload) {
     }
     await Promise.all([load(), open(saved.id)])
   } catch (error) {
-    // 409(EXPERIENCE_STALE 등): 폼은 남기고 이유를 보여 준다. 다시 열면 새 내용으로 시작한다.
+    // EXPERIENCE_STALE: 폼은 열 때의 version 을 쥐고 있어 다시 보내도 또 409 다. 상세를 새로 읽어 보기로 돌린다.
+    if (error instanceof ApiClientError && error.code === 'EXPERIENCE_STALE' && selected.value) {
+      await open(selected.value.id)
+      drawerError.value = '다른 곳에서 바뀌었습니다. 새 내용으로 다시 수정하세요.'
+      return
+    }
+    // 그 밖의 오류는 폼과 입력을 남기고 이유를 보여 준다.
     drawerError.value = error instanceof Error ? error.message : '경험을 저장하지 못했습니다.'
   } finally {
     saving.value = false

@@ -2,7 +2,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ResumeEditor from '../components/ResumeEditor.vue'
 import * as api from '../api/experiences'
-import { emptyContent, type Resume, type ResumePayload } from '../types/resume'
+import { SECTIONS, emptyContent, emptyRow, type Resume, type ResumePayload, type Row, type SectionKey } from '../types/resume'
 import type { ExperienceDetail, ExperienceLine } from '../types/experience'
 
 vi.mock('../api/experiences', () => ({
@@ -136,10 +136,95 @@ describe('이력서 편집기의 경험 연결', () => {
     expect(wrapper.get('.page-notice .notice').text()).toContain('경험 연결이 끊긴 행이 있습니다: 검색 개선')
   })
 
+  it('저장이 실패해 응답이 오지 않으면 "원본으로 갱신"이 남아 다시 저장할 때도 refreshExperienceIds 로 나간다', async () => {
+    const value = resume([anchored])
+    const wrapper = await mountEditor(value)
+    await projectRows(wrapper).get('.resume-row__exp .button').trigger('click')
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    // 부모(ResumeBoard)는 실패하면 saving 만 되돌리고 resume 을 바꾸지 않는다.
+    await wrapper.setProps({ saving: true })
+    await wrapper.setProps({ saving: false })
+    expect(projectRows(wrapper).text()).toContain('저장하면 원본 개정으로 갱신')
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    expect(wrapper.emitted('save')).toHaveLength(2)
+    expect(savedPayload(wrapper).refreshExperienceIds).toEqual(['e1'])
+  })
+
   it('경험 원본을 못 불러와도 편집기는 열리고 경험 조작만 숨긴다', async () => {
     vi.mocked(api.listExperiences).mockRejectedValue(new Error('일시 오류'))
     const wrapper = await mountEditor(resume([anchored]))
     expect(wrapper.find('.resume-row__exp').exists()).toBe(false)
     expect(wrapper.find('.resume-name').exists()).toBe(true)
+  })
+})
+
+describe('경험 앵커 섹션 4개', () => {
+  const cases = [
+    { key: 'projects', label: '프로젝트 경험', kind: 'PROJECT', titleKey: 'name', id: 'p1', title: '검색 개선' },
+    { key: 'experiences', label: '경력사항', kind: 'CAREER', titleKey: 'company', id: 'c1', title: '잡사이트(인턴)' },
+    { key: 'activities', label: '대내외활동', kind: 'ACTIVITY', titleKey: 'name', id: 'a1', title: '오픈소스 동아리' },
+    { key: 'trainings', label: '교육이수', kind: 'TRAINING', titleKey: 'name', id: 't1', title: '백엔드 부트캠프' },
+  ] as const
+  const details = cases.map((item) => ({ ...detail(item.id, item.title, ['INIT']), kind: item.kind }))
+
+  function resumeWith(key: SectionKey, rows: Row[]): Resume {
+    const content = emptyContent()
+    content[key] = rows
+    return { id: 'resume', name: '백엔드', content, positionIds: [], version: 7, createdAt: '', updatedAt: '' }
+  }
+  const sectionOf = (wrapper: Awaited<ReturnType<typeof mountEditor>>, label: string) =>
+    wrapper.findAll('.resume-section').find((section) => section.find('h2').text().startsWith(label))!
+
+  beforeEach(() => {
+    vi.mocked(api.listExperiences).mockReset().mockResolvedValue({
+      experiences: cases.map((item) => ({ ...line(item.id, item.title, 1), kind: item.kind })), unlinked: [], index: {} as never,
+    })
+    vi.mocked(api.getExperiences).mockReset().mockImplementation(async (ids) => details.filter((d) => ids.includes(d.id)))
+    vi.mocked(api.createExperience).mockReset().mockResolvedValue({
+      id: 'new', version: 0, revision: 1, changeKind: 'INIT', needsReview: [], normalizedSkills: [], warnings: [],
+    })
+  })
+
+  it.each(cases)('$label: 이 섹션 종류의 경험만 고르고, 불러온 행은 제목·사실·experienceId 만 갖는다', async (item) => {
+    const wrapper = await mountEditor(resumeWith(item.key, []))
+    const section = sectionOf(wrapper, item.label)
+    const options = section.get('select[aria-label="경험에서 불러오기"]').findAll('option').map((option) => option.text())
+    expect(options.slice(1)).toEqual([`${item.title} (2024.03~2024.08)`])
+    await section.get('select[aria-label="경험에서 불러오기"]').setValue(item.id)
+    await flushPromises()
+    await wrapper.get('.resume-head .button.primary').trigger('click')
+    const row = savedPayload(wrapper).content[item.key][0]
+    expect(row[item.titleKey]).toBe(item.title)
+    expect(row.experienceId).toBe(item.id)
+    expect('experienceRevision' in row).toBe(false)
+    expect(row.description).toContain('- 색인 파이프라인을 다시 짰다')
+  })
+
+  it.each(cases)('$label: 경험으로 등록은 이 섹션 종류로 만들고, 연결된 행은 다른 칸을 고쳐도 앵커를 지킨다', async (item) => {
+    const bareRow: Row = { [item.titleKey]: '새 행', startYm: '2023.01', description: '- 한 일' }
+    const wrapper = await mountEditor(resumeWith(item.key, [bareRow]))
+    await sectionOf(wrapper, item.label).get('.resume-row__exp .button').trigger('click')
+    await flushPromises()
+    expect(api.createExperience).toHaveBeenCalledWith(expect.objectContaining({
+      kind: item.kind, title: '새 행', facts: expect.objectContaining({ actions: [{ text: '한 일' }] }),
+    }))
+
+    const anchoredRow: Row = { [item.titleKey]: item.title, startYm: '2024.03', description: '기존', experienceId: item.id, experienceRevision: 1 }
+    const other = await mountEditor(resumeWith(item.key, [anchoredRow]))
+    await sectionOf(other, item.label).get('.resume-row textarea').setValue('고친 설명')
+    await other.get('.resume-head .button.primary').trigger('click')
+    expect(savedPayload(other).content[item.key][0]).toMatchObject({ experienceId: item.id, experienceRevision: 1 })
+  })
+
+  it('앵커 없는 섹션(학력·수상·자격·SW 역량)에는 경험 조작을 그리지 않는다', async () => {
+    const content = emptyContent()
+    for (const section of SECTIONS) content[section.key] = [emptyRow(section)]
+    const wrapper = await mountEditor({ id: 'resume', name: '백엔드', content, positionIds: [], version: 7, createdAt: '', updatedAt: '' })
+    for (const label of ['학력사항', '수상내역', '자격증', 'SW 역량']) {
+      const section = sectionOf(wrapper, label)
+      expect(section.find('select[aria-label="경험에서 불러오기"]').exists()).toBe(false)
+      expect(section.find('.resume-row__exp').exists()).toBe(false)
+    }
+    expect(wrapper.findAll('select[aria-label="경험에서 불러오기"]')).toHaveLength(4)
   })
 })
