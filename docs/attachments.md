@@ -71,7 +71,7 @@ cd frontend && npm run type-check && npm test
 7. 첨부가 있는 이력서를 `복제` → 복제본에서 그 첨부를 `교체` 또는 `제거` 하고 저장 → 원본 이력서를 열면 원래 파일이 그대로 보이고 `미리보기` 가 되는가 (원본 첨부 `GET` 200)
 8. 첨부가 있는 이력서를 열 때 DevTools 네트워크에 `/api/attachments/{id}/meta` 요청이 없는가 (메타는 이력서 응답에 함께 온다)
 
-자동 검증: `AttachmentField.spec.ts`(교체·제거가 DELETE 를 보내지 않음, 받은 메타가 있으면 메타 GET 없음, 편집기 전체에서 메타 GET 없음) · `ResumeServiceTest`(첨부 칸 7개 수집) · `ResumeAttachmentsIntegrationTest`(PostgreSQL 에서 남의 첨부 메타가 빠짐).
+자동 검증: `AttachmentField.spec.ts`(교체·제거가 DELETE 를 보내지 않음, 받은 메타가 있으면 메타 GET 없음, 편집기 전체에서 메타 GET 없음) · `ResumeServiceTest`(첨부 칸 7개 수집, `[null]` 행이 있어도 상세·생성이 깨지지 않음) · `ResumeAttachmentsIntegrationTest`(PostgreSQL 에서 남의 첨부 메타가 빠짐).
 
 ## 함정
 
@@ -85,6 +85,8 @@ cd frontend && npm run type-check && npm test
   저장하지 않고 나간 경우에도 이력서는 이전 id 를 들고 있으니 지우면 안 된다. 전에는 화면이 이전 파일을 즉시 DELETE 했다 — `docs/decisions.md` 「첨부 교체·제거 때 이전 파일을 지우지 않는다」.
   `DELETE /api/attachments/{id}` 경로는 남아 있지만 화면은 부르지 않는다. `AttachmentField.spec.ts` 가 http 계층에서 DELETE 가 나가지 않는 것을 고정한다.
 - **이력서 응답에 실리는 메타는 응답 전용이다.** 저장 요청에 넣지 않는다 — 웹 편집기는 보내지 않고, MCP 는 요청의 모르는 필드를 거부한다(`McpTools` 의 `FAIL_ON_UNKNOWN_PROPERTIES`). 응답에 없는 id 는 `AttachmentField` 가 `/meta` 로 직접 부르므로, 새로 올린 직후나 남의 id 가 적힌 칸도 화면은 전처럼 동작한다.
+- **첨부 칸을 모을 때 `null` 행은 건너뛴다.** 섹션 배열 요소에는 `@NotNull` 이 없어 `{"trainings":[null]}` 이 검증을 통과해 그대로 저장되고, 예전에 MCP 로 저장된 문서에도 있을 수 있다.
+  `ResumeContent.attachmentIds()` 는 모든 이력서 응답이 지나가므로, 여기서 행을 그대로 만지면 상세·생성·저장·복제·`resume_get` 이 전부 500 이 되고 그 이력서를 열 수 없다. `rows()` 가 `null` 행을 거른다.
 - `fetch` 에 `FormData` 를 줄 때 `Content-Type` 을 직접 넣으면 boundary 가 빠져 서버가 파트를 못 읽는다.
   `api/http.ts` 가 `FormData` 를 예외로 두는 이유다.
 - bytea 는 행에 같이 붙는다. 메타 조회는 별도 프로젝션(`AttachmentRepository.findMeta`)을 써서 바이트를 읽지 않는다.

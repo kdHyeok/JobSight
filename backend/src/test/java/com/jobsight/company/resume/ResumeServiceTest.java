@@ -22,6 +22,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -311,6 +313,32 @@ class ResumeServiceTest {
         ResumeResponse response = service.findById(resume.getId());
 
         assertThat(response.attachments()).containsExactly(Map.entry(ids.get(0), mine));
+    }
+
+    /**
+     * 컨테이너 요소에 @NotNull 이 없어 [null] 행은 검증을 통과하고 그대로 저장된다. 예전에 저장된 문서에도 있을 수 있다.
+     * 첨부 칸을 모으다가 그 행에서 NPE 가 나면 상세·생성이 500 이 되고 이력서를 열 수 없다.
+     */
+    @Test
+    void nullRowsDoNotBreakTheResponse() {
+        saveReturnsArgument();
+        UUID fileId = UUID.randomUUID();
+        AttachmentResponse meta = new AttachmentResponse(fileId, "이수증.pdf", "application/pdf", 1024);
+        given(attachmentRepository.findMetas(Set.of(fileId), OWNER_ID)).willReturn(List.of(meta));
+        Resume resume = new Resume(OWNER_ID, "v1", """
+                {"trainings":[null,{"name":"교육","fileId":"%s"}],"activities":[null],"awards":[null],"certificates":[null]}
+                """.formatted(fileId));
+        resume.onCreate();
+        given(repository.findByIdAndOwnerId(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
+
+        assertThat(service.findById(resume.getId()).attachments()).containsExactly(Map.entry(fileId, meta));
+
+        ResumeContent withNullRows = new ResumeContent(null, null,
+                Arrays.asList(null, new ResumeContent.Training("교육", null, null, null, null, fileId.toString())),
+                Collections.singletonList(null), null, Collections.singletonList(null),
+                Collections.singletonList(null), null, null);
+        ResumeResponse created = service.create(new ResumeRequest("v2", withNullRows, List.of(), null));
+        assertThat(created.attachments()).containsExactly(Map.entry(fileId, meta));
     }
 
     @Test
