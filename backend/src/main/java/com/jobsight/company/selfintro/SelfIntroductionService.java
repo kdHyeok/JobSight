@@ -36,6 +36,9 @@ public class SelfIntroductionService {
     private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}]+");
     private static final double K1 = 1.2;
     private static final double B = 0.75;
+    /** 요청 DTO 의 @Size 상한과 같다. MCP 의 더하기 결과에도 적용한다. */
+    private static final int MAX_POSITIONS = 10;
+    private static final int MAX_TYPES = 3;
 
     private final SelfIntroductionRepository repository;
     private final ResumeRepository resumeRepository;
@@ -73,14 +76,39 @@ public class SelfIntroductionService {
         return SelfIntroductionResponse.of(repository.save(value));
     }
 
-    /** positionIds·questionTypes 가 null 이면 연결을 건드리지 않는다. 남는 연결은 출처를 유지한다(웹 저장이 AI 기록을 확정하지 않는다). */
+    /**
+     * positionIds·questionTypes 가 null 이면 연결을 건드리지 않는다. 남는 연결은 출처를 유지한다(웹 저장이 AI 기록을 확정하지 않는다).
+     * 웹은 보낸 목록으로 맞추고(✗ 해제), MCP 는 더하기만 한다(addOnly).
+     */
     @Transactional
     public SelfIntroductionResponse update(UUID id, SelfIntroductionUpdateRequest request) {
         SelfIntroduction value = findOwned(id);
-        value.update(requireOwnedResumes(request.resumeIds()), request.question().trim(), normalize(request.answer()));
-        if (request.positionIds() != null) value.linkPositions(requireOwnedPositions(request.positionIds()), source());
-        if (request.questionTypes() != null) value.linkQuestionTypes(codes(request.questionTypes()), source());
+        LinkSource source = source();
+        Set<UUID> resumeIds = requireOwnedResumes(request.resumeIds());
+        Set<UUID> positionIds = request.positionIds() == null ? null
+                : addOnly(requireOwnedPositions(request.positionIds()), value.getPositionLinks(), source, MAX_POSITIONS, "지원 직무");
+        Set<Competency> types = request.questionTypes() == null ? null
+                : addOnly(codes(request.questionTypes()), value.getQuestionTypes(), source, MAX_TYPES, "문항 유형");
+        value.update(resumeIds, request.question().trim(), normalize(request.answer()));
+        if (positionIds != null) value.linkPositions(positionIds, source);
+        if (types != null) value.linkQuestionTypes(types, source);
         return SelfIntroductionResponse.of(repository.save(value));
+    }
+
+    /**
+     * MCP(AI) 요청은 연결을 더하기만 한다 — 목록에 없는 기존 연결(확정·AI 기록)도 남긴다. AI 기록의 확정과 삭제는
+     * 웹 전용이다(설계 3절 규칙 3, 5.2). 그래서 AI 가 다른 회사용으로 고치며 목록을 바꿔도 사용자가 남긴 출처가 지워지지 않는다.
+     * 더한 결과가 요청 상한을 넘으면 400 이다(빼는 것은 웹에서).
+     */
+    private static <K> Set<K> addOnly(Set<K> wanted, Set<? extends SelfIntroduction.Link<K>> links, LinkSource source,
+                                      int max, String label) {
+        if (source != LinkSource.AI) return wanted;
+        links.forEach(link -> wanted.add(link.key()));
+        if (wanted.size() > max) {
+            throw new ApiRuleException(HttpStatus.BAD_REQUEST, "TOO_MANY_LINKS", label + "는 " + max
+                    + "개 이하여야 합니다. MCP 는 연결을 더하기만 하므로 기존 연결을 빼는 것은 웹 자기소개 화면에서 합니다.");
+        }
+        return wanted;
     }
 
     /** 웹의 ✓. 확정 도구는 MCP 에 없다 — 설계 3절 규칙 3. */

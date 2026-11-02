@@ -152,7 +152,7 @@ describe('자기소개 문항과 연결 이력서', () => {
     await wrapper.get('select[aria-label="지원 직무 추가"]').setValue('p-front')
     expect(wrapper.get('.intro-editor button[type="submit"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('select[aria-label="문항 유형 추가"]').setValue('MOTIVATION')
-    expect(wrapper.get('.intro-links').text()).toContain('비회사 · 프론트')
+    expect(wrapper.get('.intro-links').text()).toContain('비회사 · 수시 · 프론트')
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
     expect(api.createSelfIntroduction).toHaveBeenCalledWith({
@@ -170,15 +170,30 @@ describe('자기소개 문항과 연결 이력서', () => {
     await wrapper.get('.intro-card .button').trigger('click')
     const candidates = () => wrapper.findAll('.link-candidates button').map((button) => button.text())
     expect(wrapper.get('.link-candidates').text()).toContain('어느 지원용?')
-    expect(candidates()).toEqual(['+ 에이회사 · 백엔드', '+ 에이회사 · 데이터'])
+    expect(candidates()).toEqual(['+ 에이회사 · 공채 · 백엔드', '+ 에이회사 · 공채 · 데이터'])
     await wrapper.get('[role="combobox"]').setValue('프런트')
     await wrapper.get('[role="option"]').trigger('click')
-    expect(candidates()).toEqual(['+ 에이회사 · 백엔드', '+ 에이회사 · 데이터', '+ 비회사 · 프론트'])
+    expect(candidates()).toEqual(['+ 에이회사 · 공채 · 백엔드', '+ 에이회사 · 공채 · 데이터', '+ 비회사 · 수시 · 프론트'])
     await wrapper.findAll('.link-candidates button')[1].trigger('click')
     expect(wrapper.find('.link-candidates').exists()).toBe(false)
     await wrapper.get('.intro-editor form').trigger('submit')
     await flushPromises()
     expect(api.updateSelfIntroduction).toHaveBeenCalledWith(item.id, expect.objectContaining({ positionIds: ['p-data'] }))
+  })
+
+  it('같은 회사의 다른 공고에 같은 이름 직무가 있으면 공고명으로 구분하고, 직무명과 같은 공고명은 뺀다', async () => {
+    vi.mocked(listPositions).mockResolvedValue([
+      { id: 'p-first', name: '백엔드', companyName: '에이회사', postingTitle: '상반기 공채' },
+      { id: 'p-second', name: '백엔드', companyName: '에이회사', postingTitle: '하반기 공채' },
+      { id: 'p-same', name: '데이터', companyName: '비회사', postingTitle: '데이터' },
+      { id: 'p-untitled', name: '운영', companyName: null, postingTitle: null },
+    ] as unknown as Position[])
+    const wrapper = await mountBoard()
+    await wrapper.get('.page-head > button').trigger('click')
+    const options = wrapper.findAll('select[aria-label="지원 직무 추가"] option').slice(1).map((option) => option.text())
+    expect(options).toEqual(['에이회사 · 상반기 공채 · 백엔드', '에이회사 · 하반기 공채 · 백엔드', '비회사 · 데이터', '회사 미입력 · 운영'])
+    await wrapper.get('select[aria-label="지원 직무 추가"]').setValue('p-second')
+    expect(wrapper.get('.link-chips').text()).toContain('에이회사 · 하반기 공채 · 백엔드')
   })
 
   it('AI 기록 칩은 ✓로 바로 확정하고 ✗로 연결에서 뺀다', async () => {
@@ -192,13 +207,13 @@ describe('자기소개 문항과 연결 이력서', () => {
       ...aiRecorded, positionLinks: [{ positionId: 'p-backend', source: 'USER' }],
     })
     const wrapper = await mountBoard()
-    expect(wrapper.get('.intro-card').text()).toContain('에이회사 · 백엔드 · AI 기록')
+    expect(wrapper.get('.intro-card').text()).toContain('에이회사 · 공채 · 백엔드 · AI 기록')
     await wrapper.get('.intro-card .button').trigger('click')
     expect(wrapper.find('.link-candidates').exists()).toBe(false)
-    await wrapper.get('[aria-label="에이회사 · 백엔드 확정"]').trigger('click')
+    await wrapper.get('[aria-label="에이회사 · 공채 · 백엔드 확정"]').trigger('click')
     await flushPromises()
     expect(api.confirmSelfIntroduction).toHaveBeenCalledWith(item.id, { positionIds: ['p-backend'] })
-    expect(wrapper.find('[aria-label="에이회사 · 백엔드 확정"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="에이회사 · 공채 · 백엔드 확정"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="지원동기 확정"]').exists()).toBe(true)
     await wrapper.get('[aria-label="지원동기 연결 해제"]').trigger('click')
     await wrapper.get('.intro-editor form').trigger('submit')

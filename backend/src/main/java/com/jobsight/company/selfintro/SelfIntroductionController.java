@@ -63,7 +63,9 @@ public class SelfIntroductionController {
     @PutMapping("/{id}")
     @Operation(summary = "자기소개 문항 변경",
             description = "resumeIds·question·answer 는 보낸 값으로 바꾼다(연결 0개 허용). "
-                    + "positionIds·questionTypes 는 null 이면 유지, 배열이면 그 목록으로 맞춘다([] 는 비움). "
+                    + "positionIds·questionTypes 는 null 이면 유지한다. 웹은 배열 목록으로 맞추고([] 는 비움), "
+                    + "MCP 는 목록의 연결을 더하기만 한다 — 목록에 없는 기존 연결(확정·AI 기록)을 지우지 않으며, 빼는 것은 사용자가 웹에서 한다. "
+                    + "더한 결과가 직무 10개·문항 유형 3개를 넘으면 TOO_MANY_LINKS. "
                     + "남는 연결은 출처(확정·AI 기록)를 유지하고 새 연결만 요청 주체의 출처로 단다. MCP 연결은 'AI 기록'이다.")
     public SelfIntroductionResponse update(@PathVariable UUID id,
                                            @Valid @RequestBody SelfIntroductionUpdateRequest request) {

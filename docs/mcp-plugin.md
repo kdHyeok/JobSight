@@ -174,8 +174,9 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 뉴스/유튜브·참고 상세 조회는 소유자 필터된 목록에서 ID를 찾는다.
 MCP용 `position_create`는 기존 `PositionService` 트랜잭션에서 공고 소유권을 검증하고 직무를 추가한다.
 이력서는 `resume_list/get/create/update/copy/delete`, 자기소개는 `self_intro_list/get/create/update/delete`로 전체 CRUD를 제공한다.
-자기소개 생성은 이력서 또는 직무 1개 이상, 수정은 0개 허용이고, 수정의 `positionIds`·`questionTypes` 는 null=유지다. `self_intro_update` 에는
-다른 update 도구처럼 "전체 교체" 문구가 붙지만 이 두 필드의 null=유지 규칙은 도구 설명(`SelfIntroductionController`)에 있다.
+자기소개 생성은 이력서 또는 직무 1개 이상, 수정은 0개 허용이고, 수정의 `positionIds`·`questionTypes` 는 null=유지다. **MCP 요청은 이 두 목록을
+기존 연결에 더하기만 한다**(사용자가 확정한 연결·AI 기록을 지우지 못함, 빼기는 웹 전용 — `docs/decisions.md` D4). `self_intro_update` 에는
+다른 update 도구처럼 "전체 교체" 문구가 붙지만 이 두 필드의 규칙은 도구 설명(`SelfIntroductionController`)에 있다.
 이력서 행 도구(`resume_basic_update`, `resume_row_add/update/delete`)는 REST 에 없는 MCP 전용이다. REST 는 문서 통째 PUT 만 있고,
 MCP 는 문서 전체를 되돌려 보내기 어려워 서버가 조회→한 군데 수정→저장을 한 트랜잭션으로 묶는다(`ResumeService.mutateRows`).
 행 입력 `ResumeRowRequest` 는 8개 섹션 필드의 합집합 record 다 — 스키마 생성기가 Map 을 그리지 못하고 섹션별 도구는 24개가 되기 때문.

@@ -37,8 +37,10 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 5. 강조 표시는 텍스트 조각을 Vue 노드로 나누며 `v-html`을 사용하지 않는다.
 6. 연결 이력서는 검색창 클릭·포커스 시에만 드롭다운으로 펼친다. 미선택 이력서를 이름으로 검색하고 검색어가 없으면 최근 수정순으로 보여 준다. 목록은 최대 320px(작은 화면은 화면 높이의 45%) 안에서 휠·스크롤바로 탐색하며 폼 본문을 밀어내지 않는다. 화면 아래 남은 공간이 더 작으면 높이를 줄이고, 공간이 거의 없으면 입력을 화면 안으로 이동해 마지막 항목까지 접근할 수 있게 한다.
 7. 선택한 이력서는 검색과 무관하게 칩으로 유지하고 칩에서 연결을 해제한다. 연속 선택 시 검색어만 비우고 목록은 열어 둔다. 신규 문항은 첫 이력서를 기본 선택한다. 저장 버튼은 생성이면 이력서·직무 1개 이상, 수정이면 질문만 있으면 열린다.
-8. **수정의 `positionIds`·`questionTypes` 는 null 이면 유지, 배열이면 그 목록으로 맞춘다.** 남는 연결은 출처를 유지하고 새 연결만
-   요청 주체의 출처를 단다. 그래서 웹에서 저장해도 AI 기록이 저절로 확정되지 않고, 이 필드를 보내지 않는 이력서 편집기의 문항 저장은 연결을 건드리지 않는다.
+8. **수정의 `positionIds`·`questionTypes` 는 null 이면 유지한다. 웹은 배열 목록으로 맞추고(✗ 해제), MCP 는 더하기만 한다.**
+   MCP 요청은 목록에 없는 기존 연결(확정·AI 기록)을 지우지 못한다(`[]` 도 지우지 않음). AI 기록의 확정과 삭제는 웹 전용이다(설계 5.2, `docs/decisions.md` D4).
+   더한 결과가 직무 10개·유형 3개를 넘으면 400 `TOO_MANY_LINKS`. 남는 연결은 출처를 유지하고 새 연결만 요청 주체의 출처를 단다.
+   그래서 웹에서 저장해도 AI 기록이 저절로 확정되지 않고, 이 필드를 보내지 않는 이력서 편집기의 문항 저장은 연결을 건드리지 않는다.
 9. **확정(AI → USER)은 웹에서만 한다.** `POST /api/self-introductions/{id}/confirm` 은 MCP 도구로 등록하지 않는다. 연결되지 않은 대상은 404 `LINK_NOT_FOUND`.
 10. **웹 REST 목록 응답은 답변 전문이다.** 웹은 목록 항목의 `answer` 를 그대로 PUT 하므로 미리보기로 줄이면 답변이 잘려 저장된다.
     MCP 전용 목록 모양(미리보기·limit·출처)은 `McpActions` 래퍼가 따로 만든다. REST 응답에는 편집기용 `positionLinks`·`questionTypes` 만 덧붙였다.
@@ -46,7 +48,8 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 
 ## 편집기의 직무·문항 유형
 
-- `지원 직무`: 고른 직무를 칩으로 보여 준다. 추가는 `직무 추가…` select(회사 · 직무명). AI 기록 칩은 warning 톤에 `AI 기록`·✓·✗ 를 단다.
+- `지원 직무`: 고른 직무를 칩으로 보여 준다. 추가는 `직무 추가…` select. 라벨은 `회사 · 공고명 · 직무명` 이다 — 같은 회사의 다른 공고에
+  같은 이름 직무가 있어도 고를 수 있게 공고명을 넣고, 공고명이 없거나 직무명과 같으면 뺀다. AI 기록 칩은 warning 톤에 `AI 기록`·✓·✗ 를 단다.
   ✓는 초안이 아니라 바로 확정 요청을 보내고, ✗·×는 초안에서 뺀 뒤 `저장`으로 전송한다.
 - **직접 출처가 없으면 "어느 지원용?" 후보 칩**을 띄운다. 후보는 초안에 연결된 이력서들의 직무 **전부**이고 개수를 자르지 않는다.
   이력서 목록 응답의 `positionIds` 로 계산한다(이력서마다 다시 부르지 않는다). 클릭 한 번으로 고르면 후보 줄이 사라진다.
@@ -59,7 +62,7 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 |---|---|---|
 | `self_intro_list` | `McpActions.listSelfIntros` → `SelfIntroductionAgentService.list` | 필터 `q`(100자, 넘으면 `QUERY_TOO_LONG`)·`resumeId`·`positionId`·`postingId`·`companyId`·`questionType`·`unlinked`, `limit`(기본 10, 1~50로 맞춤). 응답 `{fallback, total, complete, results[]}` |
 | `self_intro_get` | `McpActions.getSelfIntro` | 같은 항목 모양에 `answer` 전문 |
-| `self_intro_create` / `_update` | `SelfIntroductionController` | 위 DTO 그대로. MCP 로 남긴 연결은 항상 `AI` |
+| `self_intro_create` / `_update` | `SelfIntroductionController` | 위 DTO 그대로. MCP 로 남긴 연결은 항상 `AI`. `_update` 의 연결은 더하기만(불변 조건 8) |
 | `self_intro_delete` | `SelfIntroductionController` | — |
 
 목록 항목: `answerPreview`(300자 + `…`), `answerLength`, `score`·`matchedTerms`(q 가 있을 때), `sourceStatus`(`직접 출처`/`출처 미상`),
@@ -68,7 +71,12 @@ app_users ──1:N──▶ self_introductions ──N:M──▶ resumes      
 
 - 직무·공고·기업 필터는 그 직무에 written_for 로 쓴 답변을 준다(USER·AI 모두, 항목마다 `trust`).
   **직접 출처가 0건이면** 빈 배열 대신 `fallback:"indirect"` 로, 연결 이력서가 그 직무를 지원하는 답변 중 **직접 출처가 없는 것**만 준다.
-- `questionTypes` 는 저장된 태그가 있으면 그것(`from` USER·AI), 없으면 정규식 추정(`from` REGEX, trust `추정`).
+- `questionTypes` 는 설계 4.1 순서다: 사용자가 확정한 태그(`from` USER)가 있으면 그것, 없으면 정규식 추정(`from` REGEX, trust `추정`).
+  AI 기록 태그(`from` AI)는 **덧붙기만 하고 추정을 지우지 않는다** — 확인 안 된 태그가 지원동기(FIT) 추정을 가려 재사용 금지 표시를 끄면 안 된다.
+  `questionType` 필터와 `otherCompanySpecific` 의 FIT 판정은 이렇게 합친 목록으로 한다.
+- 읽는 양: 목록·상세는 연결된 직무·이력서의 **이름만** 가벼운 조회(`PositionRepository.findLabels`, `ResumeRepository.findPositionRows`)로 읽는다.
+  계정의 직무 상세·이력서 본문(content JSONB)은 읽지 않는다. 공고·기업 필터만 계정 직무 이름 전체(`findAllLabels`)를 한 번 읽는다.
+  SQL 수 상한은 [backend.md](backend.md#배치-페치와-sql-수-상한).
 - `otherCompanySpecific`: FIT 유형(지원동기·포부·직무 이해) 답변이고, 대상 회사가 없거나 다른 회사다 — 본문 재사용 금지.
   `sameCompany` 는 필터로 회사가 정해졌을 때만 true/false, 아니면 null.
 
@@ -93,11 +101,19 @@ cd frontend && npm run type-check && npm test
 ```
 
 자동 검증:
-- `SelfIntroductionServiceTest`: 생성 "이력서 또는 직무 1개 이상"·수정 0개 허용, 웹 USER·MCP AI 출처, 남의 직무 404, 빈 이력서 목록 수정(예전 `ids.get(0)`), 남는 연결의 출처 유지, null 이면 연결 유지, 확정과 `LINK_NOT_FOUND`.
+- `SelfIntroductionServiceTest`: 생성 "이력서 또는 직무 1개 이상"·수정 0개 허용, 웹 USER·MCP AI 출처, 남의 직무 404, 빈 이력서 목록 수정(예전 `ids.get(0)`), 남는 연결의 출처 유지, null 이면 연결 유지, **MCP 수정은 더하기만·상한 초과 `TOO_MANY_LINKS`**, 확정과 `LINK_NOT_FOUND`.
+- `CurrentUserTest`: 목 없이 실제 인증 객체로 `viaMcp()` — `McpPrincipal` 이면 true, 웹 세션(`AppSessionUser`)·익명·없음이면 false.
+- `SelfIntroductionControllerTest`(MockMvc): 확정의 404 `LINK_NOT_FOUND`·남의 문항 404·유형 4개 400. CSRF 없는 확정 요청 403 은 `scripts/smoke.sh`.
 - `CompetencyTest`: 정규식 상위 2개와 신뢰도, 동점은 표 순서, "기술하시오"의 동사 '기술' 제외.
-- `SelfIntroductionRelationsIntegrationTest`(Testcontainers): 다른 계정 직무 id 로 연결 → 404, 같은 행을 SQL 로 넣으면 복합 FK 위반. AI 기록 → 웹 확정 → "확정". 직접 출처 0건이면 `fallback:"indirect"` 와 "출처 미상", 다른 직무용 답변은 섞지 않음. 미리보기 301자·limit·complete, **REST 목록은 답변 전문**, `q` 101자 → `QUERY_TOO_LONG`. 다른 회사용 지원동기 `otherCompanySpecific`. 직무 삭제 시 연결 CASCADE 와 0개 연결 수정. 표와 enum 일치.
+- `SelfIntroductionRelationsIntegrationTest`(Testcontainers, **`CurrentUser` 목 없음** — 출처는 SecurityContext 의 실제 주체가 정한다):
+  다른 계정 직무 id 로 연결 → 404, 같은 행을 SQL 로 넣으면 복합 FK 위반. 남의 문항·직무·공고·기업 id 로 `get`·`list` 필터·`confirm` → 404,
+  문항 쪽·유형 표의 owner 불일치 SQL 삽입도 거부. **MCP 토큰으로 `McpTools.call("self_intro_create")` → DB source `AI`**, 웹 세션 → `USER`, 웹 확정 → "확정".
+  **MCP `self_intro_update` 가 확정 연결·AI 기록을 지우지 못하고 웹 저장은 지움.** 직접 출처 0건이면 `fallback:"indirect"` 와 "출처 미상", 다른 직무용 답변은 섞지 않음.
+  미리보기 301자·정확히 300자는 말줄임 없음, limit 기본 10·상한 50·0 이하 1, **REST 목록은 답변 전문**, `q` 100자 통과·101자 400 `QUERY_TOO_LONG`(MCP `tools/call` 도 같은 코드의 도구 오류).
+  다른 회사용 지원동기 `otherCompanySpecific`, 두 회사에 연결한 답변의 연결별 `sameCompany`·FIT 여부. **AI 태그가 정규식 FIT 를 가리지 않고 확정 태그는 앞선다.**
+  **MCP 목록·상세가 이력서·직무·공고·기업 엔티티를 읽지 않고 SQL 상한(6·6·7·7) 안.** 직무 삭제 시 연결 CASCADE 와 0개 연결 수정. 표와 enum 일치.
 - `McpToolsTest`: `self_intro_list`·`get` 이 래퍼로 가고 REST 목록을 부르지 않음, 스키마의 `maxLength:100`·필터·enum, 생성 요청의 직무·유형 전달과 연결 0개 생성 거부, 확정 도구 없음.
-- `SelfIntroduction.spec.ts`: 직무만으로 생성·연결 없는 생성 차단, 수정 0개 허용, "어느 지원용?" 후보(연결 이력서들의 직무 전부), AI 기록 ✓ 확정·✗ 해제, 카드의 AI 기록 표시.
+- `SelfIntroduction.spec.ts`: 직무만으로 생성·연결 없는 생성 차단, 수정 0개 허용, "어느 지원용?" 후보(연결 이력서들의 직무 전부), AI 기록 ✓ 확정·✗ 해제, 카드의 AI 기록 표시, **같은 회사·같은 이름 직무를 공고명으로 구분**.
 
 손으로 볼 것: 로그인 뒤 `/introductions` 에서 직무를 골라 저장하고 새로고침해 칩이 남는지, MCP 로 만든 문항의 AI 기록 칩을 ✓로 확정하는지.
 그 밖에 이력서에서 여러 직무를 선택해 저장한 다음 새로고침해 유지되는지 확인한다. 기존 문항의 질문·답변을 이력서에서 수정하고 질문 추가·과거 검색이 목록 아래에 있는지 확인한다. 질문을 추가해 자기소개 화면에서
@@ -120,5 +136,7 @@ cd frontend && npm run type-check && npm test
 - **trust "확정"은 사용자가 연결을 눌러 확인했다는 뜻이지 성과 검증이 아니다.** 웹과 MCP가 같은 문자열(`확정`·`AI 기록`·`추정`)을 쓴다.
 - 직무를 지우면(공고 수정에서 빠진 직무 포함) 그 직접 출처가 함께 사라진다(ON DELETE CASCADE). 답변은 남고 "출처 미상"이 된다.
 - `ResumeQuestions.vue` 의 문항 저장은 `positionIds`·`questionTypes` 를 보내지 않는다(null=유지). 여기서 빈 배열을 보내면 직접 출처가 지워진다.
+- 통합 테스트에서 `CurrentUser` 를 목으로 바꾸고 `viaMcp()` 를 지정하면 출처 판정 자체는 검증되지 않는다. 출처를 보는 테스트는 SecurityContext 에
+  `McpPrincipal`·`AppSessionUser` 를 넣어 실제 판정을 탄다.
 - 정규식 추정은 키워드 일치 수의 몫이라 질문이 짧으면 신뢰도가 1.0 으로 나와도 틀릴 수 있다. 확정된 유형이 필요하면 웹에서 고른다.
 - 같은 id 를 `positionIds` 에 두 번 보내면 하나로 합친다(예전 이력서 중복 id 404 는 없앴다).

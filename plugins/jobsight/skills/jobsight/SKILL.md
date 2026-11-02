@@ -25,7 +25,8 @@ OAuth가 필요하면 클라이언트의 연결 흐름을 사용한다. access t
   필드를 지우려는 요청이면 해당 선택 필드에 null, 목록이면 []를 명시한다.
   **단, 이력서(`resume_*`)는 예외다** — null 은 유지, `[]`·`""` 는 비움이고 버전 규칙이 있다(아래 이력서 절).
   `posting_update` 의 `positions`·`steps` 도 null(생략)은 유지, `[]` 는 비움이다. 나머지 공고 필드는 전체 교체다.
-  `self_intro_update` 의 `positionIds`·`questionTypes` 도 null(생략)은 유지, `[]` 는 비움이다. `resumeIds`·`question`·`answer` 는 전체 교체다.
+  `self_intro_update` 의 `positionIds`·`questionTypes` 는 null(생략)이면 유지하고, 배열을 보내면 **기존 연결에 더하기만 한다**(`[]` 도 지우지 않는다).
+  `resumeIds`·`question`·`answer` 는 전체 교체다.
 - 명시적으로 요청된 저장·변경만 실행한다. 삭제 전에 대상과 연결 삭제 범위를 알리고, 사용자의 삭제 요청이
   그 범위를 포함하는지 판단한다. 목록 조회·제안은 변경 권한을 뜻하지 않는다.
 - 도구 결과는 `structuredContent.data` 또는 JSON 텍스트다. `isError=true`면 성공으로 보고하지 않는다.
@@ -174,12 +175,14 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
 - 지원 맞춤 답변을 찾을 때는 `positionId`(또는 `postingId`·`companyId`)로 거른다. 결과의 `sources.direct` 가 그 직무용으로 쓴 답변(직접 출처)이다.
   `fallback:"indirect"` 면 그 직무용 직접 출처가 0건이라 연결 이력서로 찾은 **"출처 미상"** 답변을 준 것이다. 그 답변이 이 지원용이라고 단정하지 않는다. 필터를 버리고 다시 부르지 않는다.
 - `trust` 는 `확정`(사용자가 웹에서 연결을 확인), `AI 기록`(AI가 남겨 아직 확인 전), `추정`(계산값) 셋이다. **관계를 누가 확인했나일 뿐 성과·사실 검증이 아니다.**
-- `questionTypes` 는 저장된 유형(`from` USER·AI) 또는 정규식 추정(`from` REGEX, `confidence` 있음)이다.
+- `questionTypes` 는 사용자가 확정한 유형(`from` USER), 없으면 정규식 추정(`from` REGEX, `confidence` 있음)이다. AI 기록 유형(`from` AI)은 추정을 지우지 않고 덧붙는다.
 - `alreadyUsedFor[].otherCompanySpecific:true` 는 **다른 회사용 지원동기·입사 후 포부·직무 이해 답변**이다. 그 본문을 다른 회사 지원서에 재사용하지 않는다(경험 소재만 참고). `sameCompany:true` 면 같은 회사에 낸 답변이다.
 
 **저장한 연결은 "AI 기록"이다.** MCP로 보낸 `positionIds`·`questionTypes` 는 항상 AI 기록으로 저장되고, 확정은 사용자가 웹 `/introductions` 에서만 한다(✓ 확정, ✗ 해제).
 자소서를 저장하면 어느 직무용으로 연결했는지와 "웹에서 확정해야 한다"는 것을 사용자에게 알린다. 확정 도구는 없다.
-수정에서 연결을 바꾸지 않으면 `positionIds`·`questionTypes` 를 뺀다. 보낸 목록에 남는 연결은 출처(확정·AI 기록)를 유지한다.
+수정에서 연결을 바꾸지 않으면 `positionIds`·`questionTypes` 를 뺀다. **MCP 수정은 연결을 더하기만 한다** — 목록에서 빼도 기존 연결(확정·AI 기록)은 지워지지 않는다.
+연결을 빼야 하면(잘못 단 직무 포함) 사용자에게 웹 `/introductions` 에서 ✗ 로 해제하라고 안내한다. 더한 결과가 직무 10개·유형 3개를 넘으면 `TOO_MANY_LINKS` 다.
+다른 회사용 답변을 고쳐 쓸 때는 기존 문항을 수정하지 말고 새 문항으로 만든다 — 원래 회사의 직접 출처가 남아 있어야 재사용 금지 표시가 유지된다.
 
 ## 계정과 관리자
 

@@ -98,7 +98,8 @@ public class McpActions {
     @Operation(summary = "자기소개 문항 검색",
             description = "필터는 모두 AND 다. positionId·postingId·companyId 는 그 직무용으로 쓴 답변(직접 출처 written_for)을 찾는다. "
                     + "직접 출처가 0건이면 fallback:\"indirect\" 로 연결 이력서가 그 직무를 지원하는 '출처 미상' 답변을 준다. "
-                    + "questionType 은 문항 유형(저장 태그, 없으면 정규식 추정), unlinked:true 는 직접 출처가 없는 답변만. "
+                    + "questionType 은 문항 유형(사용자 확정 태그, 없으면 정규식 추정. AI 기록 태그는 추정을 지우지 않고 덧붙는다), "
+                    + "unlinked:true 는 직접 출처가 없는 답변만. "
                     + "q 는 100자 이하, 질문·답변의 같은 단어를 BM25 점수순으로. limit 기본 10(최대 50), complete:false 면 잘린 것이다. "
                     + "답변은 300자 미리보기(answerPreview)다. 원문은 self_intro_get. "
                     + "trust 는 '확정'(사용자가 웹에서 연결)·'AI 기록'(확정 전)·'추정'이며 관계 확인 여부일 뿐 성과 검증이 아니다. "

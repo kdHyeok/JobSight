@@ -60,9 +60,12 @@ const candidatePositions = computed(() => {
 const canSave = computed(() => !!draft.question.trim()
   && (!!editingId.value || draft.resumeIds.length > 0 || draft.positionIds.length > 0))
 
+/** 회사 · 공고명 · 직무명. 같은 회사의 다른 공고에 같은 이름 직무가 있어도 고를 수 있게 공고명을 넣는다(없거나 직무명과 같으면 뺀다). */
 function positionLabel(id: string) {
   const position = positionById.value.get(id)
-  return position ? `${position.companyName || '회사 미입력'} · ${position.name}` : '삭제된 직무'
+  if (!position) return '삭제된 직무'
+  const posting = position.postingTitle && position.postingTitle !== position.name ? position.postingTitle : null
+  return [position.companyName || '회사 미입력', posting, position.name].filter(Boolean).join(' · ')
 }
 function positionSource(id: string): LinkSource | undefined {
   return editingItem.value?.positionLinks?.find((link) => link.positionId === id)?.source

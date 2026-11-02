@@ -181,6 +181,47 @@ class SelfIntroductionServiceTest {
         verify(positionRepository, never()).findAllByIdInAndOwnerId(anyCollection(), any());
     }
 
+    /**
+     * MCP 수정은 연결을 더하기만 한다. 목록에 없는 기존 연결(확정·AI 기록)을 지우지 않는다 —
+     * AI 기록의 확정과 삭제는 웹 전용이다(설계 3절 규칙 3, 5.2).
+     */
+    @Test
+    void mcpUpdateOnlyAddsLinks() {
+        Position confirmed = position("백엔드");
+        Position added = position("프론트");
+        SelfIntroduction value = value("지원 동기", "답변");
+        value.linkPositions(Set.of(confirmed.getId()), LinkSource.USER);
+        value.linkQuestionTypes(Set.of(Competency.MOTIVATION), LinkSource.USER);
+        given(currentUser.viaMcp()).willReturn(true);
+        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+        given(positionRepository.findAllByIdInAndOwnerId(anyCollection(), eq(OWNER_ID))).willReturn(List.of(added));
+
+        var updated = service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
+                List.of(added.getId()), List.of(Competency.COLLABORATION), "지원 동기", "답변"));
+
+        assertThat(updated.positionLinks()).containsExactlyInAnyOrder(
+                new SelfIntroductionResponse.PositionLinkView(confirmed.getId(), LinkSource.USER),
+                new SelfIntroductionResponse.PositionLinkView(added.getId(), LinkSource.AI));
+        assertThat(updated.questionTypes()).containsExactlyInAnyOrder(
+                new SelfIntroductionResponse.QuestionTypeView(Competency.MOTIVATION, LinkSource.USER),
+                new SelfIntroductionResponse.QuestionTypeView(Competency.COLLABORATION, LinkSource.AI));
+    }
+
+    /** 더한 결과가 상한(문항 유형 3개)을 넘으면 400 이고 저장하지 않는다. 빼는 것은 웹에서 한다. */
+    @Test
+    void mcpUpdateOverLinkLimitIsRejected() {
+        SelfIntroduction value = value("지원 동기", "답변");
+        value.linkQuestionTypes(Set.of(Competency.MOTIVATION, Competency.ASPIRATION, Competency.JOB_FIT), LinkSource.USER);
+        given(currentUser.viaMcp()).willReturn(true);
+        given(repository.findByIdAndOwnerId(value.getId(), OWNER_ID)).willReturn(Optional.of(value));
+
+        assertThatThrownBy(() -> service.update(value.getId(), new SelfIntroductionUpdateRequest(List.of(),
+                null, List.of(Competency.COLLABORATION), "지원 동기", "답변")))
+                .isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo("TOO_MANY_LINKS"));
+        assertThat(value.getQuestionTypes()).hasSize(3);
+        verify(repository, never()).save(any());
+    }
+
     /** 웹의 ✓: AI 기록을 USER 로 바꾼다. 연결돼 있지 않은 대상을 확정하려 하면 404 다. */
     @Test
     void confirmTurnsAiIntoUserAndRejectsUnlinkedTarget() {

@@ -29,6 +29,10 @@ EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, 
 - 이 테스트가 상한 9를 단언한다. 목록 경로에 SQL 을 더하면 여기서 깨진다. 늘어난 이유가 정당하면 실측해서 상한과 이 줄을 함께 고친다.
 - `hibernate.generate_statistics` 는 그 테스트의 `@SpringBootTest(properties=…)` 에서만 켠다. `application.yml` 에 넣지 않는다.
 - 함정: 같은 종류의 소유 엔티티가 100개를 넘으면(예: 직무 101개) 그 컬렉션의 SQL 이 묶음 수만큼 는다(101개면 2회). 컬렉션 하나에 원소가 많은 것과는 무관하다. 새 컬렉션은 EAGER 든 LAZY 든 이 설정을 자동으로 탄다.
+- MCP 자소서 `self_intro_get`·`self_intro_list`(`SelfIntroductionAgentService`)는 계정 직무 상세(`PositionService.findAll`)와 이력서 엔티티(content JSONB)를
+  읽지 않고, 연결된 것의 이름만 constructor projection(`PositionRepository.findLabels`·`findAllLabels`, `ResumeRepository.findPositionRows`)으로 읽는다.
+  `SelfIntroductionRelationsIntegrationTest.agentReadsOnlyLabelsWithinStatementLimit` 가 상한(실측 상세 6·목록 6·직무 필터 7·기업 필터 7)과
+  `Resume`·`Position`·`JobPosting`·`Company` 엔티티 로드 0을 단언한다. 공고·기업 소유 확인은 `existsByIdAndOwnerId` 다.
 
 ## 요청 한 번의 흐름
 
