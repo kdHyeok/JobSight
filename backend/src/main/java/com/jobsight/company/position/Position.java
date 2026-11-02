@@ -113,13 +113,23 @@ public class Position {
         this.headcount = attributes.headcount();
         this.workLocation = attributes.workLocation();
         this.memo = attributes.memo();
-        this.techStack = new LinkedHashSet<>(attributes.techStack());
+        replace(this.techStack, attributes.techStack());
         this.updatedAt = Instant.now();
     }
 
     public void replaceReferences(Set<UUID> referenceIds) {
-        this.referenceIds = new LinkedHashSet<>(referenceIds);
+        replace(this.referenceIds, referenceIds);
         this.updatedAt = Instant.now();
+    }
+
+    /**
+     * 같은 컬렉션에서 빠진 것만 빼고 새것만 더한다. 새 Set 을 대입하면 Hibernate 가 저장마다 컬렉션 표 전체를
+     * DELETE·INSERT 한다(설계 1.3 P8). Resume.replacePositions 와 같은 방식이다.
+     */
+    private static <T> void replace(Set<T> current, java.util.Collection<T> next) {
+        Set<T> wanted = new LinkedHashSet<>(next);
+        current.retainAll(wanted);
+        current.addAll(wanted);
     }
 
     @PrePersist

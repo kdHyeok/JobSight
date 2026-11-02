@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, mount, shallowMount } from '@vue/test-utils'
 import ResumeSection from '../components/ResumeSection.vue'
 import ResumeEditor from '../components/ResumeEditor.vue'
@@ -232,5 +232,33 @@ describe('ResumeSection', () => {
     const next = wrapper.emitted('update:rows')?.[0]?.[0] as typeof rows
     expect(next[1].name).toBe('ADsP')
     expect(next[0]).toEqual(rows[0])
+  })
+})
+
+/** 설계 1.3 P11: 키 입력마다 직렬화하는 것은 편집 중인 문서 하나뿐이다. 저장본은 prop 이 바뀔 때만 직렬화한다. */
+describe('변경됨 판정 비용', () => {
+  it('행을 고칠 때 JSON.stringify 는 한 번이고, 원래 값으로 돌리면 변경됨이 사라진다', async () => {
+    const wrapper = shallowMount(ResumeEditor, {
+      props: {
+        resume: { id: 'resume', name: '이력서', content: { ...emptyContent(), projects: [{ name: 'A' }] }, positionIds: ['b', 'a'], createdAt: '', updatedAt: '' } as unknown as Resume,
+        positions: [], saving: false, apiFieldErrors: {},
+      },
+    })
+    expect(wrapper.find('.resume-dirty').exists()).toBe(false)
+    const projects = () => wrapper.findAllComponents(ResumeSection).find((section) => section.props('section').key === 'projects')!
+    const original = projects().props('rows') as Record<string, unknown>[]
+
+    const stringify = vi.spyOn(JSON, 'stringify')
+    projects().vm.$emit('update:rows', original.map((row) => ({ ...row, role: '백엔드' })))
+    await wrapper.vm.$nextTick()
+    const calls = stringify.mock.calls.length
+    stringify.mockRestore()
+
+    expect(wrapper.find('.resume-dirty').exists()).toBe(true)
+    expect(calls).toBe(1)
+
+    projects().vm.$emit('update:rows', original)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.resume-dirty').exists()).toBe(false)
   })
 })

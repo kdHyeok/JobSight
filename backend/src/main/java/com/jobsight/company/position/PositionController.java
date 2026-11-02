@@ -1,6 +1,7 @@
 package com.jobsight.company.position;
 
 import com.jobsight.company.common.ApiPaths;
+import com.jobsight.company.position.dto.PositionOption;
 import com.jobsight.company.position.dto.PositionReferencesRequest;
 import com.jobsight.company.position.dto.PositionRequest;
 import com.jobsight.company.position.dto.PositionResponse;
@@ -35,6 +36,14 @@ public class PositionController {
     @GetMapping
     public List<PositionResponse> findAll(@RequestParam(name = "q", required = false) String q) {
         return service.findAll(q);
+    }
+
+    /** 같은 경로에 view=summary 가 붙은 요청만 여기로 온다. 쿼리 파라미터라 경로 표(ApiPaths·routes.ts·nginx.conf)는 그대로다. */
+    @Operation(summary = "직무 선택지 요약", description = "view=summary. 이름·소속 공고/기업·수정 시각만 SQL 한 번으로 돌려준다. "
+            + "이력서 편집기의 직무 고르기용. q 는 받지 않는다.")
+    @GetMapping(params = "view=summary")
+    public List<PositionOption> findOptions() {
+        return service.findOptions();
     }
 
     @Operation(summary = "직무 상세", description = "linkedSelfIntroCount 는 이 직무를 지우면(마지막 직무면 공고까지) 직접 출처 연결이 "

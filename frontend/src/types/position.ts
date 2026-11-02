@@ -61,6 +61,9 @@ export interface Position {
   linkedSelfIntroCount?: number | null
 }
 
+/** 직무 선택지 요약(GET /api/positions?view=summary, 설계 1.3 P6). 이력서 편집기의 직무 고르기가 쓰는 값만 온다. */
+export type PositionOption = Pick<Position, 'id' | 'name' | 'postingId' | 'postingTitle' | 'companyId' | 'companyName' | 'updatedAt'>
+
 export interface PositionPayload {
   name: string
   team: string

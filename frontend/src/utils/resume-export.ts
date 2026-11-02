@@ -1,5 +1,5 @@
 import { attachmentUrl, fetchAttachmentMeta } from '../api/attachments'
-import type { Position } from '../types/position'
+import type { PositionOption } from '../types/position'
 import type { ResumeContent } from '../types/resume'
 import { BASIC_FIELDS, SECTIONS, text } from '../types/resume'
 
@@ -53,7 +53,7 @@ function download(blob: Blob, filename: string) {
 
 const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!)
 
-export function downloadWord(name: string, content: ResumeContent, positions: Position[]) {
+export function downloadWord(name: string, content: ResumeContent, positions: PositionOption[]) {
   const sections = SECTIONS.map((section) => {
     const rows = content[section.key].map((row) => `<article>${section.fields.filter((field) => field.kind !== 'file' && field.kind !== 'terms').map((field) => `<p><b>${escape(field.label)}</b> ${escape(text(row, field.key))}</p>`).join('')}</article>`).join('')
     return rows ? `<h2>${escape(section.label)}</h2>${rows}` : ''

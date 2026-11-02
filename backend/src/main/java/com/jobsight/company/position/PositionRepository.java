@@ -2,6 +2,7 @@ package com.jobsight.company.position;
 
 import com.jobsight.company.common.OwnerCount;
 import com.jobsight.company.position.dto.PositionLabel;
+import com.jobsight.company.position.dto.PositionOption;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -22,6 +23,24 @@ public interface PositionRepository extends JpaRepository<Position, UUID> {
     List<Position> findAllByPostingIdInAndOwnerIdOrderByCreatedAtAsc(Collection<UUID> postingIds, UUID ownerId);
 
     List<Position> findAllByIdInAndOwnerId(Collection<UUID> ids, UUID ownerId);
+
+    /** 소유 확인용. 남의 것·없는 id 는 빠진다. 직무 상세와 EAGER 컬렉션을 읽지 않는다 — 설계 1.3 P7. */
+    @Query("select p.id from Position p where p.id in :ids and p.ownerId = :ownerId")
+    List<UUID> findOwnedIds(@Param("ids") Collection<UUID> ids, @Param("ownerId") UUID ownerId);
+
+    /**
+     * 편집기 선택지용 요약(GET /api/positions?view=summary, 설계 1.3 P6): 이름과 소속 공고·기업, 수정 시각만 SQL 한 번에 읽는다.
+     * 직무 상세와 EAGER 컬렉션(스택·참고 정보), 공고 절차, 기업 업종을 읽지 않는다.
+     */
+    @Query("""
+            select new com.jobsight.company.position.dto.PositionOption(p.id, p.name, j.id, j.title, c.id, c.name, p.updatedAt)
+              from Position p
+              left join JobPosting j on j.id = p.postingId and j.ownerId = p.ownerId
+              left join Company c on c.id = j.companyId and c.ownerId = p.ownerId
+             where p.ownerId = :ownerId
+             order by p.createdAt desc
+            """)
+    List<PositionOption> findOptions(@Param("ownerId") UUID ownerId);
 
     long countByPostingIdAndOwnerId(UUID postingId, UUID ownerId);
 

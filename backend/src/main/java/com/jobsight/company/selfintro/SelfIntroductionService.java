@@ -13,9 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import com.jobsight.company.experience.dto.ExperienceSearchResult;
 import com.jobsight.company.writingguide.WritingGuideService;
 import tools.jackson.databind.ObjectMapper;
-import com.jobsight.company.position.Position;
 import com.jobsight.company.position.PositionRepository;
-import com.jobsight.company.resume.Resume;
 import com.jobsight.company.resume.ResumeRepository;
 import com.jobsight.company.selfintro.dto.SelfIntroductionConfirmRequest;
 import com.jobsight.company.selfintro.dto.SelfIntroductionCreateRequest;
@@ -73,9 +71,9 @@ public class SelfIntroductionService {
     }
 
     public List<SelfIntroductionResponse> findAll(String query, UUID resumeId) {
-        List<SelfIntroduction> values = repository.findAllByOwnerIdOrderByUpdatedAtDesc(currentUser.id()).stream()
-                .filter(value -> resumeId == null || value.getResumeIds().contains(resumeId))
-                .toList();
+        List<SelfIntroduction> values = resumeId == null
+                ? repository.findAllByOwnerIdOrderByUpdatedAtDesc(currentUser.id())
+                : repository.findAllLinkedToResume(currentUser.id(), resumeId);
         return rank(values, query).stream().map(SelfIntroductionResponse::of).toList();
     }
 
@@ -304,18 +302,21 @@ public class SelfIntroductionService {
     }
 
     private Set<UUID> requireOwnedResumes(List<UUID> ids) {
-        return requireOwned(ids, unique -> resumeRepository.findAllByIdInAndOwnerId(unique, currentUser.id()), Resume::getId);
+        return requireOwned(ids, unique -> resumeRepository.findOwnedIds(unique, currentUser.id()));
     }
 
     private Set<UUID> requireOwnedPositions(List<UUID> ids) {
-        return requireOwned(ids, unique -> positionRepository.findAllByIdInAndOwnerId(unique, currentUser.id()), Position::getId);
+        return requireOwned(ids, unique -> positionRepository.findOwnedIds(unique, currentUser.id()));
     }
 
-    /** 묶음을 한 번에 소유자 조건으로 읽는다. 하나라도 없으면(남의 것 포함) 그 id 로 404. 빈 목록은 조회하지 않는다. */
-    private static <T> Set<UUID> requireOwned(List<UUID> ids, Function<List<UUID>, List<T>> findOwned, Function<T, UUID> idOf) {
+    /**
+     * 묶음을 한 번에 소유자 조건으로 읽는다. 하나라도 없으면(남의 것 포함) 그 id 로 404. 빈 목록은 조회하지 않는다.
+     * id 만 읽는다 — 엔티티와 EAGER 컬렉션을 로드하지 않는다(설계 1.3 P7).
+     */
+    private static Set<UUID> requireOwned(List<UUID> ids, Function<List<UUID>, List<UUID>> findOwnedIds) {
         Set<UUID> unique = new LinkedHashSet<>(orEmpty(ids));
         if (unique.isEmpty()) return unique;
-        Set<UUID> found = findOwned.apply(List.copyOf(unique)).stream().map(idOf).collect(Collectors.toSet());
+        Set<UUID> found = new HashSet<>(findOwnedIds.apply(List.copyOf(unique)));
         UUID missing = unique.stream().filter(id -> !found.contains(id)).findFirst().orElse(null);
         if (missing != null) throw new ResourceNotFoundException(missing);
         return unique;

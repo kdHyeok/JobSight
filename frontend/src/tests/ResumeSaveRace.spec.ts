@@ -10,7 +10,7 @@ import { emptyContent, type Resume, type ResumePayload } from '../types/resume'
 vi.mock('../api/http', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api/http')>(), request: vi.fn(),
 }))
-vi.mock('../api/positions', () => ({ listPositions: vi.fn(async () => []) }))
+vi.mock('../api/positions', () => ({ listPositions: vi.fn(async () => []), listPositionOptions: vi.fn(async () => []) }))
 vi.mock('../api/self-introductions', () => ({ listSelfIntroductions: vi.fn(async () => []) }))
 enableAutoUnmount(afterEach)
 

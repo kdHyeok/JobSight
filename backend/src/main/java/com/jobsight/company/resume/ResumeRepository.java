@@ -1,5 +1,6 @@
 package com.jobsight.company.resume;
 
+import com.jobsight.company.resume.dto.ResumeListRow;
 import com.jobsight.company.resume.dto.ResumePositionRow;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -39,6 +40,22 @@ public interface ResumeRepository extends JpaRepository<Resume, UUID> {
     List<Resume> findAllByOwnerIdOrderByUpdatedAtDesc(UUID ownerId);
 
     List<Resume> findAllByIdInAndOwnerId(List<UUID> ids, UUID ownerId);
+
+    /** 소유 확인용. 남의 것·없는 id 는 빠진다. content 를 읽지 않는다 — 설계 1.3 P7. */
+    @Query("select r.id from Resume r where r.id in :ids and r.ownerId = :ownerId")
+    List<UUID> findOwnedIds(@Param("ids") Collection<UUID> ids, @Param("ownerId") UUID ownerId);
+
+    /**
+     * 목록용(설계 1.3 P4): 이름·시각과 지원 직무를 이력서×직무 한 줄씩(직무가 없으면 null 한 줄) SQL 한 번에 읽는다.
+     * content JSONB 를 읽지 않는다. 같은 updatedAt 끼리의 순서가 흔들리지 않게 id 로 한 번 더 정렬한다.
+     */
+    @Query("""
+            select new com.jobsight.company.resume.dto.ResumeListRow(r.id, r.name, r.createdAt, r.updatedAt, p)
+              from Resume r left join r.positionIds p
+             where r.ownerId = :ownerId
+             order by r.updatedAt desc, r.id
+            """)
+    List<ResumeListRow> findListRows(@Param("ownerId") UUID ownerId);
 
     /** 이름과 지원 직무만 이력서×직무 한 줄씩 읽는다(직무가 없으면 null 한 줄). content JSONB 를 읽지 않는다 — 설계 1.3 P4. */
     @Query("""
