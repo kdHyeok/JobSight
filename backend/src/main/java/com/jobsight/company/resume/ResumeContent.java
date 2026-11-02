@@ -25,9 +25,9 @@ public record ResumeContent(
         @Size(max = 50, message = "SW 역량은 50개 이하여야 합니다.") List<@Valid Skill> skills,
         @Size(max = 50, message = "프로젝트는 50개 이하여야 합니다.") List<@Valid Project> projects
 ) {
-    private static final int SHORT = 200;
-    private static final int URL = 500;
-    private static final int LONG = 5000;
+    static final int SHORT = 200;
+    static final int URL = 500;
+    static final int LONG = 5000;
 
     public static ResumeContent empty() {
         return new ResumeContent(BasicInfo.empty(),

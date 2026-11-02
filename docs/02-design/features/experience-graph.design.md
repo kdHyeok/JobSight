@@ -1308,7 +1308,10 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 - **설계와 다름 ① 23503 의 쪽 판정**: 2.3 은 "삭제 쪽이면 참조되는 테이블, 삽입 쪽이면 참조하는 테이블을 싣는다"고 봤으나, 실제 스키마로 재 보니 경험을 지울 때도 오류의 테이블 필드는 참조하는 쪽(`resume_experiences`)이었다. 그래서 `ApiErrors` 는 서버 메시지 머리(`insert or update on table` = 삽입 쪽)로 가른다. DB `lc_messages` 가 영어라는 가정이 붙는다(compose 의 postgres 이미지 기본값). `docs/decisions.md` 에 남겼다. 이를 위해 PostgreSQL 드라이버를 `implementation` 으로 올렸다.
 - **설계와 다름 ② `ExperienceRevision` 은 엔티티가 아니다**: `seq` 가 `GENERATED ALWAYS AS IDENTITY` 이고 복합 키라, 넣기·읽기 두 문장을 JDBC(`ExperienceRevisions`)로 한다. `Persistable` 은 대량 insert 하는 `Experience` 에만 둔다(R48 의 목적은 같다).
 - **설계와 다름 ③ 우회 금지 아키텍처 테스트**는 ArchUnit 이 아니라 소스 검사(`ResumeWriterGateTest`)다. 의존성을 들이지 않으려고 했고, `Resume.update` 를 패키지 전용으로 내려 다른 패키지는 content 를 바꿀 수도 없게 했다.
-- 웹(USER) 경험 저장은 검토 확정을 겸한다(`reviewed_revision = revision`). MCP(AI) 저장만 'AI 기록'이다. 가져오기 CREATE 초안도 'AI 기록'이다(6.3).
+- 웹(USER) 경험 생성과 `facts` 를 보낸 웹 수정은 검토 확정을 겸한다(`reviewed_revision = revision`). 메모·skills·domains·소재집만 고친 웹 수정은 확정하지 않는다 — 사람이 보지 않은 AI 사실이 '확정'으로 바뀌면 안 된다(리뷰 반영). MCP(AI) 저장만 'AI 기록'이다. 가져오기 CREATE 초안도 'AI 기록'이다(6.3).
+- 가져오기(리뷰 반영): `decisions` 에 같은 묶음 key 가 둘이면 400 `DUPLICATE_DECISION`. CREATE 초안은 사실 상한에 맞춘다 — 2000자를 넘는 행 설명은 2000자 항목 여러 개로 나누고(같은 근거 id), 배열 50개를 넘는 몫은 `unverified` 에 적고, 기간·위치는 200자로 자른 뒤 저장 경로와 같은 `normalize` 를 거친다.
+- `resume_add_experiences` 의 FACTS 행은 이력서 칸 상한(이름 200, role·techStack 500, 설명·성과 5000)에 맞춰 자르고 `…` 를 붙인다(리뷰 반영). 원문은 경험 원본에 남는다.
+- 공용 오류 변환은 23505·23503 을 409 로 바꾸되, 경험 쪽 지연 FK 셋이 아닌 위반은 SQLState·제약 이름을 WARN 로그로 남긴다(리뷰 반영, 코드 버그 추적용).
 - `experience_index` 목록은 경험 한 줄 뒤에 미등록 묶음이 이어지는 한 줄로 `cursor`·`limit`(기본·최대 60)을 자른다. 상세 모드 `ids` 는 10개 이하이고 응답 모양은 같다(`experiences[]` 가 상세, `unlinkedRows` 는 []). `counts` 는 `{experiences(종류별), aiRecords, unlinkedRows, groups, unknownSourceSelfIntros}`.
 - `resume_add_experiences` 입력은 `request:{items[]}`(record 검증 때문, 3단계 `experience_search` 와 같은 이유)이고 반환은 `resume_get(view=outline)` 모양(새 `version` 포함)이다. 행 문구는 사실에서만 만든다: 프로젝트는 `role`·`techStack`(skills)·`description`(행동)·`outcome`(결과), 나머지는 `description` 하나. `facts.period` 의 `~` 뒤를 `endYm` 으로 쓴다.
 - 쓰이는 경험의 `kind` 를 바꾸면 409 `EXPERIENCE_IN_USE` 다(섹션이 어긋난다). 행 도구는 `index`·`experienceId` 중 정확히 하나(아니면 400 `TARGET_REQUIRED`). 행 갱신에서 다른 `experienceId` 를 보내면 이전 개정을 버리고 새 연결로 본다.

@@ -78,20 +78,31 @@ public final class ApiErrors {
     private static ApiError integrity(Throwable exception) {
         Throwable current = exception;
         for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++) {
-            if (current instanceof SQLException sql && "23505".equals(sql.getSQLState())) {
-                return error(HttpStatus.CONFLICT, "CONFLICT", "같은 항목이 이미 있습니다. 다시 읽고 확인하세요.");
-            }
-            if (current instanceof SQLException sql && "23503".equals(sql.getSQLState())) {
-                return foreignKey(sql);
+            if (current instanceof SQLException sql && ("23505".equals(sql.getSQLState()) || "23503".equals(sql.getSQLState()))) {
+                ApiError error = "23505".equals(sql.getSQLState())
+                        ? error(HttpStatus.CONFLICT, "CONFLICT", "같은 항목이 이미 있습니다. 다시 읽고 확인하세요.")
+                        : foreignKey(sql);
+                // 경험 쪽 지연 FK 셋은 예상된 경합이다. 그 밖의 위반은 코드 버그일 수 있어 응답(409)과 별개로 제약 이름을 남긴다 —
+                // 사용자에게는 충돌로 보여도 서버 로그로 원인을 추적할 수 있어야 한다.
+                if (!EXPERIENCE_FKS.contains(constraint(sql))) {
+                    log.warn("Integrity violation translated to {} {}: sqlState={} constraint={}", error.status(), error.code(),
+                            sql.getSQLState(), constraint(sql), exception);
+                }
+                return error;
             }
             current = current.getCause();
         }
         return null;
     }
 
+    private static String constraint(SQLException sql) {
+        ServerErrorMessage detail = sql instanceof PSQLException pg ? pg.getServerErrorMessage() : null;
+        return detail == null || detail.getConstraint() == null ? "" : detail.getConstraint();
+    }
+
     private static ApiError foreignKey(SQLException sql) {
         ServerErrorMessage detail = sql instanceof PSQLException pg ? pg.getServerErrorMessage() : null;
-        String constraint = detail == null || detail.getConstraint() == null ? "" : detail.getConstraint();
+        String constraint = constraint(sql);
         String message = detail == null || detail.getMessage() == null ? "" : detail.getMessage();
         // 서버 메시지는 lc_messages 가 영어일 때 이 머리다(compose 의 postgres 이미지 기본값). 다른 언어면 삭제 쪽으로 본다.
         boolean insertSide = message.startsWith("insert or update");

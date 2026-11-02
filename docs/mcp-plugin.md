@@ -211,6 +211,7 @@ MCP 는 문서 전체를 되돌려 보내기 어려워 서버가 조회→한 �
 MCP 전용은 `IllegalArgumentException`·Jackson 변환 실패 → `INVALID_ARGUMENT` 와 JSON-RPC 오류뿐이다. 도구 오류는 `isError:true` 와 `content[0].text = "<코드>: <메시지>"` 다(`structuredContent` 오류 형식은 아직 없다).
 무결성 위반도 같은 변환이다(4단계): 23505 → 409 `CONFLICT`, 23503 은 경험 쪽 지연 FK 셋이면 삭제 쪽 409 `EXPERIENCE_IN_USE`·삽입 쪽 409
 `EXPERIENCE_CHANGED`, 그 밖 소유자 복합 FK 의 삽입 쪽은 404 `NOT_FOUND`, 이름을 모르는 FK 는 409 `CONFLICT` 다(원인 체인 탐색, docs/experiences.md 함정).
+경험 쪽 지연 FK 셋이 아닌 무결성 위반은 응답과 별개로 SQLState·제약 이름을 WARN 로그로 남긴다(코드 버그 추적용).
 `ApiErrorsTest` 가 같은 예외 15가지(커밋 시점에 감싸진 55P03·40P01·23503 포함)를 REST 와 MCP 에 함께 던져 상태·코드가 같은지 본다.
 
 인증 테스트는 외부 Google 자격증명 없이 인증된 세션을 주입하고 실제 Spring OAuth 필터의 코드 발급/교환을 검증한다.

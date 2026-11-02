@@ -23,6 +23,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -41,7 +42,11 @@ import java.util.stream.Collectors;
 @Service
 @Transactional(readOnly = true)
 public class ExperienceImportService {
+    /** ExperienceFacts 의 상한: 인용 1000자, 항목 문구 2000자, 기간·위치 200자, 배열 50개. */
     private static final int QUOTE = 1000;
+    private static final int TEXT = 2000;
+    private static final int SHORT = 200;
+    private static final int MAX_ITEMS = 50;
 
     private final ExperienceService views;
     private final ExperienceBankService bank;
@@ -103,6 +108,14 @@ public class ExperienceImportService {
      */
     @Transactional
     public ExperienceViews.ImportResult apply(ExperienceRequests.Import request) {
+        // 묶음 하나에 결정은 하나. 둘이면 앞 결정이 만든 경험이 어디에도 연결되지 않은 채 남는다(이중 제출·재시도).
+        Set<String> keys = new HashSet<>();
+        for (ExperienceRequests.ImportDecision decision : request.decisions()) {
+            if (!keys.add(decision.key())) {
+                throw new ApiRuleException(HttpStatus.BAD_REQUEST, "DUPLICATE_DECISION",
+                        "같은 묶음에 결정이 둘 이상입니다: " + decision.key() + ". 묶음마다 결정을 하나만 보내세요.");
+            }
+        }
         UUID owner = currentUser.id();
         ownerLock.acquire(owner);
         resumes.setLocalLockTimeout();
@@ -179,7 +192,12 @@ public class ExperienceImportService {
                 created.stream().map(Experience::getId).toList());
     }
 
-    /** 구성 행들로 만든 사실 초안. 행끼리 다른 기간·역할은 고르지 않고 conflicts 에 적는다. 주장마다 그 행 인용을 근거로 단다. */
+    /**
+     * 구성 행들로 만든 사실 초안. 행끼리 다른 기간·역할은 고르지 않고 conflicts 에 적는다. 주장마다 그 행 인용을 근거로 단다.
+     * 이력서 칸(설명 5000자)이 사실 상한(항목 2000자·배열 50개·기간 200자)보다 커서, 긴 설명은 2000자 항목 여러 개로 나누고
+     * 50개를 넘어 담지 못한 몫이 있으면 unverified 에 적는다. 마지막에 저장 경로와 같은 normalize 를 거친다 — 상세를 읽어
+     * 그대로 다시 보내는 저장이 검증(@Valid)에 막히거나 공백 차이로 해시가 달라져 개정이 생기지 않게.
+     */
     private Experience draft(UUID owner, RowGroups.Group group, Map<UUID, Resume> byId) {
         List<ExperienceFacts.Evidence> evidence = new ArrayList<>();
         List<ExperienceFacts.Item> actions = new ArrayList<>();
@@ -188,26 +206,34 @@ public class ExperienceImportService {
         Set<String> roles = new LinkedHashSet<>();
         Set<String> skills = new LinkedHashSet<>();
         String captured = Instant.now().toString();
-        for (RowGroups.Row row : group.rows()) {
+        List<RowGroups.Row> rows = group.rows();
+        boolean overflow = rows.size() > MAX_ITEMS;
+        Set<String> actionTexts = new HashSet<>();
+        Set<String> resultTexts = new HashSet<>();
+        for (RowGroups.Row row : rows.subList(0, Math.min(rows.size(), MAX_ITEMS))) {
             String evidenceId = "ev" + (evidence.size() + 1);
             String text = row.text();
             evidence.add(new ExperienceFacts.Evidence(evidenceId, ExperienceFacts.SourceType.RESUME_ROW,
                     new ExperienceFacts.Ref(row.resume().id(), row.section(), row.index(), row.resume().version(), null, null),
-                    text.length() <= QUOTE ? text : text.substring(0, QUOTE), null,
-                    row.resume().name() + " · " + row.section() + "[" + row.index() + "]", sha256(text), captured));
-            if (!row.period().isEmpty()) periods.add(row.period());
+                    clip(text, QUOTE), null,
+                    clip(row.resume().name() + " · " + row.section() + "[" + row.index() + "]", SHORT), sha256(text), captured));
+            if (!row.period().isEmpty()) periods.add(clip(row.period(), SHORT));
             skills.addAll(KeyNormalizer.skills(row.techStack()));
             Parts parts = parts(row);
-            if (parts.role() != null) roles.add(parts.role());
-            add(actions, "a", parts.action(), evidenceId);
-            add(results, "r", parts.result(), evidenceId);
+            if (parts.role() != null) roles.add(clip(parts.role(), TEXT));
+            // 같은 문구(행 전체)는 한 번만 담는다. 나눈 조각끼리는 같아도 지우지 않는다.
+            if (actionTexts.add(parts.action())) overflow |= add(actions, "a", parts.action(), evidenceId);
+            if (resultTexts.add(parts.result())) overflow |= add(results, "r", parts.result(), evidenceId);
         }
         List<ExperienceFacts.Item> conflicts = new ArrayList<>();
-        if (periods.size() > 1) add(conflicts, "c", "이력서마다 기간이 다르다: " + String.join(" / ", periods), null);
-        if (roles.size() > 1) add(conflicts, "c", "이력서마다 역할이 다르다: " + String.join(" / ", roles), null);
-        ExperienceFacts facts = new ExperienceFacts(periods.stream().findFirst().orElse(null),
-                roles.stream().findFirst().orElse(null), null, actions, results, evidence, List.of(), conflicts);
-        RowGroups.Row first = group.rows().get(0);
+        if (periods.size() > 1) add(conflicts, "c", clip("이력서마다 기간이 다르다: " + String.join(" / ", periods), TEXT), null);
+        if (roles.size() > 1) add(conflicts, "c", clip("이력서마다 역할이 다르다: " + String.join(" / ", roles), TEXT), null);
+        List<ExperienceFacts.Item> unverified = new ArrayList<>();
+        if (overflow) add(unverified, "u", "구성 행 " + rows.size() + "개의 내용이 초안 상한(배열 " + MAX_ITEMS
+                + "개)을 넘어 일부만 담았다. 빠진 내용은 이력서 행에서 확인한다.", null);
+        ExperienceFacts facts = bank.normalize(new ExperienceFacts(periods.stream().findFirst().orElse(null),
+                roles.stream().findFirst().orElse(null), null, actions, results, evidence, unverified, conflicts), null);
+        RowGroups.Row first = rows.get(0);
         Experience experience = new Experience(owner, group.kind(), group.title(), first.startYm(), bank.json(facts));
         experience.describe(null, List.copyOf(skills), List.of());
         return experience;
@@ -230,11 +256,24 @@ public class ExperienceImportService {
         };
     }
 
-    private static void add(List<ExperienceFacts.Item> items, String prefix, String text, String evidenceId) {
-        if (text == null) return;
-        if (items.stream().anyMatch(item -> item.text().equals(text))) return;
-        items.add(new ExperienceFacts.Item(prefix + (items.size() + 1), text,
-                evidenceId == null ? List.of() : List.of(evidenceId)));
+    /** 항목 상한(2000자)에 맞춰 나눠 붙인다. 배열 상한(50개)에 걸려 버린 몫이 있으면 true. */
+    private static boolean add(List<ExperienceFacts.Item> items, String prefix, String text, String evidenceId) {
+        if (text == null) return false;
+        for (int start = 0; start < text.length(); ) {
+            String chunk = clip(text.substring(start), TEXT);
+            start += chunk.length();
+            if (chunk.isBlank()) continue;
+            if (items.size() >= MAX_ITEMS) return true;
+            items.add(new ExperienceFacts.Item(prefix + (items.size() + 1), chunk,
+                    evidenceId == null ? List.of() : List.of(evidenceId)));
+        }
+        return false;
+    }
+
+    /** 앞에서 max 자까지. 서로게이트 쌍을 가르지 않는다. */
+    private static String clip(String value, int max) {
+        if (value.length() <= max) return value;
+        return value.substring(0, Character.isHighSurrogate(value.charAt(max - 1)) ? max - 1 : max);
     }
 
     private static String joined(String a, String b) {

@@ -26,8 +26,8 @@
 3. **개정은 클라이언트가 바꾸지 못한다.** 개정 없이 온 행은 저장된 같은 경험 행의 개정을 잇는다(새 연결만 지금 개정). 보낸 개정이 저장값과 다르면 400 `EXPERIENCE_REVISION_MISMATCH`. 개정을 올리는 길은 웹 PUT 의 `refreshExperienceIds`("원본으로 갱신")와 `resume_add_experiences` 둘뿐이다.
 4. **키가 빠진 행**은 저장된 문서에 같은 `(종류, 제목 키, 시작 연월)` 행이 정확히 하나 있고 앵커가 있으면 그 앵커를 잇는다. 그 밖에는 `(종류, 제목 키)` 가 정확히 1건이고 시작 연월이 충돌하지 않을 때만 자동 연결한다. 새 경험은 만들지 않는다.
 5. **개정 판정은 서버가 한다**(입력에 `changeKind` 없음): facts 해시가 직전 개정과 같으면 개정 없음(`NONE`). 배열 항목은 안정 id 로 짝짓는다 — 새 id 만 늘면 `ADD`, 기존 id 의 값이 바뀌거나 사라지면 `CORRECT`. 근거·미확인·충돌 칸만 바뀌면 `ADD`. "재검토 필요"는 참조한 개정보다 `seq` 가 큰 `CORRECT` 가 있을 때만이다.
-6. **기존 경험에 facts·dossier 를 보내면 `expectedVersion` 필수**(없으면 400 `VERSION_REQUIRED`, 다르면 409 `EXPERIENCE_STALE`). 웹 저장은 출처 USER 이고 검토 확정을 겸한다. MCP 저장은 'AI 기록'(`reviewed:false`)이다.
-7. **경험 관계를 바꾸는 쓰기는 `OwnerLock` 아래에서 한다**: 이력서 create·update·copy·delete·basic·행 도구·`resume_add_experiences`, 경험 저장·검토·삭제·가져오기, 자소서 create·update. 같은 계정은 줄을 서고 3초를 넘기면 409 `BUSY`, 다른 계정은 기다리지 않는다. 그다음 이력서(id 오름차순) → 경험 순서로만 행을 잠근다.
+6. **기존 경험에 facts·dossier 를 보내면 `expectedVersion` 필수**(없으면 400 `VERSION_REQUIRED`, 다르면 409 `EXPERIENCE_STALE`). 웹 저장은 출처 USER 다. 웹 생성과 `facts` 를 보낸 웹 수정만 검토 확정을 겸한다 — 메모·skills·domains·소재집만 고친 저장은 'AI 기록'을 확정하지 않는다. MCP 저장은 'AI 기록'(`reviewed:false`)이다.
+7. **경험 관계를 바꾸는 쓰기는 `OwnerLock` 아래에서 한다**: 이력서 create·update·copy·delete·basic·행 도구·`resume_add_experiences`, 경험 저장·검토·삭제·가져오기, 자소서 create·update(확정·삭제는 예외 — 근거를 늘리지 않는다). `OwnerLockGateTest` 가 이 네 서비스의 쓰기 트랜잭션을 소스로 검사한다. 같은 계정은 줄을 서고 3초를 넘기면 409 `BUSY`, 다른 계정은 기다리지 않는다. 그다음 이력서(id 오름차순) → 경험 순서로만 행을 잠근다.
 8. **쓰이는 경험은 지우지 못한다.** 이력서가 쓰면 409 `EXPERIENCE_IN_USE`(이력서 이름), 자소서 근거는 `detach=true` 없이 409. 확인은 잠금 아래에서 하고, 지연 FK 셋(`resume_experiences_experience_fk`·`_revision_fk`, `self_introduction_experiences_revision_fk`)이 잠금 밖 경로를 막는다. 계정 삭제 연쇄는 지연이라 통과한다.
 9. **자소서 작성 근거는 받은 `(경험, 개정)` 쌍 그대로** 저장·조회한다. REST 는 목록으로 맞추고, MCP 는 더하기만 한다(이미 연결된 경험은 건너뜀).
 
@@ -36,7 +36,8 @@
 ```bash
 docker compose up -d --build backend frontend && docker compose logs backend | grep "now at version"   # v25
 bash scripts/smoke.sh
-# 백엔드 테스트(컨테이너): ExperienceBankIntegrationTest(계정 삭제 연쇄·링커·개정·삭제·T9 대기·MCP·가져오기), ResumeWriterGateTest, ApiErrorsTest
+# 백엔드 테스트(컨테이너): ExperienceBankIntegrationTest(계정 삭제 연쇄·복합 FK·링커·개정·삭제 경합·REST 삭제·T6 상한·T9 대기/줄 서기·MCP·가져오기),
+#   ExperienceChangeKindTest(개정 판정 표), ResumeWriterGateTest, OwnerLockGateTest(쓰기 트랜잭션의 OwnerLock 소스 검사), ApiErrorsTest
 ```
 
 **운영 점검·롤백 런북**(설계 6.2): JSON↔표 대조는 `ResumeWriter.mismatches(owner)` 와 같은 SQL(설계 6.2 의 질의)로 계정별 건수만 본다 — 0 이어야 한다.
@@ -49,6 +50,9 @@ bash scripts/smoke.sh
 - **개정 이력은 JPA 엔티티가 아니다.** `seq` 가 `GENERATED ALWAYS` 라 `ExperienceRevisions` 가 JDBC 로 넣고 읽는다. 경험 행을 먼저 flush 해야 한다(개정 → 경험 FK 는 지연이 아님).
 - **가져오기 대량 insert 는 `Experience implements Persistable`** 이라 `saveAll` 이 merge(SELECT) 없이 persist 한다(생성자에서 UUID 를 채우고 version 이 primitive 라 그대로면 merge 가 된다).
 - **한 이력서에 같은 묶음 키 행이 둘이면** 가져오기 CREATE 가 같은 경험을 두 행에 붙여 400 `EXPERIENCE_ROW_DUPLICATE` 로 전체가 실패한다. 한 행의 제목·기간을 고친 뒤 다시 계획한다.
+- **가져오기 결정은 묶음마다 하나**다. 같은 key 가 두 번 오면 400 `DUPLICATE_DECISION`(앞 결정이 만든 경험이 고아가 되던 문제). CREATE 초안은 사실 상한(항목 2000자·배열 50개·기간 200자)에 맞춰 나누거나 자르고, 담지 못한 몫은 `unverified` 에 적는다.
+- **사실 상한이 이력서 칸 상한보다 크다**(role 2000 > 500, 항목 2000×50 > 설명 5000). `resume_add_experiences` 는 칸에 맞춰 자르고 `…` 를 붙인다. 행에서 잘린 원문은 경험 원본에 그대로 있다.
+- **23505·23503 은 409 로 응답하지만**, 경험 쪽 지연 FK 셋이 아닌 위반은 `ApiErrors` 가 SQLState·제약 이름을 WARN 로 남긴다. 사용자가 "충돌"을 반복해서 받으면 이 로그부터 본다.
 - **`resume_update`(MCP)** 는 저장 전에 있던 경험 행이 빠지면 409 `LINKED_ROWS_MISSING` 이다. 일부러 지우면 `removedExperienceIds` 에 적는다. 웹 PUT 은 막지 않고 응답 `unlinkedWarnings` 로 알린다.
 - **자소서 MCP 목록·상세 SQL 상한**이 작성 근거 컬렉션 1회만큼 올랐다(7·7·8·8). 근거가 있는 문항이 있으면 경험 이름·개정 이력 2회가 더 붙는다 — docs/backend.md.
 - 정기 백업·복원 리허설은 4a 사용 배포의 운영 선행 조건이다(docs/nginx-deploy.md "정기 백업과 복원 리허설"). 아직 수행하지 않았다.

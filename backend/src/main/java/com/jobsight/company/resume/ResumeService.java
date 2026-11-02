@@ -250,25 +250,28 @@ public class ResumeService {
         String actions = texts(facts.actions());
         String results = texts(facts.results());
         Map<String, Object> row = new LinkedHashMap<>();
+        // 사실 상한(항목 2000자×50, role 2000자)이 이력서 칸 상한보다 크다. 칸에 맞춰 자르고 생략 표시를 붙인다 —
+        // 그대로 넣으면 문서 검증이 400 으로 막고, 호출자는 사실을 지우는 것 말고 고칠 길이 없다. 원문은 경험 원본에 그대로 있다.
         switch (experience.getKind()) {
             case PROJECT -> {
-                row.put("name", experience.getTitle());
-                row.put("role", facts.role());
-                row.put("techStack", experience.getSkills().isEmpty() ? null : String.join(", ", experience.getSkills()));
-                row.put("description", actions);
-                row.put("outcome", results);
+                row.put("name", fit(experience.getTitle(), ResumeContent.SHORT));
+                row.put("role", fit(facts.role(), ResumeContent.URL));
+                row.put("techStack", experience.getSkills().isEmpty() ? null
+                        : fit(String.join(", ", experience.getSkills()), ResumeContent.URL));
+                row.put("description", fit(actions, ResumeContent.LONG));
+                row.put("outcome", fit(results, ResumeContent.LONG));
             }
             case CAREER -> {
-                row.put("company", experience.getTitle());
-                row.put("description", join(facts.role(), actions, results));
+                row.put("company", fit(experience.getTitle(), ResumeContent.SHORT));
+                row.put("description", fit(join(facts.role(), actions, results), ResumeContent.LONG));
             }
             default -> {
-                row.put("name", experience.getTitle());
-                row.put("description", join(facts.role(), actions, results));
+                row.put("name", fit(experience.getTitle(), ResumeContent.SHORT));
+                row.put("description", fit(join(facts.role(), actions, results), ResumeContent.LONG));
             }
         }
-        row.put("startYm", start);
-        row.put("endYm", end);
+        row.put("startYm", fit(start, ResumeContent.SHORT));
+        row.put("endYm", fit(end, ResumeContent.SHORT));
         row.put(ResumeExperienceLinker.ID, experience.getId().toString());
         row.put(ResumeExperienceLinker.REVISION, experience.getRevision());
         row.values().removeIf(Objects::isNull);
@@ -283,6 +286,13 @@ public class ResumeService {
     private static String join(String... parts) {
         String joined = Stream.of(parts).filter(part -> part != null && !part.isBlank()).collect(Collectors.joining("\n"));
         return joined.isEmpty() ? null : joined;
+    }
+
+    /** max 자를 넘으면 앞 max-1 자 + "…". 서로게이트 쌍을 가르지 않는다. */
+    private static String fit(String value, int max) {
+        if (value == null || value.length() <= max) return value;
+        int end = Character.isHighSurrogate(value.charAt(max - 2)) ? max - 2 : max - 1;
+        return value.substring(0, end) + "…";
     }
 
     private static String blankToNull(String value) {

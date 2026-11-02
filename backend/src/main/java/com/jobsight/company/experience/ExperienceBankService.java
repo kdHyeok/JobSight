@@ -32,7 +32,7 @@ import java.util.stream.Stream;
 
 /**
  * 경험 원본 쓰기 — 설계 5.2 experience_save, 6.4 삭제, 6.5 개정 판정. 모든 쓰기는 OwnerLock(T9) 아래에서 한다.
- * 출처는 요청 주체가 정한다: 웹 USER(검토 확정까지 함께), MCP AI('AI 기록').
+ * 출처는 요청 주체가 정한다: 웹 USER(생성과 facts 를 보낸 수정은 검토 확정까지 함께), MCP AI('AI 기록').
  */
 @Service
 @Transactional(readOnly = true)
@@ -128,7 +128,8 @@ public class ExperienceBankService {
             }
         }
         if (request.dossier() != null) experience.writeDossier(json(request.dossier()));
-        if (source == LinkSource.USER) experience.markReviewed();
+        // 검토 확정을 겸하는 것은 사람이 facts 를 보고 보낸 웹 저장뿐이다. 메모·skills·소재집만 고친 저장은 AI 기록을 확정하지 않는다.
+        if (source == LinkSource.USER && request.facts() != null) experience.markReviewed();
         experience.touchSearchText();
         Experience saved = repository.saveAndFlush(experience);
         List<ExperienceViews.NeedsReview> needsReview = List.of();

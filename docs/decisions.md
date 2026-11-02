@@ -289,3 +289,7 @@ FK 를 `SET NULL` 류로 바꾸거나 직무를 소프트 삭제하는 안은 �
 
 위 「첨부 교체·제거 때 이전 파일을 지우지 않는다」 뒤로 첨부를 지울 길이 없었다. 자동 정리 작업은 여전히 두지 않고, 사용자가 지우는 길을 둘 둔다. 이력서 저장·삭제가 성공한 뒤 빠진 첨부를 매번 묻는 길과, 이력서 목록의 [첨부 파일] 서랍에서 어디서도 쓰지 않고 올린 지 7일이 지난 파일만 지우는 길이다.
 서버는 `DELETE` 에서 첨부 행을 네이티브 `for update` 로 잡은 뒤 계정 이력서 content 의 텍스트 포함 검사로 사용처를 판정하고, 쓰는 곳이 있으면 409 `ATTACHMENT_IN_USE` 다. 첨부 id 를 새로 적는 쓰기는 그 행을 `for key share` 로 잡아 두 쪽이 엇갈리지 않게 한다. JPA `PESSIMISTIC_WRITE` 는 PostgreSQL 에서 `for no key update` 라 `for key share` 와 충돌하지 않으므로 이 자리에는 쓰지 않는다. — 설계 6.9, 10.7 R46
+
+## 웹 경험 저장의 검토 확정은 facts 를 보낸 저장으로 좁힌다 (4a 리뷰 반영, 2026-11-02)
+
+4a 는 "웹(USER) 경험 저장은 검토 확정을 겸한다"로 정해 메모·skills 만 고친 웹 저장도 `reviewed_revision = revision` 으로 올렸다. 그러면 사람이 보지 않은 AI 개정이 조용히 '확정'이 되고, 목차의 `aiRecords` 와 신뢰 표시가 사라진다. 이제 웹 생성과 `facts` 를 보낸 웹 수정만 확정을 겸하고, 그 밖의 확정은 개정 일치를 확인하는 `POST /api/experiences/{id}/review` 로만 한다. — 설계 7절 "4a 구현 메모", docs/experiences.md 불변 조건 6

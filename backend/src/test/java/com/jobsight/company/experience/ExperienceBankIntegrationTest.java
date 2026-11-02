@@ -24,11 +24,19 @@ import com.jobsight.company.selfintro.dto.SelfIntroductionList;
 import com.jobsight.company.selfintro.dto.SelfIntroductionResponse;
 import com.jobsight.company.selfintro.dto.SelfIntroductionUpdateRequest;
 import com.jobsight.company.user.UserRole;
+import com.jobsight.company.common.ApiPaths;
+import com.jobsight.company.common.GlobalExceptionHandler;
+import com.jobsight.company.experience.dto.ExperienceDossier;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -54,6 +62,13 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doReturn;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * 4단계(최소판) 경험 원본·개정·연결 — 설계 7절 4a 검증 칸을 실제 PostgreSQL 스키마(V25)와 실제 트랜잭션으로 본다.
@@ -81,9 +96,12 @@ class ExperienceBankIntegrationTest {
     @Autowired SelfIntroductionService selfIntros;
     @Autowired ResumeWriter writer;
     @Autowired OwnerLock ownerLock;
-    @Autowired JdbcTemplate jdbc;
+    /** 실제 동작 그대로의 spy. 삭제 경합 테스트만 사용 중 확인 질의를 비워 "확인 뒤에 생긴 연결"을 만든다. */
+    @MockitoSpyBean JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactions;
     @Autowired ObjectMapper mapper;
+    @Autowired Validator validator;
+    @Autowired ExperienceController controller;
 
     private UUID owner;
 
@@ -157,6 +175,13 @@ class ExperienceBankIntegrationTest {
 
     private static String code(Throwable thrown) {
         return ApiErrors.translate(thrown).code();
+    }
+
+    private static String sqlState(Throwable thrown) {
+        for (Throwable current = thrown; current != null; current = current.getCause()) {
+            if (current instanceof java.sql.SQLException sql) return sql.getSQLState();
+        }
+        return null;
     }
 
     private List<Map<String, Object>> links(UUID resumeId) {
@@ -355,8 +380,15 @@ class ExperienceBankIntegrationTest {
         ExperienceViews.Saved same = saveFacts(id, saved.version(), first);
         assertThat(same.changeKind()).isEqualTo("NONE");
         assertThat(same.revision()).isOne();
+        // 표현(앞뒤 공백) 차이는 정규화 뒤 같은 facts 라 개정이 없다. 소재집만 보내도 expectedVersion 은 필수다.
+        ExperienceViews.Saved spaced = saveFacts(id, same.version(), facts(" 백엔드 ",
+                List.of(item("a1", "  배치 분할 ")), List.of(), List.of(note("ev1", " 회의록 발췌"))));
+        assertThat(spaced.changeKind()).isEqualTo("NONE");
+        assertThat(spaced.revision()).isOne();
+        assertThat(code(catchThrowable(() -> bank.save(id, new ExperienceRequests.Save(null, null, null, null, null,
+                new ExperienceDossier("서술", null, null, null), null, null, null))))).isEqualTo("VERSION_REQUIRED");
 
-        ExperienceViews.Saved added = saveFacts(id, same.version(), facts("백엔드",
+        ExperienceViews.Saved added = saveFacts(id, spaced.version(), facts("백엔드",
                 List.of(item("a1", "배치 분할"), item(null, "모니터링 추가")), List.of(), List.of(note("ev1", "회의록 발췌"))));
         assertThat(added.changeKind()).isEqualTo("ADD");
         ExperienceViews.Saved evidenceOnly = saveFacts(id, added.version(), facts("백엔드",
@@ -436,6 +468,118 @@ class ExperienceBankIntegrationTest {
         assertThat(code(changed)).isEqualTo("EXPERIENCE_CHANGED");
     }
 
+    /**
+     * 6.4 경합: 사용 중 확인을 지난 뒤에 다른 트랜잭션이 연결을 커밋한 경우(확인 질의가 빈 결과를 본 상황을 spy 로 만든다).
+     * 삭제는 커밋이 아니라 delete 안의 IMMEDIATE 문에서 409 EXPERIENCE_IN_USE 로 막혀야 한다 — 그 문장을 빼면 이 테스트가 깨진다.
+     */
+    @Test
+    void deleteIsRejectedWhenALinkAppearsAfterTheUsageCheck() {
+        signIn();
+        UUID raced = create(ExperienceKind.PROJECT, "경합 경험", null, null, null).id();
+        UUID resumeId = resume("경합", Map.of());
+        jdbc.update("insert into resume_experiences (owner_id, resume_id, experience_id, based_on_experience_id, based_on_revision) "
+                + "values (?, ?, ?, ?, 1)", owner, resumeId, raced, raced);
+        doReturn(List.of()).when(jdbc).queryForList(startsWith("select distinct r.name"), eq(String.class), any(), any());
+
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            Throwable thrown = catchThrowable(() -> bank.delete(raced, false));
+            assertThat(thrown).as("커밋 전, delete 호출 안에서 막힌다").isNotNull();
+            assertThat(code(thrown)).isEqualTo("EXPERIENCE_IN_USE");
+            status.setRollbackOnly();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from experiences where id = ?", Integer.class, raced)).isOne();
+    }
+
+    /**
+     * REST 진입점(컨트롤러·detach 파라미터·GlobalExceptionHandler)으로 삭제: 사용 중 409, detach=true 면 200, 남의 경험 404.
+     * 같은 EXPERIENCE_IN_USE 를 MCP 도구(experience_save 의 종류 변경)와 REST PUT 이 같은 상태·코드로 낸다.
+     */
+    @Test
+    void restDeleteAndMcpShareErrorCodes() throws Exception {
+        owner = newUser();
+        asWeb();
+        UUID foreign = create(ExperienceKind.PROJECT, "남의 경험", null, null, null).id();
+        signIn();
+        MockMvc rest = MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new GlobalExceptionHandler()).build();
+        String path = ApiPaths.EXPERIENCES + "/{id}";
+        UUID used = create(ExperienceKind.PROJECT, "쓰는 경험", null, null, null).id();
+        resume("백엔드 A", Map.of("projects", List.of(Map.of("name", "쓰는 경험", "experienceId", used.toString()))));
+        UUID cited = create(ExperienceKind.PROJECT, "근거 경험", null, null, null).id();
+        selfIntros.create(new SelfIntroductionCreateRequest(null, null, null, "협업", "답", List.of(new ExperienceRef(cited, 1))));
+
+        rest.perform(delete(path, used).param("detach", "true"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPERIENCE_IN_USE"));
+        rest.perform(delete(path, cited))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPERIENCE_IN_USE"));
+        rest.perform(delete(path, cited).param("detach", "true"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.detachedSelfIntros").value(1));
+        rest.perform(delete(path, foreign)).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("NOT_FOUND"));
+
+        rest.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path, used)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"kind\":\"ACTIVITY\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXPERIENCE_IN_USE"));
+        McpPrincipal principal = asMcp();
+        Throwable mcp = catchThrowable(() -> tools.call("experience_save", Map.of("id", used.toString(),
+                "request", Map.of("kind", "ACTIVITY")), principal));
+        assertThat(ApiErrors.translate(mcp).status()).isEqualTo(409);
+        assertThat(code(mcp)).isEqualTo("EXPERIENCE_IN_USE");
+    }
+
+    /**
+     * 2.4 복합 FK: 링커를 거치지 않는 경로(직접 SQL, JSON 앵커로 rebuild)로 남의 경험을 이어도 DB 가 23503 으로 거부한다.
+     * 단일 컬럼 FK 로 바꾸면 이 테스트가 깨진다.
+     */
+    @Test
+    void compositeForeignKeysRejectAnotherOwnersExperience() {
+        owner = newUser();
+        asWeb();
+        UUID foreign = create(ExperienceKind.PROJECT, "남의 경험", null, null, null).id();
+        signIn();
+        UUID resumeId = resume("v1", Map.of());
+        UUID intro = selfIntros.create(new SelfIntroductionCreateRequest(null, null, null, "q", "a", List.of())).id();
+        TransactionTemplate tx = new TransactionTemplate(transactions);
+
+        Throwable resumeLink = catchThrowable(() -> tx.executeWithoutResult(status -> {
+            jdbc.update("insert into resume_experiences (owner_id, resume_id, experience_id, based_on_experience_id, "
+                    + "based_on_revision) values (?, ?, ?, ?, 1)", owner, resumeId, foreign, foreign);
+            jdbc.execute("set constraints all immediate");
+        }));
+        assertThat(sqlState(resumeLink)).isEqualTo("23503");
+        Throwable introLink = catchThrowable(() -> tx.executeWithoutResult(status -> {
+            jdbc.update("insert into self_introduction_experiences (owner_id, self_introduction_id, experience_id, "
+                    + "experience_revision, source) values (?, ?, ?, 1, 'USER')", owner, intro, foreign);
+            jdbc.execute("set constraints all immediate");
+        }));
+        assertThat(sqlState(introLink)).isEqualTo("23503");
+
+        jdbc.update("update resumes set content = ?::jsonb where id = ?", "{\"projects\":[{\"name\":\"x\",\"experienceId\":\""
+                + foreign + "\",\"experienceRevision\":1}]}", resumeId);
+        Throwable rebuilt = catchThrowable(() -> tx.executeWithoutResult(status -> {
+            ownerLock.acquire(owner);
+            writer.rebuild(owner);
+        }));
+        assertThat(sqlState(rebuilt)).isEqualTo("23503");
+        assertThat(links(resumeId)).isEmpty();
+    }
+
+    /** 웹 저장이 검토 확정을 겸하는 것은 facts 를 보낸 저장뿐이다. 메모·skills 만 고친 저장은 AI 기록을 확정하지 않는다. */
+    @Test
+    void webMetadataSaveDoesNotConfirmAiFacts() {
+        signIn();
+        McpPrincipal principal = asMcp();
+        ExperienceViews.Saved saved = (ExperienceViews.Saved) tools.call("experience_save", Map.of("request", Map.of(
+                "kind", "PROJECT", "title", "AI 경험", "facts", Map.of("actions", List.of(Map.of("text", "설계"))))), principal);
+        asWeb();
+        bank.save(saved.id(), new ExperienceRequests.Save(null, null, null, "메모만", null, null, List.of("Kafka"), null, null));
+        ExperienceViews.Detail afterMemo = detail(saved.id());
+        assertThat(afterMemo.reviewed()).isFalse();
+        assertThat(afterMemo.memo()).isEqualTo("메모만");
+
+        bank.save(saved.id(), new ExperienceRequests.Save(null, null, null, null, afterMemo.facts(), null, null, null,
+                afterMemo.version()));
+        assertThat(detail(saved.id()).reviewed()).isTrue();
+    }
+
     /** 검토 확정은 보고 있던 개정이어야 한다. MCP 저장은 'AI 기록'(reviewed:false), 웹 확정 뒤 reviewed:true. */
     @Test
     void mcpSaveIsAiRecordUntilWebReview() {
@@ -485,17 +629,27 @@ class ExperienceBankIntegrationTest {
             authenticate(new AppSessionUser(mine, "x@example.com", UserRole.USER));
             return catchThrowable(() -> create(ExperienceKind.PROJECT, "대기", null, null, null));
         });
-        Future<Long> free = pool.submit(() -> {
+        // 잠금은 10초까지 쥐고 있으므로, 다른 계정이 기다렸다면 3초 뒤 BUSY 로 실패한다. 성공 자체가 "기다리지 않음"이다.
+        Future<ExperienceViews.Saved> free = pool.submit(() -> {
             authenticate(new AppSessionUser(other, "y@example.com", UserRole.USER));
-            long started = System.nanoTime();
-            create(ExperienceKind.PROJECT, "다른 계정", null, null, null);
-            return (System.nanoTime() - started) / 1_000_000;
+            return create(ExperienceKind.PROJECT, "다른 계정", null, null, null);
         });
-        assertThat(free.get(10, TimeUnit.SECONDS)).as("다른 계정은 기다리지 않는다(ms)").isLessThan(2000);
+        assertThat(free.get(10, TimeUnit.SECONDS).id()).as("다른 계정은 기다리지 않는다").isNotNull();
         Throwable timedOut = blocked.get(15, TimeUnit.SECONDS);
         assertThat(code(timedOut)).isEqualTo("BUSY");
+
+        // 줄 서기: 잠금이 3초 안에 풀리면 기다리던 같은 계정 쓰기가 성공한다.
+        CountDownLatch queuedStarted = new CountDownLatch(1);
+        Future<ExperienceViews.Saved> queued = pool.submit(() -> {
+            authenticate(new AppSessionUser(mine, "x@example.com", UserRole.USER));
+            queuedStarted.countDown();
+            return create(ExperienceKind.PROJECT, "줄 선 쓰기", null, null, null);
+        });
+        queuedStarted.await(5, TimeUnit.SECONDS);
+        Thread.sleep(500);
         release.countDown();
         holder.get(10, TimeUnit.SECONDS);
+        assertThat(queued.get(10, TimeUnit.SECONDS).id()).isNotNull();
         pool.shutdown();
     }
 
@@ -557,6 +711,60 @@ class ExperienceBankIntegrationTest {
         tools.call("resume_update", Map.of("id", resumeId.toString(), "request", allowed), principal);
         assertThat(read(resumeId).content().experiences()).isEmpty();
         assertThat(writer.mismatches(owner)).isZero();
+    }
+
+    /**
+     * T6 섹션 상한(ResumeWriter 1단계): 51번째 행은 PUT 이든 resume_add_experiences 든 400 INVALID_CONTENT 이고,
+     * 저장·연결이 하나도 바뀌지 않는다.
+     */
+    @Test
+    void sectionLimitIsCheckedBeforeAnythingIsWritten() {
+        signIn();
+        UUID experience = create(ExperienceKind.PROJECT, "쉰한 번째", null, null, null).id();
+        List<Map<String, Object>> fifty = new java.util.ArrayList<>();
+        for (int i = 0; i < 50; i++) fifty.add(Map.of("name", "행 " + i));
+        UUID resumeId = resume("꽉 찬 이력서", Map.of("projects", fifty));
+        ResumeResponse before = read(resumeId);
+
+        List<Map<String, Object>> fiftyOne = new java.util.ArrayList<>(fifty);
+        fiftyOne.add(Map.of("name", "쉰한 번째", "experienceId", experience.toString()));
+        assertThat(code(catchThrowable(() -> put(resumeId, mapper.convertValue(Map.of("projects", fiftyOne),
+                ResumeContent.class), null)))).isEqualTo("INVALID_CONTENT");
+        assertThat(code(catchThrowable(() -> resumes.addExperiences(resumeId,
+                List.of(new ExperienceRequests.AddItem(experience)), null)))).isEqualTo("INVALID_CONTENT");
+
+        ResumeResponse after = read(resumeId);
+        assertThat(after.version()).isEqualTo(before.version());
+        assertThat(after.content().projects()).hasSize(50);
+        assertThat(links(resumeId)).isEmpty();
+    }
+
+    /**
+     * resume_add_experiences 의 FACTS 행은 이력서 칸 상한(role 500, 설명·성과 5000)에 맞춰 자르고 생략 표시를 붙인다.
+     * 사실 상한(항목 2000자×50, role 2000자)은 칸 상한보다 커서 그대로 넣으면 문서 검증이 400 으로 막는다.
+     */
+    @Test
+    void factsRowsFitResumeFieldLimits() {
+        signIn();
+        List<ExperienceFacts.Item> longActions = List.of(item(null, "가".repeat(2000)), item(null, "나".repeat(2000)),
+                item(null, "다".repeat(2000)));
+        UUID project = create(ExperienceKind.PROJECT, "긴 경험", null,
+                facts("역".repeat(1500), longActions, longActions, List.of()), null).id();
+        UUID career = create(ExperienceKind.CAREER, "긴 경력", null,
+                facts("역".repeat(1500), longActions, List.of(), List.of()), null).id();
+        UUID resumeId = resume("v1", Map.of());
+
+        resumes.addExperiences(resumeId, List.of(new ExperienceRequests.AddItem(project), new ExperienceRequests.AddItem(career)),
+                null);
+        ResumeContent content = read(resumeId).content();
+        assertThat(content.projects()).singleElement().satisfies(row -> {
+            assertThat(row.experienceId()).isEqualTo(project);
+            assertThat(row.role()).hasSize(500).endsWith("…");
+            assertThat(row.description()).hasSize(5000).endsWith("…");
+            assertThat(row.outcome()).hasSize(5000).startsWith("- 가");
+        });
+        assertThat(content.experiences()).singleElement()
+                .satisfies(row -> assertThat(row.description()).hasSize(5000).endsWith("…"));
     }
 
     /**
@@ -681,6 +889,52 @@ class ExperienceBankIntegrationTest {
         assertThat(again.groups()).isEmpty();
         assertThat(imports.apply(new ExperienceRequests.Import(again.resumeVersions(), List.of())).created()).isZero();
         assertThat(views.index(null, null, null, null).importHint()).isNull();
+    }
+
+    /** 같은 묶음 key 에 결정이 둘이면(CREATE 두 번, CREATE 뒤 LINK_TO) 400 DUPLICATE_DECISION 이고 아무것도 만들지 않는다. */
+    @Test
+    void importRejectsDuplicateDecisionKeys() {
+        signIn();
+        UUID existing = create(ExperienceKind.PROJECT, "기존", null, null, null).id();
+        resume("v1", Map.of("projects", List.of(Map.of("name", "정산 배치", "startYm", "2025.03"))));
+        ExperienceViews.ImportPlan plan = imports.plan();
+        String key = plan.groups().get(0).key();
+
+        for (ExperienceRequests.ImportDecision second : List.of(
+                new ExperienceRequests.ImportDecision(key, ExperienceRequests.ImportAction.CREATE, null),
+                new ExperienceRequests.ImportDecision(key, ExperienceRequests.ImportAction.LINK_TO, existing))) {
+            assertThat(code(catchThrowable(() -> imports.apply(new ExperienceRequests.Import(plan.resumeVersions(), List.of(
+                    new ExperienceRequests.ImportDecision(key, ExperienceRequests.ImportAction.CREATE, null), second))))))
+                    .isEqualTo("DUPLICATE_DECISION");
+        }
+        assertThat(jdbc.queryForObject("select count(*) from experiences where owner_id = ?", Integer.class, owner)).isOne();
+        assertThat(imports.plan().groups()).hasSize(1);
+    }
+
+    /**
+     * 가져오기 CREATE 초안도 사실 상한(Item.text 2000, period 200)과 정규화를 거친다: 긴 행 설명은 2000자 항목 여러 개로 나뉘어
+     * 내용을 잃지 않고, 상세를 읽어 그대로 다시 보내는 저장이 검증을 통과하며 개정을 만들지 않는다(NONE).
+     */
+    @Test
+    void importDraftFitsFactLimitsAndRoundTrips() {
+        signIn();
+        String description = "가".repeat(4500);
+        resume("v1", Map.of("projects", List.of(Map.of("name", "긴 프로젝트", "startYm", "가".repeat(150),
+                "endYm", "나".repeat(150), "role", " 백엔드 ", "description", description))));
+        ExperienceViews.ImportPlan plan = imports.plan();
+        UUID id = imports.apply(new ExperienceRequests.Import(plan.resumeVersions(), List.of(new ExperienceRequests.ImportDecision(
+                plan.groups().get(0).key(), ExperienceRequests.ImportAction.CREATE, null)))).experienceIds().get(0);
+
+        ExperienceViews.Detail created = detail(id);
+        assertThat(validator.validate(created.facts())).isEmpty();
+        assertThat(created.facts().period()).hasSizeLessThanOrEqualTo(200);
+        assertThat(created.facts().role()).isEqualTo("백엔드");
+        assertThat(created.facts().actions()).hasSize(3)
+                .allSatisfy(action -> assertThat(action.evidenceIds()).containsExactly("ev1"));
+        assertThat(String.join("", created.facts().actions().stream().map(ExperienceFacts.Item::text).toList()))
+                .isEqualTo(description);
+        ExperienceViews.Saved again = saveFacts(id, created.version(), created.facts());
+        assertThat(again.changeKind()).isEqualTo("NONE");
     }
 
     /** 목차 전체판: 경험 한 줄 뒤에 미등록 묶음, counts 와 importHint. 남의 id 로 상세를 부르면 404. */
