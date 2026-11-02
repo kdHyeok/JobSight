@@ -1,6 +1,7 @@
 package com.jobsight.company.experience;
 
 import com.jobsight.company.common.ResourceNotFoundException;
+import com.jobsight.company.experience.dto.ExperienceSearchRequest.Field;
 import com.jobsight.company.experience.dto.ExperienceSearchResult;
 import com.jobsight.company.experience.dto.ExperienceViews;
 import com.jobsight.company.mcp.McpOAuthConfig;
@@ -33,6 +34,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * 3단계: 공고를 저장하지 않는 경험 찾기와 묶음 기반 목차·missing — 설계 7절 3단계 검증 칸.
@@ -153,6 +155,102 @@ class ExperienceSearchIntegrationTest {
             assertThat(row.title()).isEqualTo("사내 메시지 큐 이전");
             assertThat(row.why()).anySatisfy(why -> assertThat(why.matched()).containsExactly("aws"));
         });
+    }
+
+    /**
+     * 소형 골드셋: 행 6개, 요구만 넘기고 공고 본문은 비워 LEXICAL 을 끈다 — 순서가 REQUIREMENT 점수 그대로다.
+     * N=6, df(kafka)=2(태그 alpha·본문 charlie), df(redis)=1, df(go)=2 이므로
+     * 질의 1: bravo 1.0×1×ln7=1.95 > alpha 1.0×1×ln4=1.39 > tie-a = tie-b 0.7×ln4=0.97 > charlie 1.0×0.5×ln4=0.69.
+     * 질의 2: 같은 kafka 를 기술 환경 칸(0.3)에 두면 요구 역량 칸의 go(1.39)가 앞선다. noise 는 어디에도 없다.
+     * 칸 가중·정확/포함 일치·희소도·RRF 방향·동점 키 정렬 중 하나라도 바뀌면 순서가 달라진다.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void goldSetOrdersByFieldWeightMatchRarityAndKey() {
+        signIn();
+        Map<String, Object> created = (Map<String, Object>) call("resume_create", Map.of("request", Map.of("name", "골드셋",
+                "content", Map.of("projects", List.of(
+                        project("alpha", "2024.01", "Kafka", "메시지 처리를 맡았다"),
+                        project("bravo", "2024.02", "Redis", "캐시 처리를 맡았다"),
+                        project("charlie", "2024.03", "Java", "Kafka 컨슈머를 튜닝했다"),
+                        project("tie-b", "2024.04", "Go", "서버를 만들었다"),
+                        project("tie-a", "2024.05", "Go", "서버를 만들었다"),
+                        project("noise", "2024.06", "Excel", "문서를 정리했다"))))));
+        UUID gold = UUID.fromString(created.get("id").toString());
+
+        ExperienceSearchResult first = (ExperienceSearchResult) call("experience_search", Map.of("request", Map.of(
+                "posting", Map.of(),
+                "requirements", List.of(
+                        requirement("Kafka", "requiredSkills", "SKILL", "Kafka 경험"),
+                        requirement("Redis", "requiredSkills", "SKILL", "Redis 경험"),
+                        requirement("Go", "responsibilities", "SKILL", "Go 서버 개발")))));
+        assertThat(first.results()).extracting(ExperienceSearchResult.Result::title)
+                .containsExactly("bravo", "alpha", "tie-a", "tie-b", "charlie");
+        assertThat(first.results()).extracting(ExperienceSearchResult.Result::rank).containsExactly(1, 2, 3, 4, 5);
+        // 출처가 정답 행을 가리킨다: 같은 이력서의 원래 행 번호.
+        assertThat(first.results()).extracting(row -> row.source().index()).containsExactly(1, 0, 4, 3, 2);
+        assertThat(first.results()).allSatisfy(row -> {
+            assertThat(row.source().resumeId()).isEqualTo(gold);
+            assertThat(row.source().section()).isEqualTo("projects");
+            assertThat(row.why()).extracting(ExperienceSearchResult.Why::signal).containsOnly("REQUIREMENT");
+        });
+
+        ExperienceSearchResult second = (ExperienceSearchResult) call("experience_search", Map.of("request", Map.of(
+                "posting", Map.of(),
+                "requirements", List.of(
+                        requirement("Kafka", "techStack", "SKILL", "Kafka"),
+                        requirement("Go", "requiredSkills", "SKILL", "Go 경험")))));
+        assertThat(second.results()).extracting(ExperienceSearchResult.Result::title)
+                .containsExactly("tie-a", "tie-b", "alpha", "charlie");
+    }
+
+    /**
+     * uncovered 경계: 지원자격·요구 역량 칸만 결핍으로 본다. 본문에는 보이지만 키가 맞지 않으면 TAG_MISMATCH_POSSIBLE.
+     * "Spring-Batch" 는 하이픈으로 나뉘어 언급 키 springbatch 가 되지 않지만 평문 키에는 보인다.
+     */
+    @Test
+    void uncoveredOnlyFromGapFieldsAndSeparatesTagMismatch() {
+        signIn();
+        call("resume_create", Map.of("request", Map.of("name", "정산", "content", Map.of("projects", List.of(
+                project("정산 이관", "2024.01", "Java", "Spring-Batch 로 정산 작업을 옮겼다"))))));
+
+        ExperienceSearchResult result = (ExperienceSearchResult) call("experience_search", Map.of("request", Map.of(
+                "posting", Map.of(),
+                "requirements", List.of(
+                        requirement("Spring Batch", "requiredSkills", "SKILL", "Spring Batch 경험"),
+                        requirement("Databricks", "preferredSkills", "SKILL", "Databricks 우대"),
+                        requirement("Terraform", "responsibilities", "SKILL", "Terraform 으로 인프라 관리"),
+                        requirement("Kubernetes", "qualifications", "SKILL", "Kubernetes 운영 가능자")))));
+
+        // 우대(databricks)·담당업무(terraform) 칸의 키는 내 자료에 없어도 결핍이 아니다.
+        assertThat(result.uncovered()).extracting(ExperienceSearchResult.Uncovered::key,
+                        ExperienceSearchResult.Uncovered::field, ExperienceSearchResult.Uncovered::reason)
+                .containsExactly(
+                        tuple("springbatch", Field.requiredSkills, "TAG_MISMATCH_POSSIBLE"),
+                        tuple("kubernetes", Field.qualifications, "NO_MATCH"));
+    }
+
+    /**
+     * 요구 없이 지원 자격 본문만 넘기면: 서버 사전은 기술 키만 뽑아 지원자격 칸의 요구로 쓴다(결핍 보고 대상).
+     * 경력 연수 같은 자격 문장은 서버가 분류하지 않으므로 qualifications[] 는 비고 REQUIREMENTS_PARTIAL 로 알린다.
+     */
+    @Test
+    void serverFallbackFromQualificationsTextKeepsSkillKeysOnly() {
+        signIn();
+        resumeA();
+        ExperienceSearchResult result = (ExperienceSearchResult) call("experience_search", Map.of("request", Map.of(
+                "posting", Map.of("qualifications", "Kubernetes 운영 경력 3년 이상, Kafka 사용 경험"))));
+
+        assertThat(result.query().requirementsSource()).isEqualTo("SERVER_DICTIONARY");
+        assertThat(result.warnings()).containsExactly("REQUIREMENTS_PARTIAL");
+        assertThat(result.query().requirements()).extracting(ExperienceSearchResult.RequirementKey::key,
+                        ExperienceSearchResult.RequirementKey::field)
+                .containsExactly(tuple("kubernetes", Field.qualifications),
+                        tuple("kafka", Field.qualifications));
+        assertThat(result.uncovered()).extracting(ExperienceSearchResult.Uncovered::key,
+                        ExperienceSearchResult.Uncovered::field, ExperienceSearchResult.Uncovered::reason)
+                .containsExactly(tuple("kubernetes", Field.qualifications, "NO_MATCH"));
+        assertThat(result.qualifications()).isEmpty();
     }
 
     /** 요구를 넘기지 않으면 서버 사전으로 뽑고 부분 추출임을 알린다. */

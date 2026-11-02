@@ -1298,9 +1298,10 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 - `experience_index`: 입력은 `kinds?`, `cursor?`(정수 오프셋), `limit?`(기본·최대 60, 테스트용으로 열었다). 상세 모드 `ids` 는 경험 원본이 생기는 4단계에 더한다. `importHint` 는 가져오기 화면이 없어 싣지 않는다(4단계). `counts` 는 `{unlinkedRows, groups, unknownSourceSelfIntros}`.
 - `resume_get(view=outline)` 의 `unlinkedRows` 는 **그 이력서의** 행 묶음이다(계정 전체는 `experience_index`). full `resume_get`·`resume_create` 는 `McpActions` 래퍼가 응답 맨 앞에 `missing` 을 붙인다. 웹 REST 응답은 그대로다. `maybeUnlinked` 는 3단계에서 "이 이력서에 종류·제목 키가 같고 시작 연월만 다른 행이 있음"이다.
 - `experience_search` 입력은 `{request:{positionId? | posting?, requirements?, limit?}}` 로 감쌌다(5.2 의 맨 위 인자와 다름). `McpTools` 가 record 인자만 Bean Validation 하므로 `requirements[]` 의 칸·종류 필수 검사를 받으려면 record 여야 한다. 둘 다 없거나 둘 다 있으면 400 `QUERY_REQUIRED`. `postingId`·`question`·`q`·`competencies`·`kinds` 는 3단계에 없다.
-- REQUIREMENT 일치: 행 `techStack` 의 기술 키와 정확·별칭 일치 1, 본문·`techStack` 의 영문 토큰·이웃 토큰 결합·한글 사전어 언급 0.5(토큰 포함 관계를 본문 언급까지 넓혔다. 경력·활동 행은 `techStack` 이 없기 때문). 요구 `text` 는 기술 이름이고 문장은 `quote` 에 둔다. 서버 사전 추출은 `techStack` 목록 전부와 네 칸 본문의 사전어다.
+- REQUIREMENT 일치: 행 `techStack` 의 기술 키와 정확·별칭 일치 1, 본문·`techStack` 의 영문 토큰·이웃 토큰 결합·한글 사전어 언급 0.5(토큰 포함 관계를 본문 언급까지 넓혔다. 경력·활동 행은 `techStack` 이 없기 때문). 요구 `text` 는 기술 이름이고 문장은 `quote` 에 둔다. 서버 사전 추출은 `techStack` 목록 전부와 네 칸 본문의 사전어다. 지원자격 본문만 넘기면 그 안의 사전어(기술 키)만 지원자격 칸 요구가 되어 결핍 보고 대상이다. "경력 3년 이상" 같은 자격 문장은 서버가 분류하지 않으므로 `qualifications[]` 는 비고, `REQUIREMENTS_PARTIAL` 이 그것을 알린다. `TAG_MISMATCH_POSSIBLE` 은 정확·언급 일치가 모두 없는데 행 평문 키에 그 키가 보일 때다("Spring-Batch" 처럼 기호로 끊긴 표기). 본문에 토큰으로 보이는 키는 0.5 언급 일치라 결핍이 아니다.
 - 결과 출처는 대표 행 `source`(가장 최근에 고친 이력서의 행, `textHash` 는 행 평문 SHA-256 앞 16자, `excerpt` 앞 200자)와 같은 묶음의 다른 행 `alsoIn[]` 로 나눴다. `context` 는 `dataVersion`(계정 이력서 `(id, version)` 해시)·`searchConfig` 둘뿐이다. `coverageIncomplete` 는 3단계에서 늘 true 다(모든 행이 미등록).
 - RRF 출처 가중은 3단계 후보(사용자가 쓴 이력서 행)가 모두 1이다. 동점은 묶음 키 오름차순.
+- 골드셋 검증 칸은 실제 지원 건 골드셋(0단계) 전까지 **소형 합성 골드셋**으로 고정한다: `ExperienceSearchIntegrationTest.goldSetOrdersByFieldWeightMatchRarityAndKey`(행 6개, 공고 본문을 비워 LEXICAL 을 끄고 REQUIREMENT 순서를 전부 단언 — 칸 가중, 정확 1·포함 0.5, `ln(1+N/df)`, RRF 방향, 동점 키 정렬 중 하나만 바꿔도 깨진다)와 출처 행 번호. 실제 골드셋 측정과 "프로젝트 누락" 하네스는 남아 있다.
 
 ### 함께 갱신할 문서
 

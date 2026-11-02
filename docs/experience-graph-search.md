@@ -20,13 +20,14 @@
 4. 응답 모양은 4단계와 같다. 4단계는 `experiences[]`·`experienceId` 를 채우고 자료원만 바꾼다(형식 유지, 전환 경로).
 5. 같은 `context`(dataVersion·searchConfig)와 같은 질의면 같은 결과다. 동점은 묶음 키 순. 신호·가중을 바꾸면 `ExperienceSearch.SEARCH_CONFIG` 를 올린다.
 
-**실행·검증**: `KeyNormalizerTest`(별칭·대소문자·공백·기호·연월), `ExperienceSearchIntegrationTest`(Testcontainers — 저장 안 함, 기술 환경만 있는 키 제외, 없는 필수 기술 포함, 지원 자격 분리, `missing`·outline·목차·쪽 나누기, 소유자 격리), `McpCallLogTest`(호출 로그 한 줄).
+**실행·검증**: `KeyNormalizerTest`(별칭·대소문자·공백·기호·연월), `ExperienceSearchIntegrationTest`(Testcontainers — 저장 안 함, 기술 환경만 있는 키 제외, 없는 필수 기술 포함, 지원 자격 분리, 우대·담당업무 칸 결핍 제외, `TAG_MISMATCH_POSSIBLE`, 지원자격 본문만 준 서버 사전 fallback, 소형 골드셋 순위·출처, `missing`·outline·목차·쪽 나누기, 소유자 격리), `McpCallLogTest`(호출 로그 한 줄).
 
 **함정**
 - 요구 `text` 는 기술 이름("Kafka")이다. 문장을 넣으면 키가 `kafka사용경험` 이 되어 아무것도 맞지 않는다. 문장은 `quote` 에 둔다.
 - 제목이 빈 행은 묶지 않는다 — 목차·missing·검색 어디에도 안 나온다.
 - 한글 별칭은 본문 부분 문자열로 찾는다. 흔한 단어와 겹치는 별칭(예: "뷰", "노드")은 넣지 않았다. 사전에 넣기 전에 오탐을 생각한다.
 - `coverageIncomplete` 는 3단계에서 늘 true 다. AI 는 결핍을 단정하지 않는다.
+- 요구 없이 지원자격 본문만 넘기면 서버는 사전의 기술 키만 뽑는다(지원자격 칸 요구, 결핍 보고 대상). "경력 3년" 같은 자격 문장은 `qualifications[]` 에 나오지 않는다 — 자격을 분리하려면 클라이언트가 `kind: QUALIFICATION` 으로 넘긴다.
 - 묶음은 이력서 JSON 을 매번 전부 읽는다(계정당 이력서 수십 개 규모 가정). 느려지면 4단계 `resume_experiences` 표로 옮긴다.
 
 ## 목적 (폐기 — 첫 구상)
