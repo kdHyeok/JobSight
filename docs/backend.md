@@ -15,6 +15,17 @@
 | 스키마 | `resources/db/migration/V1~V19` — Flyway, `ddl-auto: validate` |
 | 설정 | `resources/application.yml` — 비밀값은 `configtree:/run/secrets/` |
 
+## 배치 페치와 SQL 수 상한
+
+EAGER 컬렉션(`Position` 의 `techStack`·`referenceIds`, `JobPosting.steps`, `Company` 의 `industries`·`businesses`, `Resume.positionIds`)은
+`spring.jpa.properties.hibernate.default_batch_fetch_size: 100` 으로 행마다가 아니라 100개씩 묶어 읽는다.
+
+- 실측(`PositionListQueryCountIntegrationTest`, 기업 5·공고 5·직무 10): 직무 목록(`GET /api/positions`) 1회 SQL **39 → 9**.
+  9회 = 직무·공고·기업·참고 정보 조회 4회 + EAGER 컬렉션 5종 각 1회.
+- 이 테스트가 상한 9를 단언한다. 목록 경로에 SQL 을 더하면 여기서 깨진다. 늘어난 이유가 정당하면 실측해서 상한과 이 줄을 함께 고친다.
+- `hibernate.generate_statistics` 는 그 테스트의 `@SpringBootTest(properties=…)` 에서만 켠다. `application.yml` 에 넣지 않는다.
+- 함정: 컬렉션 하나가 100건을 넘으면 묶음이 둘로 나뉘어 SQL 이 1회씩 는다. 새 EAGER 컬렉션도 이 설정을 자동으로 탄다.
+
 DB 연결 획득은 3초 안에 실패시킨다. 마지막 직무 삭제의 PostgreSQL 행 잠금만 `SET LOCAL lock_timeout = '3s'`로 현재 트랜잭션에 한정해 요청이 매달리지 않게 한다. `/actuator/health`의 DB 지표와 로그인 옵션 조회가 장애 감지 경로다.
 
 ## 요청 한 번의 흐름

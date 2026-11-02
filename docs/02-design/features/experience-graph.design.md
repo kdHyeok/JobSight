@@ -1,6 +1,6 @@
 # JobSight 경험-지원 관계 구조 최종 설계
 
-작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b. 1.4 의 공고 쪽 T3 와 5.3 `posting_update` 적용 — 1단계 1c) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
+작성 2026-11-02 · 상태: **설계, 미구현** (1.3 의 P2, 1.4 의 T1·T2·T4·T5 와 이력서 쪽 T3 적용 — 1단계 1a. 1.3 의 P5 와 1.4 의 T7 적용 — 1단계 1b. 1.4 의 공고 쪽 T3 와 5.3 `posting_update` 적용 — 1단계 1c. 1.3 의 P1 적용 — 1단계 1d) · 근거: 코드 분석 5갈래, 외부 조사, 3안 독립 설계와 심사, 반박 40건 처리. 1절은 같은 날 공개 도메인 실측으로 고쳤다. 같은 날 외부 설계 리뷰 7건과 보완 4건을 반영했다(10.2절). 이어서 받은 2차 리뷰도 반영했다(10.3절). 3·4차 리뷰로 경험의 정본을 이력서 행에서 경험 원본으로 옮기고 JobSight를 중앙 관리 지점으로 정했다(10.4절). 5차 리뷰로 병합 때 과거 개정을 보존하고, 복사한 행은 원래 개정 번호를 지키게 했다(10.5절).
 
 아래에서 `B/` 는 `backend/src/main/java/com/jobsight/company/`, `M/` 은 `backend/src/main/resources/db/migration/`, `F/` 는 `frontend/src/components/` 를 줄여 쓴 것이다.
 
@@ -131,7 +131,7 @@
 | # | 원인 (근거) | 처방 | 예상 효과(추정) | 단계 |
 |---|---|---|---|---|
 | N1 | 한국 요청이 Cloudflare LAX 엣지로 들어간다(1.0) | 1.0의 (A)·(B)·(C) 중 선택 | (B)면 요청당 약 300ms → 국내 왕복 | 사용자 결정 |
-| P1 | 배치 페치 설정이 없다(`application.yml:10-18`). 그래서 위 EAGER 컬렉션들에서 1+N이 난다 | `spring.jpa.properties.hibernate.default_batch_fetch_size: 100` | 직무 목록 SQL → 10회 안팎 | 1 |
+| P1 | 배치 페치 설정이 없다(`application.yml:10-18`). 그래서 위 EAGER 컬렉션들에서 1+N이 난다 | **적용함(2026-11-02, 1d)**: `spring.jpa.properties.hibernate.default_batch_fetch_size: 100`. 실측(`PositionListQueryCountIntegrationTest`, 기업 5·공고 5·직무 10, 컬렉션마다 행 있음): 직무 목록 1회 SQL **39 → 9**. 테스트가 상한 9를 단언한다 | 직무 목록 SQL → 10회 안팎(실측 9) | 완료 |
 | P2 | 자소서 요청이 편집기가 그려진 뒤에야 나갔다(`F/ResumeQuestions.vue` onMounted) | **적용함(2026-11-02)**: 이력서·직무와 같은 `Promise.all` 로 옮기고 `questions` prop 으로 내렸다. 실패하면 `null` 을 넘겨 문항 칸이 직접 다시 부른다. `Promise.all` 을 풀어 직무를 배경으로 돌리는 것은 하지 않는다 — HTTP/2 병렬이라 이득이 서버 처리 시간 차이(ms)뿐이다 | 직렬 단계 하나, 약 0.3초 | 완료 |
 | P3 | 자소서: 소유자 전체를 읽고 자바에서 거른다(`B/selfintro/SelfIntroductionService.java:41-45`). LAZY `resumeIds` 가 행마다 SQL을 낸다(`B/selfintro/SelfIntroduction.java:27-31`). 인덱스 `idx_self_introduction_resumes_resume`(`M/V20__self_introduction_resumes.sql:10-11`)를 쓰지 않는다 | `join s.resumeIds r where s.ownerId=:o and r=:rid` 조인 쿼리 | SQL 1+S → 2~3 | 트랙 |
 | P4 | 이력서 목록이 content JSONB까지 읽는다(`B/resume/ResumeService.java:52-56`) | JPQL 생성자 projection | JSONB 전송 0 | 트랙 |
@@ -192,7 +192,7 @@ CREATE INDEX position_references_reference_idx ON position_references (reference
 ### 1.6 기대 효과와 회귀 방지
 
 - 기대 효과(추정): 이력서 화면 1회 SQL 백여 회 → 10회 안팎, API 요청 4+A건 → 3~4건. 실제 체감 효과는 0단계와 같은 방법으로 다시 잰다.
-- 회귀 방지: Testcontainers와 `Statistics#getPrepareStatementCount()` 로 요청 1회의 SQL 수 상한을 단언한다.
+- 회귀 방지: Testcontainers와 `Statistics#getPrepareStatementCount()` 로 요청 1회의 SQL 수 상한을 단언한다. 1d에서 직무 목록(`PositionService.findAll`)에 상한 9로 넣었다(`PositionListQueryCountIntegrationTest`, 통계는 이 테스트에서만 켠다).
 - 동시성 테스트: 같은 이력서에 `addRow(projects)` 2건을 병렬로 보내면 끝난 뒤 2행이어야 한다.
 - 행 번호 테스트: AI가 읽은 `version` 으로 `projects[0]` 수정을 보내기 전에 웹에서 0번을 지우면 409여야 하고, 다른 행은 바뀌지 않아야 한다.
 

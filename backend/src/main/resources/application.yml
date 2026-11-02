@@ -16,6 +16,9 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+        # EAGER 컬렉션(직무 스택·참고 정보, 공고 절차, 기업 업종·주요 사업)을 행마다가 아니라
+        # 100개씩 묶어 읽는다. 직무 목록 1회 SQL 39 → 9 (PositionListQueryCountIntegrationTest).
+        default_batch_fetch_size: 100
   flyway:
     enabled: true
   servlet:
