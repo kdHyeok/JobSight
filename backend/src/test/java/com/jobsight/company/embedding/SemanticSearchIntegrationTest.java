@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -99,15 +100,31 @@ class SemanticSearchIntegrationTest {
         }).when(embedder).embed(any(), anyList(), any());
     }
 
+    /** 다른 모델의 embedder. 질의·문서 벡터는 같은 가짜 공간이지만 모델 이름이 다르다. */
+    void embedderModel(String model, String embedModel) {
+        doReturn(model).when(embedder).model();
+        doAnswer(invocation -> {
+            List<String> texts = invocation.getArgument(1);
+            return new EmbedderClient.Embedded(embedModel, texts.stream().map(SemanticSearchIntegrationTest::fake).toList(),
+                    texts.stream().map(text -> false).toList());
+        }).when(embedder).embed(any(), anyList(), any());
+    }
+
+    private UUID signInAs(UUID id) {
+        if (jdbc.queryForObject("select count(*) from app_users where id = ?", Long.class, id) == 0) {
+            jdbc.update("insert into app_users (id, email, role, status, google_sub, created_at, updated_at) "
+                    + "values (?, ?, 'USER', 'ACTIVE', ?, now(), now())", id, id + "@example.com", "sub-" + id);
+        }
+        principal = new McpPrincipal(id, Set.copyOf(McpOAuthConfig.SCOPES));
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
+                List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        return id;
+    }
+
     @BeforeEach
     void signIn() {
         embedderUp();
-        owner = UUID.randomUUID();
-        jdbc.update("insert into app_users (id, email, role, status, google_sub, created_at, updated_at) "
-                + "values (?, ?, 'USER', 'ACTIVE', ?, now(), now())", owner, owner + "@example.com", "sub-" + owner);
-        principal = new McpPrincipal(owner, Set.copyOf(McpOAuthConfig.SCOPES));
-        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal, null,
-                List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+        owner = signInAs(UUID.randomUUID());
         // 다른 테스트가 남긴 dirty 행을 이 회차에 섞지 않는다(스위퍼는 계정과 무관하게 돈다).
         jdbc.update("update self_introductions set embedding_dirty = false where owner_id <> ?", owner);
         jdbc.update("update experiences set embedding_dirty = false where owner_id <> ?", owner);
@@ -257,6 +274,175 @@ class SemanticSearchIntegrationTest {
         assertThat(chunks("self_introduction_chunks", "self_introduction_id", intro)).isEqualTo(2);
     }
 
+    /**
+     * 행 하나의 실패가 회차를 막지 않는다. 가장 오래된 dirty 자소서는 embedder 가 거부하고, 가장 오래된 경험은 소재집 JSON 이
+     * 깨져 있다. 뒤의 행은 같은 회차에 적재되고, 실패한 행은 미뤄져 다음 회차에 곧바로 다시 보내지 않는다.
+     */
+    @Test
+    void poisonRowIsSkippedAndDoesNotBlockLaterRows() {
+        UUID resumeId = resume();
+        UUID poisonIntro = selfIntro(resumeId, "독성 문항", "독성 답변").id();
+        UUID poisonExperience = experience("독성 경험", "정산");
+        jdbc.update("update experiences set dossier = '[1]'::jsonb where id = ?", poisonExperience);
+        UUID goodIntro = selfIntro(resumeId, "협업 경험", "협업했다").id();
+        UUID goodExperience = experience("결제 정산 배치", "정산 배치를 개선했다");
+        doAnswer(invocation -> {
+            List<String> texts = invocation.getArgument(1);
+            if (texts.stream().anyMatch(text -> text.contains("독성"))) throw new EmbedderClient.Rejected("embedder HTTP 500");
+            return new EmbedderClient.Embedded(MODEL, texts.stream().map(SemanticSearchIntegrationTest::fake).toList(),
+                    texts.stream().map(text -> false).toList());
+        }).when(embedder).embed(any(), anyList(), any());
+
+        assertThat(sweeper.sweepOnce()).isEqualTo(2);
+        assertThat(dirty("self_introductions", goodIntro)).isFalse();
+        assertThat(dirty("experiences", goodExperience)).isFalse();
+        assertThat(dirty("self_introductions", poisonIntro)).isTrue();
+        assertThat(dirty("experiences", poisonExperience)).isTrue();
+
+        clearInvocations(embedder);
+        assertThat(sweeper.sweepOnce()).isZero();
+        verify(embedder, never()).embed(any(), anyList(), any());
+    }
+
+    /** embedder 장애(연결 실패)는 행 실패가 아니다 — 회차를 멈추고 아무 행도 미루지 않는다. 살아나면 바로 적재한다. */
+    @Test
+    void embedderOutageMidRoundStopsTheRoundWithoutPostponingRows() {
+        UUID intro = selfIntro(resume(), "협업 경험", "협업했다").id();
+        doThrow(new EmbedderClient.Unavailable("connect refused", null)).when(embedder).embed(any(), anyList(), any());
+        assertThatThrownBy(() -> sweeper.sweepOnce()).isInstanceOf(EmbedderClient.Unavailable.class)
+                .isNotInstanceOf(EmbedderClient.Rejected.class);
+        embedderUp();
+        assertThat(sweeper.sweepOnce()).isEqualTo(1);
+        assertThat(dirty("self_introductions", intro)).isFalse();
+    }
+
+    /** DENSE 에도 관련도 하한이 있다: 키워드도 뜻도 맞지 않는 질의는 결과가 없다(상위 N 개를 채우지 않는다). */
+    @Test
+    void unrelatedQueryReturnsNothingFromDense() {
+        UUID resumeId = resume();
+        selfIntro(resumeId, "협업 경험", "팀 프로젝트에서 협업했다");
+        selfIntro(resumeId, "정산 경험", "정산 배치를 개선했다");
+        experience("결제 정산 배치", "정산 배치를 개선했다");
+        sweeper.sweepOnce();
+
+        SelfIntroductionList list = (SelfIntroductionList) call("self_intro_list", Map.of("q", "축구"));
+        assertThat(list.degraded()).isEmpty();
+        assertThat(list.total()).isZero();
+        assertThat(list.results()).isEmpty();
+        DenseIndex.Query query = dense.query("축구").orElseThrow();
+        assertThat(dense.experiences(owner, query)).isEmpty();
+        assertThat(dense.selfIntros(owner, query)).isEmpty();
+    }
+
+    /** 불변 조건 1: 같은 문장을 가진 다른 계정의 경험·자소서는 DENSE 로도 나오지 않는다. 조각의 owner_id 는 부모 행의 것이다. */
+    @Test
+    void denseNeverCrossesOwners() {
+        UUID mineExperience = experience("사내 해커톤", "다섯 명과 협업해 배포했다");
+        UUID mineIntro = selfIntro(resume(), "협업 경험", "팀원과 협업했다").id();
+        UUID other = signInAs(UUID.randomUUID());
+        UUID otherExperience = experience("사내 해커톤", "다섯 명과 협업해 배포했다");
+        UUID otherIntro = selfIntro(resume(), "협업 경험", "팀원과 협업했다").id();
+        signInAs(owner);
+        assertThat(sweeper.sweepOnce()).isEqualTo(4);
+
+        ExperienceSearchResult result = search("팀워크 역량");
+        assertThat(result.results()).extracting(ExperienceSearchResult.Result::experienceId)
+                .contains(mineExperience).doesNotContain(otherExperience);
+        SelfIntroductionList list = (SelfIntroductionList) call("self_intro_list", Map.of("q", "팀워크"));
+        assertThat(list.results()).extracting(SelfIntroductionList.Item::id).containsExactly(mineIntro);
+        DenseIndex.Query query = dense.query("팀워크").orElseThrow();
+        assertThat(dense.experiences(owner, query).keySet()).containsExactly(mineExperience);
+        assertThat(dense.selfIntros(owner, query).keySet()).containsExactly(mineIntro);
+        assertThat(dense.experiences(other, query).keySet()).containsExactly(otherExperience);
+        assertThat(jdbc.queryForObject("select count(*) from experience_chunks c join experiences e on e.id = c.experience_id "
+                + "where c.owner_id <> e.owner_id", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(distinct owner_id) from experience_chunks where experience_id = ?",
+                Long.class, otherExperience)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select owner_id from self_introduction_chunks where self_introduction_id = ? limit 1",
+                UUID.class, otherIntro)).isEqualTo(other);
+    }
+
+    /**
+     * 모델 교체(설계 4.4, D11): 다른 모델의 조각은 점수에 쓰지 않고, 새 모델이 처음 보이면 그 조각의 행을 dirty 로 되돌려
+     * 다시 채운다. 회차 도중 embedder 모델이 또 바뀌면 그 회차는 아무것도 쓰지 않는다.
+     */
+    @Test
+    void modelChangeReembedsAndNeverMixesVectorSpaces() {
+        String next = "fake-e5-next";
+        // 모델 교체는 계정과 무관하게 조각 전체를 다시 표시한다. 앞선 테스트의 조각이 이 회차에 섞이지 않게 비운다.
+        jdbc.update("delete from experience_chunks where owner_id <> ?", owner);
+        jdbc.update("delete from self_introduction_chunks where owner_id <> ?", owner);
+        UUID experienceId = experience("결제 정산 배치", "정산 배치를 개선했다");
+        SelfIntroductionResponse intro = selfIntro(resume(), "정산 경험", "정산 배치를 개선했다");
+        assertThat(sweeper.sweepOnce()).isEqualTo(2);
+        try {
+            DenseIndex.Query nextQuery = new DenseIndex.Query(next, fake("정산"));
+            assertThat(dense.experiences(owner, nextQuery)).isEmpty();
+            assertThat(dense.selfIntros(owner, nextQuery)).isEmpty();
+
+            embedderModel(next, next);
+            assertThat(sweeper.sweepOnce()).isEqualTo(2);
+            assertThat(jdbc.queryForList("select distinct embedding_model from experience_chunks where experience_id = ?",
+                    String.class, experienceId)).containsExactly(next);
+            assertThat(jdbc.queryForList("select distinct embedding_model from self_introduction_chunks "
+                    + "where self_introduction_id = ?", String.class, intro.id())).containsExactly(next);
+            assertThat(dense.experiences(owner, nextQuery)).containsKey(experienceId);
+            assertThat(dense.experiences(owner, new DenseIndex.Query(MODEL, fake("정산")))).isEmpty();
+
+            // 회차 도중 바뀜: /health 는 next 인데 embed 는 다른 모델로 답한다.
+            call("self_intro_update", Map.of("id", intro.id().toString(), "request", Map.of("resumeIds",
+                    intro.resumeIds().stream().map(UUID::toString).toList(), "question", "정산 경험",
+                    "answer", "카프카로 정산을 옮겼다", "expectedVersion", intro.version())));
+            embedderModel(next, "fake-e5-third");
+            assertThatThrownBy(() -> sweeper.sweepOnce()).isInstanceOf(EmbedderClient.Unavailable.class);
+            assertThat(dirty("self_introductions", intro.id())).isTrue();
+            assertThat(jdbc.queryForList("select distinct embedding_model from self_introduction_chunks "
+                    + "where self_introduction_id = ?", String.class, intro.id())).containsExactly(next);
+        } finally {
+            embedderUp();   // 다음 테스트가 MODEL 로 시작하게 이 계정 조각을 되돌린다
+            sweeper.sweepOnce();
+        }
+        assertThat(jdbc.queryForList("select distinct embedding_model from self_introduction_chunks "
+                + "where self_introduction_id = ?", String.class, intro.id())).containsExactly(MODEL);
+    }
+
+    /** 경험 수정은 dirty·source_revision 을 올리고, 바뀐 필드의 조각만 embedder 로 간다. 읽은 뒤 바뀌면 그 회차는 쓰지 않는다. */
+    @Test
+    void experienceEditReembedsOnlyChangedFieldAndRespectsCas() {
+        UUID experienceId = experience("결제 정산 배치", "정산 배치를 개선했다");
+        sweeper.sweepOnce();
+        long before = jdbc.queryForObject("select source_revision from experiences where id = ?", Long.class, experienceId);
+
+        clearInvocations(embedder);
+        call("experience_save", Map.of("id", experienceId.toString(), "request", Map.of("memo", "카프카 운영 메모")));
+        assertThat(dirty("experiences", experienceId)).isTrue();
+        assertThat(jdbc.queryForObject("select source_revision from experiences where id = ?", Long.class, experienceId))
+                .isEqualTo(before + 1);
+        assertThat(sweeper.sweepOnce()).isEqualTo(1);
+        verify(embedder).embed(eq(EmbedderClient.Mode.passage),
+                argThat((List<String> texts) -> texts.size() == 1 && texts.get(0).contains("카프카 운영 메모")), any(Duration.class));
+        assertThat(jdbc.queryForList("select field from experience_chunks where experience_id = ? order by chunk_no",
+                String.class, experienceId)).containsExactly("memo", "facts.actions");
+
+        String memoHash = jdbc.queryForObject("select text_hash from experience_chunks where experience_id = ? and field = 'memo'",
+                String.class, experienceId);
+        call("experience_save", Map.of("id", experienceId.toString(), "request", Map.of("memo", "리더십 메모")));
+        doAnswer(invocation -> {
+            jdbc.update("update experiences set source_revision = source_revision + 1 where id = ?", experienceId);
+            List<String> texts = invocation.getArgument(1);
+            return new EmbedderClient.Embedded(MODEL, texts.stream().map(SemanticSearchIntegrationTest::fake).toList(),
+                    texts.stream().map(text -> false).toList());
+        }).when(embedder).embed(any(), anyList(), any());
+        assertThat(sweeper.sweepOnce()).isZero();
+        assertThat(dirty("experiences", experienceId)).isTrue();
+        assertThat(jdbc.queryForObject("select text_hash from experience_chunks where experience_id = ? and field = 'memo'",
+                String.class, experienceId)).isEqualTo(memoHash);
+
+        embedderUp();
+        assertThat(sweeper.sweepOnce()).isEqualTo(1);
+        assertThat(dirty("experiences", experienceId)).isFalse();
+    }
+
     /** 벡터 열 모양: 384 차원이 아니면 DB 가 거부한다. 경험을 지우면 조각도 지워진다. */
     @Test
     void vectorColumnRejectsWrongDimensionAndCascades() {
@@ -278,14 +464,18 @@ class SemanticSearchIntegrationTest {
     void realArrayReadCostForThousandChunks() {
         UUID experienceId = experience("측정용", "측정");
         StringBuilder vector = new StringBuilder("{");
-        for (int i = 0; i < 384; i++) vector.append(i == 0 ? "" : ",").append(String.format(Locale.ROOT, "%.7f", Math.sin(i) / 14));
+        float[] same = new float[384];   // 질의도 같은 벡터 — 관련도 하한에 걸리지 않게(cosine 약 0.98)
+        for (int i = 0; i < 384; i++) {
+            same[i] = (float) (Math.sin(i) / 14);
+            vector.append(i == 0 ? "" : ",").append(String.format(Locale.ROOT, "%.7f", Math.sin(i) / 14));
+        }
         vector.append('}');
         jdbc.update("insert into experience_chunks (owner_id, experience_id, chunk_no, field, text_hash, embedding_model, "
                 + "embedding, embedded_at) select ?, ?, g, 'facts.actions', 'h' || g, ?, ?::real[], now() "
                 + "from generate_series(1, 1000) g", owner, experienceId, MODEL, vector.toString());
         Map<String, Object> size = jdbc.queryForMap("select sum(pg_column_size(embedding)) as stored, "
                 + "sum(octet_length(embedding::text)) as text from experience_chunks where owner_id = ?", owner);
-        DenseIndex.Query query = new DenseIndex.Query(MODEL, fake("협업"));
+        DenseIndex.Query query = new DenseIndex.Query(MODEL, same);
         dense.experiences(owner, query);   // 준비 실행(JIT·드라이버 준비)
         long best = Long.MAX_VALUE;
         for (int i = 0; i < 5; i++) {

@@ -57,9 +57,12 @@
 
 **계산 시점.** 쓰기 경로는 `embedding_dirty = true, source_revision + 1` 만 표시한다 — 경험은 저장마다(`Experience.touchSearchText`), 자소서는 질문·답변이 바뀔 때만(연결만 바꾼 저장은 아니다). 스위퍼는 ① 테이블마다 dirty 32행을 잠그지 않고 읽고 ② `text_hash`·모델이 같은 기존 조각은 재사용하고 바뀐 조각만 `/embed`(트랜잭션 밖, mode 별 64개씩) ③ **행마다 짧은 트랜잭션**의 첫 문장 `UPDATE … SET embedding_dirty = false WHERE id = ? AND source_revision = ?` 가 1행일 때만 조각을 지우고 다시 넣는다. 0행이면 그사이 원문이 바뀐 것이라 쓰지 않고 다음 회차에 다시 한다. embedder 모델 이름이 바뀌면(`/health`) 다른 모델 조각을 가진 행을 dirty 로 되돌린다.
 
+**실패 격리(5단계 리뷰, 2026-11-02).** 실패는 행 단위다. `EmbedderClient` 는 연결 실패·타임아웃·JSON 아닌 응답을 `Unavailable` 로, embedder 가 응답했지만 거부한 것(HTTP 비 200, 응답 개수 불일치, `/health` 모델 이름 없음)을 하위 형 `Rejected` 로 던진다. 스위퍼는 `Unavailable`(embedder 장애, 회차 중 모델 변경)만 회차를 멈추고, `Rejected`·원문 JSON 파싱 실패·저장 제약 위반은 **그 행만** 6초·12초·…·최대 1시간 간격으로 미루고 다음 행으로 간다 — 오래된 독 행 하나가 `order by updated_at limit 32` 의 맨 앞에서 뒤의 모든 행(다른 계정·경험 루프)을 막지 않는다. 미룬 행만큼 더 읽어 걸러 내므로 한 회차는 여전히 32행을 처리한다. 미룸 기록은 메모리에만 있어 재기동하면 한 번 다시 시도한다. 로그: 행 실패는 `embedding row failed table= id= failures= retryIn= cause=`(원문 없음) WARN, embedder 장애는 첫 회와 100회(약 5분)마다 WARN, 복구 때 INFO. embedder 는 추론 예외를 연결을 끊지 않고 500 `{"error":"INTERNAL"}` 으로 돌려준다.
+
 **검색.**
 - `experience_search`: 질의 텍스트(공고 다섯 칸·기술 환경·라벨, 800자까지)를 **트랜잭션 밖에서** 2초 안에 임베딩하고, 경험 조각과 cosine(정규화라 내적) max-sim 으로 상위 20개에 DENSE 순위를 매겨 가중 RRF 에 더한다. RESUME_ROW(미연결 행)는 DENSE 대상이 아니다. `why` 의 DENSE 항목은 `rank` 와 가장 가까운 조각의 `sourceField`. `context` 에 `embeddingModel`(degraded 면 null)·`indexGeneration`(이 계정 경험 조각의 마지막 적재 시각)·`indexBehind`(dirty 경험이 남음). `searchConfig` 는 `search-v2-2026-11-dense`.
 - `self_intro_list(q)`: BM25 와 DENSE(문항·답변 조각 max-sim 상위 30)를 RRF(k=60)로 합친다. `score` 는 RRF 값이다. 응답에 `degraded`.
+- **관련도 하한** `app.embedder.min-score = 0.45`(`application.yml`): cosine 이 이보다 낮은 조각은 두 검색 모두 DENSE 에 넣지 않는다. 하한이 없으면 엉뚱한 질의("축구")에도 상위 N 개가 결과와 `total` 을 채운다. 실측(2026-11-02, 실 embedder, 문서 8개 × 질의 12개): 관련 질의의 1위 0.46~0.58(팀워크 0.535, 정산 0.580, 갈등 해결 0.568, 리더십 0.459), 무관 질의의 1위 0.39~0.45(축구 0.385, 요리 0.412, 날씨 0.394, 피아노 0.450, 주식 0.448). 분리가 좁다 — 관련 문서의 2~3위(0.40 안팎)도 잘린다. 모델을 바꾸면 다시 잰다.
 - embedder 가 없거나 2초를 넘기면 `degraded:["dense"]` 로 나머지 신호만 쓴다. `app.embedder.url`(`EMBEDDER_URL`)이 빈 값이면 의미 검색을 끈 것이고 같은 표시다.
 
 **D11 실측 — `REAL[]` (pgvector 를 들이지 않았다).** Testcontainers PostgreSQL 17, 계정 하나에 조각 1000개(`SemanticSearchIntegrationTest.realArrayReadCostForThousandChunks` 가 출력):
@@ -80,13 +83,14 @@
 3. 스위퍼는 여러 행을 한 트랜잭션에서 잠그지 않는다. 쓰기는 CAS 1행일 때만이다.
 4. 같은 모델의 조각끼리만 비교한다(`embedding_model`). 질의 벡터를 만든 모델이 `context.embeddingModel` 이다.
 
-**실행·검증.** `EmbeddingTextsTest`(조각 상한·경계·모드·필드·해시), `SemanticSearchIntegrationTest`(Testcontainers, 가짜 embedder — 죽어 있을 때 저장 성공·degraded·`indexBehind`, 재기동 한 회차에 dirty 0, 동의어 DENSE 와 `why.sourceField`, 답변만 바꾸면 답변 조각만 재계산·연결만 바꾸면 재적재 안 함, 읽은 뒤 원문이 바뀌면 그 회차 미기록, 384 아닌 벡터 거부·CASCADE, D11 실측 출력). 컨테이너: `docker compose build embedder`(빌드가 `server.py --self-check`), `/health`.
+**실행·검증.** `EmbeddingTextsTest`(조각 상한·경계·모드·필드·해시), `SemanticSearchIntegrationTest`(Testcontainers, 가짜 embedder — 죽어 있을 때 저장 성공·degraded·`indexBehind`, 재기동 한 회차에 dirty 0, 동의어 DENSE 와 `why.sourceField`, 답변만 바꾸면 답변 조각만 재계산·연결만 바꾸면 재적재 안 함, 읽은 뒤 원문이 바뀌면 그 회차 미기록, 384 아닌 벡터 거부·CASCADE, D11 실측 출력, 독 행 건너뛰기·미룸, 회차 중 장애는 미루지 않음, 무관 질의 0건, 다른 계정 조각 비노출과 조각 owner_id, 모델 교체 재적재·다른 모델 조각 미사용·회차 중 모델 변경 미기록, 경험 수정의 dirty·source_revision·바뀐 필드만 재계산·CAS), `EmbedderClientTest`(JDK HttpServer — 500·개수 불일치·빈 모델은 `Rejected`, 2초 넘는 응답·연결 거부·JSON 아님은 `Unavailable`). 컨테이너: `docker compose build embedder`(빌드가 `server.py --self-check` — 요청 검증과 가짜 모델로 실제 HTTP 400·200·500·404 왕복), `/health`.
 
 **함정**
 - 모델을 바꾸면 차원도 바뀔 수 있다. 384 가 아니면 `CHECK` 가 막는다 — 새 마이그레이션으로 CHECK 를 바꾸고 조각을 비운 뒤 dirty 를 세운다. 같은 384 차원 모델이면 스위퍼가 알아서 다시 채운다.
 - 방금 저장한 것은 몇 초 동안 DENSE 에 없다(`indexBehind:true`). 테스트는 `sweepOnce()` 를 직접 부르고 예약 실행은 `app.embedder.sweep=false` 로 끈다.
 - 질의는 800자에서 자른다(공고 다섯 칸 전체가 512토큰을 넘을 수 있다). 앞쪽 칸(지원자격·담당업무)이 먼저 들어간다.
-- DENSE 는 모든 후보에 값이 있다 — 상위 20(자소서 30)개만 순위에 넣는다. 다 넣으면 관계없는 경험이 결과를 채운다.
+- DENSE 는 모든 후보에 값이 있다 — 하한(0.45) 아래는 버리고, 남은 것 중 상위 20(자소서 30)개만 순위에 넣는다. 다 넣으면 관계없는 경험이 결과를 채운다. 테스트의 가짜 벡터는 관련 0.99·무관 0.1 근처라 하한과 무관하다.
+- 테스트에서 모델을 바꾸면 스위퍼가 **모든 계정**의 다른 모델 조각을 dirty 로 되돌린다. `modelChangeReembeds…` 는 다른 계정 조각을 먼저 비우고 끝에 원래 모델로 되돌린다.
 - 엔티티 저장은 dirty 열을 다시 쓴다. 스위퍼와 엇갈리면 이미 끝난 행이 한 번 더 돌 수 있다(해시가 같아 embedder 는 부르지 않는다).
 
 ## 목적 (폐기 — 첫 구상)

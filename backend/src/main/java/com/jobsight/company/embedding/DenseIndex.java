@@ -1,5 +1,6 @@
 package com.jobsight.company.embedding;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -34,10 +35,17 @@ public class DenseIndex {
 
     private final EmbedderClient client;
     private final JdbcTemplate jdbc;
+    /**
+     * 관련도 하한. cosine 은 모든 조각에 값이 있어서 하한이 없으면 엉뚱한 질의("축구")에도 상위 N 개가 결과로 나온다.
+     * 기본 0.45 는 dragonkue/multilingual-e5-small-ko-v2 실측값이다(관련 질의 1위 0.46~0.58, 무관 질의 1위 0.39~0.45,
+     * docs/experience-graph-search.md). 모델을 바꾸면 다시 재고 application.yml 의 app.embedder.min-score 를 맞춘다.
+     */
+    private final double minScore;
 
-    public DenseIndex(EmbedderClient client, JdbcTemplate jdbc) {
+    public DenseIndex(EmbedderClient client, JdbcTemplate jdbc, @Value("${app.embedder.min-score:0.45}") double minScore) {
         this.client = client;
         this.jdbc = jdbc;
+        this.minScore = minScore;
     }
 
     /** 자유 문장·문항·공고 본문을 질의로 임베딩한다. embedder 가 없거나 느리면 empty — 호출자는 degraded:["dense"] 를 단다. */
@@ -59,6 +67,7 @@ public class DenseIndex {
         jdbc.query("select experience_id, field, embedding from experience_chunks where owner_id = ? and embedding_model = ?",
                 rs -> {
                     double score = dot(query.vector(), SystemEmbeddingSweepRepository.vector(rs, "embedding"));
+                    if (score < minScore) return;
                     hits.merge(rs.getObject("experience_id", UUID.class), new Hit(score, rs.getString("field")),
                             (a, b) -> a.score() >= b.score() ? a : b);
                 }, owner, query.model());
@@ -70,8 +79,8 @@ public class DenseIndex {
         Map<UUID, Double> scores = new HashMap<>();
         jdbc.query("select self_introduction_id, embedding from self_introduction_chunks where owner_id = ? and embedding_model = ?",
                 rs -> {
-                    scores.merge(rs.getObject("self_introduction_id", UUID.class),
-                            dot(query.vector(), SystemEmbeddingSweepRepository.vector(rs, "embedding")), Math::max);
+                    double score = dot(query.vector(), SystemEmbeddingSweepRepository.vector(rs, "embedding"));
+                    if (score >= minScore) scores.merge(rs.getObject("self_introduction_id", UUID.class), score, Math::max);
                 }, owner, query.model());
         return scores;
     }

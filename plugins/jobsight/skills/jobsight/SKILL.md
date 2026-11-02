@@ -226,7 +226,9 @@ experiences(경력) · awards(수상) · certificates(자격증) · skills(SW �
   그 위에서 고칠지 사용자에게 묻거나 새 `version` 으로 다시 만든다. `SELF_INTRO_BUSY`(409)는 잠시 뒤 다시 읽고 시도한다.
 
 **목록은 미리보기다.** `self_intro_list({q?,resumeId?,positionId?,postingId?,companyId?,questionType?,unlinked?,limit?})`
-- `limit` 기본 10(최대 50). `complete:false` 면 `total` 중 일부만 실었다 — 필터를 좁히거나 `limit` 을 늘린다. `q` 는 100자 이하(질문·답변의 같은 단어, BM25).
+- `limit` 기본 10(최대 50). `complete:false` 면 `total` 중 일부만 실었다 — 필터를 좁히거나 `limit` 을 늘린다. `q` 는 100자 이하(질문·답변의 같은 단어 BM25 와, 뜻이 가까운 문항·답변의 의미 검색을 합친다).
+  `matchedTerms` 가 빈 항목은 뜻으로만 찾은 것이라 "비슷한 내용"으로만 소개한다. 관련도가 낮은 답변은 의미 검색에서도 빠지므로
+  `total:0` 이면 그 주제의 답변이 없다고 말해도 된다. `degraded:["dense"]` 면 단어로만 찾았다.
 - 항목의 답변은 300자 `answerPreview` 다. **답변 원문이 필요하면 `self_intro_get` 으로 읽는다.** 미리보기를 `answer` 로 되돌려 저장하지 않는다.
 - 지원 맞춤 답변을 찾을 때는 `positionId`(또는 `postingId`·`companyId`)로 거른다. 결과의 `sources.direct` 가 그 직무용으로 쓴 답변(직접 출처)이다.
   `fallback:"indirect"` 면 그 직무용 직접 출처가 0건이라 연결 이력서로 찾은 **"출처 미상"** 답변을 준 것이다. 그 답변이 이 지원용이라고 단정하지 않는다. 필터를 버리고 다시 부르지 않는다.

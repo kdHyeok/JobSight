@@ -101,7 +101,11 @@ def handler(model):
                 _, texts = parse(self.rfile.read(length))
             except BadRequest as error:
                 return self.send(400, {"error": "BAD_REQUEST", "message": str(error)})
-            vectors, truncated = model.embed(texts)
+            try:
+                vectors, truncated = model.embed(texts)
+            except Exception as error:  # 응답 없이 끊지 않는다 — 백엔드는 500 을 "이 요청만 거부"로 읽고 그 행만 미룬다
+                sys.stderr.write("embedder embed failed: %s\n" % type(error).__name__)
+                return self.send(500, {"error": "INTERNAL"})
             self.send(200, {"model": MODEL_NAME, "dim": model.dim, "vectors": vectors, "truncated": truncated})
 
         def log_message(self, fmt, *args):  # 본문은 남기지 않는다. 경로·상태만
@@ -123,7 +127,47 @@ def self_check():
         except BadRequest:
             continue
         raise AssertionError("통과하면 안 되는 요청: " + bad[:40])
+    check_http()
     print("self-check OK")
+
+
+def check_http():
+    """가짜 모델로 실제 HTTP 왕복: 400(잘못된 요청)·200(모양)·500(추론 실패, 연결을 끊지 않는다)·404."""
+    import urllib.error
+    import urllib.request
+
+    class Fake:
+        dim, max_tokens = 2, 512
+
+        def embed(self, texts):
+            if any("boom" in t for t in texts):
+                raise RuntimeError("boom")
+            return [[0.6, 0.8] for _ in texts], [len(t) > 10 for t in texts]
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler(Fake()))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % server.server_address[1]
+
+    def call(path, payload=None):
+        data = None if payload is None else payload.encode("utf-8")
+        request = urllib.request.Request(base + path, data, {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, json.load(response)
+        except urllib.error.HTTPError as error:
+            return error.code, json.load(error)
+
+    try:
+        status, body = call("/embed", json.dumps({"mode": "passage", "texts": ["a", "가나다라마바사아자차카"]}))
+        assert status == 200 and body["vectors"] == [[0.6, 0.8]] * 2 and body["truncated"] == [False, True], body
+        assert call("/embed", '{"mode":"x","texts":["a"]}')[0] == 400
+        assert call("/embed", '{"mode":"query","texts":[]}')[0] == 400
+        assert call("/embed", json.dumps({"mode": "query", "texts": ["boom"]})) == (500, {"error": "INTERNAL"})
+        status, body = call("/health")
+        assert status == 200 and body["model"] == MODEL_NAME and body["dim"] == 2, body
+        assert call("/nope")[0] == 404
+    finally:
+        server.shutdown()
 
 
 if __name__ == "__main__":
