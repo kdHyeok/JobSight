@@ -52,12 +52,16 @@ export interface ResumeSummary {
 export interface Resume extends ResumeSummary {
   content: ResumeContent
   positionIds: string[]
+  /** 저장할 때마다 오른다. 저장 요청의 expectedVersion 으로 돌려보낸다 — docs/resumes.md 불변 조건 8. */
+  version: number
 }
 
 export interface ResumePayload {
   name: string
   content: ResumeContent
   positionIds: string[]
+  /** 문서 저장(PUT)에 필수다. 생성에는 쓰지 않는다. 다르면 409 RESUME_STALE. */
+  expectedVersion?: number
 }
 
 export type FieldKind = 'text' | 'ym' | 'url' | 'textarea' | 'file' | 'select' | 'terms'

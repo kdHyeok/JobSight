@@ -10,7 +10,7 @@
 
 ```
 app_users ──1:N──▶ resumes
-                     id · owner_id · name(이력서 명) · content JSONB · created_at · updated_at
+                     id · owner_id · name(이력서 명) · content JSONB · version · created_at · updated_at
                      └─N:M─ positions via resume_positions
 
 content = {
@@ -42,10 +42,13 @@ content = {
 1. **소유자 격리**: `findByIdAndOwnerId` 만. 타인 이력서는 404.
 2. **이름은 유일하지 않다.** 버전은 id 로 구분한다. 같은 이름의 v1·v2 가 있어도 된다 — 사용자 요구.
 3. **REST 저장은 문서 통째 PUT.** REST 에 행 단위 API 는 없다. 화면은 행 추가·삭제·이동을 로컬에서 하고 `저장` 을 눌러야 DB 에 간다(저장 안 한 변경은 `변경됨` 표시 + 이탈 경고). **MCP 만** 행 도구를 갖는다 — 서버가 조회→수정→저장을 한 트랜잭션으로 묶는 편의 계층이지, 두 번째 저장 경로가 아니다.
-4. **빈 값은 항상 같은 모양.** `content` 가 없으면 `ResumeContent.empty()`, 섹션이 `null` 이면 `[]` 로 정규화해 저장한다. 읽는 쪽이 `null` 검사를 안 하게.
+4. **저장 모양은 항상 같다.** 생성 때 `content` 가 없으면 `ResumeContent.empty()` 로 만들고, 저장하는 JSON 의 섹션은 언제나 배열이다. 읽는 쪽이 `null` 검사를 안 하게. 단 **수정 요청의 `null` 은 "유지"** 다(9번).
 5. **복제는 새 id.** `POST /resumes/{id}/copy` 는 content 를 그대로 든 새 행을 만든다. 원본은 건드리지 않는다.
 6. **연결 직무는 관계로 저장한다.** `positionIds`는 같은 소유자의 직무만 허용하고 이력서 복제에도 복사한다. 편집 화면은 검색창과 선택 칩만 보여 주고, 검색창 클릭·포커스 시 미선택 직무를 드롭다운으로 펼친다. 검색어가 없으면 최근 수정순 전체 목록, 검색 시 이름·기업·공고를 좁힌다. 목록은 최대 320px(작은 화면은 화면 높이의 45%) 안에서 휠·스크롤바로 스크롤하며 페이지 본문을 밀어내지 않는다.
 7. **내보내기는 저장된 문서 기준이다.** Word는 브라우저가 `.doc`을 만들고 PDF는 인쇄 대화상자의 PDF 저장을 사용한다. 선택한 첨부는 원본 바이트를 별도 ZIP으로 묶는다.
+8. **예전에 읽은 문서로 덮어쓰지 않는다** (`version`). 이력서는 저장할 때마다 `version` 이 오른다. 문서 전체 저장(`PUT`, `resume_update`)과 행 번호로 고치는 `resume_row_update`·`resume_row_delete` 는 `expectedVersion` 이 **필수**이고, 행 추가·기본정보 수정은 선택이다. 없으면 400 `VERSION_REQUIRED`, 지금 버전과 다르면 409 `RESUME_STALE`. 오류에는 지금 버전을 싣지 않는다 — 클라이언트가 다시 읽고 대상을 확인하게 하려는 것이다. 잠금만으로는 부족하다: AI가 `projects[0]` 을 읽은 뒤 웹에서 0번을 지우면, 잠금이 정상이어도 AI의 0번 수정이 엉뚱한 행에 들어간다.
+9. **수정 요청의 `null` 은 유지, `[]` 는 비움이다.** `PUT`·`resume_update` 의 `content`·`positionIds`·`content` 안의 빠진 섹션과 `basic`, `resume_row_update` 의 빠진 행 필드가 모두 그렇다. 행 갱신은 기존 행 위에 보낸 필드만 덮는다(`""` 는 그 필드를 비운다). AI가 섹션을 빠뜨려 보낸 저장이 조용한 삭제가 되던 것을 막는다.
+10. **쓰기는 이력서 행을 잠근다.** `update`·`updateBasic`·행 도구는 `ResumeRepository.findOwnedForUpdate`(`PESSIMISTIC_WRITE`, `lock_timeout 3s`)로 읽는다. 동시에 들어온 행 추가 두 건이 서로를 덮어 한 행이 사라지던 것을 막는다. 3초 안에 잠금을 못 얻으면 409 `RESUME_BUSY`.
 
 ## 진입점
 
@@ -56,15 +59,15 @@ content = {
 | JSON 변환 | `ResumeService.write()/read()` — Boot 4 의 Jackson 3 `tools.jackson.databind.ObjectMapper` |
 | 화면 | `ResumeBoard.vue`(`/resumes` 목록 카드, `?focus=<id>` 면 편집기) · `ResumeEditor.vue`(전체 페이지 편집기) · `ResumeSection.vue`(섹션 하나 = 행 카드 + ↑↓× + 행 추가) |
 | 섹션 정의 | `frontend/src/types/resume.ts` 의 `SECTIONS` — 라벨·필드·입력 종류. 섹션을 더하려면 **여기와 `ResumeContent`, `ResumeSection` enum 세 곳** |
-| MCP 도구 | `McpTools` 의 `resume_*` 10개. 행 도구는 `McpActions` → `ResumeService.addRow/updateRow/deleteRow/updateBasic`. 입력 `ResumeRowRequest`(합집합 record) + `ResumeSection`(enum) — `docs/mcp-plugin.md` |
+| MCP 도구 | `McpTools` 의 `resume_*` 10개. 행 도구는 `McpActions` → `ResumeService.addRow/updateRow/deleteRow/updateBasic`. 입력 `ResumeRowRequest`(합집합 record) + `ResumeSection`(enum). 행 도구는 이력서 전체가 아니라 개요 `ResumeRowResult{id, version, section, count, index, row}` 를 돌려준다 — `docs/mcp-plugin.md` |
 
 ## API 요약 (상세는 Swagger)
 
 ```
 GET    /api/resumes            → [ {id, name, updatedAt} ]      목록엔 content 없음
 POST   /api/resumes            {name, content?, positionIds?}    content 없으면 빈 문서
-GET    /api/resumes/{id}       → {id, name, content, positionIds, createdAt, updatedAt}
-PUT    /api/resumes/{id}       {name, content, positionIds}      통째 교체
+GET    /api/resumes/{id}       → {id, name, content, positionIds, version, createdAt, updatedAt}
+PUT    /api/resumes/{id}       {name, content?, positionIds?, expectedVersion}   null=유지. 버전이 다르면 409 RESUME_STALE
 POST   /api/resumes/{id}/copy  {name}                            새 버전
 DELETE /api/resumes/{id}
 
@@ -121,7 +124,7 @@ cd frontend && npm run type-check && npm test
 - **MCP 행 도구는 다른 섹션 필드를 거부한다**(`UNKNOWN_ROW_FIELD`). 합집합 record 로 받기 때문에 스키마상으로는 `school` 을 `certificates` 에 넣을 수 있어 보이지만, 서버가 섹션 record 로 엄격 변환한다. 조용히 버리면 값이 사라진 채 "성공" 이 되기 때문이다.
 - 섹션을 추가하면 `ResumeContent`(record) · `ResumeSection`(enum) · `types/resume.ts`(SECTIONS) · `ResumeRowRequest`(새 필드가 있으면) 네 곳을 함께 고친다.
 - **행 값이 전부 문자열은 아니다.** `kind: 'terms'` 필드만 배열이다. 행에서 값을 꺼낼 때는 `text(row, key)` / `terms(row, key)` 를 쓴다 — 캐스팅을 `types/resume.ts` 한 곳에 모아 둔 이유다.
-- **MCP 행 도구는 중첩 표를 실을 수 없다.** `ResumeRowRequest` 는 평평한 문자열 합집합이다. 그래서 `resume_row_update` 는 요청이 표현하지 못한 배열 필드를 **지우지 않고 남긴다**(`ResumeService.carryArrays`). 이 보호가 없으면 학력 행 하나를 고칠 때마다 성적표가 조용히 사라진다.
+- **MCP 행 도구는 중첩 표를 실을 수 없다.** `ResumeRowRequest` 는 평평한 문자열 합집합이다. `resume_row_update` 는 기존 행 위에 보낸 필드만 덮으므로(불변 조건 9), 요청이 표현하지 못한 배열 필드(성적표)는 그대로 남는다. 이 병합이 없으면 학력 행 하나를 고칠 때마다 성적표가 조용히 사라진다.
 - `when` 이 붙은 필드는 같은 행의 다른 값에 따라 **숨는다**. 숨어도 값은 문서에 남는다 — 학교 구분을 바꿨다가 되돌리면 그대로 돌아온다.
 - **저장 중인 이력서를 다시 읽을 때는 저장 완료를 기다린다.** `api/resumes.ts` 가 같은 id의 쓰기 순서와 저장 뒤 조회 순서를 보장한다. 다른 id의 조회는 기다리지 않는다. 저장이 실패해도 대기는 풀리고 서버에 남은 문서를 다시 읽을 수 있다. 이 순서는 화면 컴포넌트를 벗어났다가 다시 만들어도 유지된다. 편집기는 조회가 끝날 때까지 숨겨 오래된 문서를 다시 저장하지 못하게 한다. `ResumeSaveRace.spec.ts` 가 A 저장 중 B로 이동 후 A 복귀, 재저장 때 첫 수정 보존, 컴포넌트 재생성, 저장 실패와 같은 id의 연속 저장을 검증한다.
 - **편집기를 열 때 연결 문항은 이력서와 같은 단계에서 부른다.** `ResumeBoard.loadCurrent` 가 이력서·직무·연결 문항을 `Promise.all` 로 함께 보내고 `ResumeEditor` → `ResumeQuestions` 로 `questions` 를 내린다. 문항 칸이 그려진 뒤에 부르면 왕복 하나를 더 기다리는데, 공개 도메인은 한국 요청이 Cloudflare LAX 엣지를 거쳐 서울 터널로 가서 왕복 하나가 약 0.3초다(2026-11 측정, 서버 안 처리는 2ms 미만). 문항 요청이 실패하면 `null` 을 넘기고 문항 칸이 직접 다시 불러 오류를 보여 준다 — 문항 실패가 이력서 열기를 막지 않게. 추가·연결·수정 뒤 다시 부르는 것은 계속 `ResumeQuestions` 가 한다. 첨부 파일이 있는 이력서는 `AttachmentField` 가 그려진 뒤 메타를 부르므로 그 단계는 아직 남아 있다. `ResumeBoard.spec.ts` 가 "문항 요청이 이력서 응답을 기다리지 않는다" 를 고정한다.

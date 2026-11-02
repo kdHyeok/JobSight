@@ -9,6 +9,7 @@ import com.jobsight.company.resume.dto.ResumeCopyRequest;
 import com.jobsight.company.resume.dto.ResumeRequest;
 import com.jobsight.company.resume.dto.ResumeResponse;
 import com.jobsight.company.resume.dto.ResumeRowRequest;
+import com.jobsight.company.resume.dto.ResumeRowResult;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.stubbing.Answer;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
@@ -28,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -53,12 +56,31 @@ class ResumeServiceTest {
         return mapper.convertValue(fields, ResumeRowRequest.class);
     }
 
+    /** 생성·복제는 save, 수정 경로는 version 을 응답에 싣기 위해 saveAndFlush 를 쓴다. */
     private void saveReturnsArgument() {
-        given(repository.save(any())).willAnswer(inv -> {
+        Answer<Resume> answer = inv -> {
             Resume r = inv.getArgument(0);
             r.onCreate();
             return r;
-        });
+        };
+        lenient().when(repository.save(any())).thenAnswer(answer);
+        lenient().when(repository.saveAndFlush(any())).thenAnswer(answer);
+    }
+
+    /** 쓰기 경로는 잠금 조회로 읽는다(docs/resumes.md 불변 조건 10). 단위 테스트에서 version 은 0 그대로다. */
+    private Resume lockedResume(String contentJson) {
+        Resume resume = new Resume(OWNER_ID, "v1", contentJson);
+        resume.onCreate();
+        given(repository.findOwnedForUpdate(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
+        return resume;
+    }
+
+    private ResumeContent stored(Resume resume) {
+        return mapper.readValue(resume.getContent(), ResumeContent.class);
+    }
+
+    private static void assertCode(Throwable thrown, String code) {
+        assertThat(thrown).isInstanceOfSatisfying(ApiRuleException.class, e -> assertThat(e.getCode()).isEqualTo(code));
     }
 
     /** content 없이 만들어도 저장 JSON 은 항상 같은 모양이다 — 읽는 쪽이 null 검사를 안 한다. */
@@ -66,7 +88,7 @@ class ResumeServiceTest {
     void createWithoutContentStoresEmptyDocument() {
         saveReturnsArgument();
 
-        ResumeResponse created = service.create(new ResumeRequest("  새 이력서 ", null, List.of()));
+        ResumeResponse created = service.create(new ResumeRequest("  새 이력서 ", null, List.of(), null));
 
         ArgumentCaptor<Resume> saved = ArgumentCaptor.forClass(Resume.class);
         verify(repository).save(saved.capture());
@@ -87,12 +109,12 @@ class ResumeServiceTest {
                         List.of(new ResumeContent.CollegeTerm("1학년", "일반화학(A+)", "24.00", "4.38")), null)),
                 null, null, null, null, null, null, null);
 
-        ResumeResponse created = service.create(new ResumeRequest("v1", content, List.of()));
+        ResumeResponse created = service.create(new ResumeRequest("v1", content, List.of(), null));
 
         assertThat(created.content().educations()).hasSize(1);
         assertThat(created.content().educations().get(0).endYm()).isEqualTo("현재");
         assertThat(created.content().basic().githubUrl()).isEqualTo("https://example.com/gh");
-        // null 로 보낸 섹션은 빈 배열로 정규화된다.
+        // 생성 때 null 로 보낸 섹션은 빈 배열로 정규화된다.
         assertThat(created.content().trainings()).isEmpty();
     }
 
@@ -128,52 +150,119 @@ class ResumeServiceTest {
                 .willReturn(List.of(position, secondPosition));
 
         ResumeResponse created = service.create(new ResumeRequest("지원용", null,
-                List.of(positionId, secondPositionId)));
+                List.of(positionId, secondPositionId), null));
 
         assertThat(created.positionIds()).containsExactly(positionId, secondPositionId);
         UUID unknown = UUID.randomUUID();
-        assertThatThrownBy(() -> service.create(new ResumeRequest("다른 직무", null, List.of(unknown))))
+        assertThatThrownBy(() -> service.create(new ResumeRequest("다른 직무", null, List.of(unknown), null)))
                 .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    /** 문서 전체 저장은 버전이 필수이고, 예전 버전이면 409 다(docs/resumes.md 불변 조건 8). */
+    @Test
+    void updateRequiresCurrentVersion() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{\"basic\":{\"name\":\"테스트\"}}");
+
+        assertCode(catchThrown(() -> service.update(resume.getId(), new ResumeRequest("v1", null, null, null))),
+                "VERSION_REQUIRED");
+        assertCode(catchThrown(() -> service.update(resume.getId(), new ResumeRequest("v1", null, null, 3L))),
+                "RESUME_STALE");
+        assertThat(service.update(resume.getId(), new ResumeRequest("v2", null, null, 0L)).name()).isEqualTo("v2");
+    }
+
+    /** 수정 요청의 null 은 유지, [] 는 비움이다. AI 가 섹션을 빠뜨려도 조용히 지워지지 않는다(불변 조건 9). */
+    @Test
+    void updateKeepsWhatTheRequestLeavesOut() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{\"basic\":{\"name\":\"테스트\"},\"skills\":[{\"name\":\"Python\"}],"
+                + "\"projects\":[{\"name\":\"Planetory\"}]}");
+        UUID positionId = UUID.randomUUID();
+        resume.replacePositions(Set.of(positionId));
+        ResumeContent partial = new ResumeContent(null,
+                List.of(new ResumeContent.Education(null, null, "테스트 대학교", null, null, null, null,
+                        null, null, null, null, null, null)),
+                null, null, null, null, null, List.of(), null);
+
+        ResumeResponse updated = service.update(resume.getId(), new ResumeRequest("v1", partial, null, 0L));
+
+        assertThat(updated.content().basic().name()).isEqualTo("테스트");
+        assertThat(updated.content().educations()).extracting(ResumeContent.Education::school).containsExactly("테스트 대학교");
+        assertThat(updated.content().skills()).isEmpty();
+        assertThat(updated.content().projects()).extracting(ResumeContent.Project::name).containsExactly("Planetory");
+        assertThat(updated.positionIds()).containsExactly(positionId);
     }
 
     /** 행 도구: 그 섹션 필드만 받고, 다른 섹션 필드·범위 밖 index 는 거부한다. 나머지 섹션은 그대로. */
     @Test
     void rowToolsEditOneSectionAndRejectForeignFields() {
         saveReturnsArgument();
-        Resume resume = new Resume(OWNER_ID, "v1",
+        Resume resume = lockedResume(
                 "{\"basic\":{\"name\":\"테스트\"},\"educations\":[{\"school\":\"테스트 대학교\"}],\"certificates\":[]}");
-        resume.onCreate();
-        given(repository.findByIdAndOwnerId(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
 
-        ResumeResponse added = service.addRow(resume.getId(), ResumeSection.certificates,
-                row(Map.of("name", "SQLD", "issuer", "기관 A", "acquiredYm", "2026.03")));
-        assertThat(added.content().certificates()).extracting(ResumeContent.Certificate::name).containsExactly("SQLD");
-        assertThat(added.content().educations()).extracting(ResumeContent.Education::school).containsExactly("테스트 대학교");
-        assertThat(added.content().basic().name()).isEqualTo("테스트");
+        ResumeRowResult added = service.addRow(resume.getId(), ResumeSection.certificates,
+                row(Map.of("name", "SQLD", "issuer", "기관 A", "acquiredYm", "2026.03")), null);
+        assertThat(added.count()).isEqualTo(1);
+        assertThat(added.index()).isZero();
+        assertThat(added.row()).containsEntry("name", "SQLD");
+        assertThat(stored(resume).educations()).extracting(ResumeContent.Education::school).containsExactly("테스트 대학교");
+        assertThat(stored(resume).basic().name()).isEqualTo("테스트");
 
-        ResumeResponse replaced = service.updateRow(resume.getId(), ResumeSection.certificates, 0,
-                row(Map.of("name", "ADsP", "issuer", "기관 A", "acquiredYm", "2025.09")));
-        assertThat(replaced.content().certificates()).extracting(ResumeContent.Certificate::name).containsExactly("ADsP");
+        ResumeRowResult replaced = service.updateRow(resume.getId(), ResumeSection.certificates, 0,
+                row(Map.of("name", "ADsP", "acquiredYm", "2025.09")), 0L);
+        assertThat(replaced.row()).containsEntry("name", "ADsP").containsEntry("issuer", "기관 A");
 
         // 학력 필드(school)를 자격증 섹션에 넣으면 조용히 버리지 않고 거부한다.
-        assertThatThrownBy(() -> service.addRow(resume.getId(), ResumeSection.certificates, row(Map.of("school", "x"))))
+        assertThatThrownBy(() -> service.addRow(resume.getId(), ResumeSection.certificates, row(Map.of("school", "x")), null))
                 .isInstanceOf(ApiRuleException.class).hasMessageContaining("certificates");
-        assertThatThrownBy(() -> service.deleteRow(resume.getId(), ResumeSection.certificates, 5))
-                .isInstanceOf(ApiRuleException.class);
+        assertCode(catchThrown(() -> service.deleteRow(resume.getId(), ResumeSection.certificates, 5, 0L)), "ROW_NOT_FOUND");
 
-        ResumeResponse removed = service.deleteRow(resume.getId(), ResumeSection.certificates, 0);
-        assertThat(removed.content().certificates()).isEmpty();
+        ResumeRowResult removed = service.deleteRow(resume.getId(), ResumeSection.certificates, 0, 0L);
+        assertThat(removed.count()).isZero();
+        assertThat(removed.index()).isNull();
+        assertThat(stored(resume).certificates()).isEmpty();
+    }
+
+    /** 행 갱신은 보낸 필드만 덮는다. "" 는 비움이고, 요청이 표현하지 못하는 성적표 배열은 남는다(불변 조건 9). */
+    @Test
+    void rowUpdateOverlaysOnlySentFields() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{\"educations\":[{\"school\":\"테스트 대학교\",\"major\":\"컴퓨터공학과\","
+                + "\"collegeTerms\":[{\"grade\":\"1학년\",\"courses\":\"일반화학(A+)\"}]}],"
+                + "\"certificates\":[{\"name\":\"SQLD\",\"issuer\":\"기관 A\"}]}");
+
+        ResumeRowResult education = service.updateRow(resume.getId(), ResumeSection.educations, 0,
+                row(Map.of("major", "통계학과")), 0L);
+        assertThat(education.row()).containsEntry("school", "테스트 대학교").containsEntry("major", "통계학과");
+        assertThat(stored(resume).educations().get(0).collegeTerms()).extracting(ResumeContent.CollegeTerm::grade)
+                .containsExactly("1학년");
+
+        service.updateRow(resume.getId(), ResumeSection.certificates, 0, row(Map.of("issuer", "")), 0L);
+        assertThat(stored(resume).certificates().get(0).name()).isEqualTo("SQLD");
+        assertThat(stored(resume).certificates().get(0).issuer()).isEmpty();
+    }
+
+    /** 행 번호로 고치거나 지우면 버전이 필수, 추가는 선택이다(불변 조건 8). */
+    @Test
+    void rowIndexToolsRequireVersion() {
+        saveReturnsArgument();
+        Resume resume = lockedResume("{\"projects\":[{\"name\":\"Planetory\"},{\"name\":\"JOBIS\"}]}");
+
+        assertCode(catchThrown(() -> service.updateRow(resume.getId(), ResumeSection.projects, 0,
+                row(Map.of("name", "다른 이름")), null)), "VERSION_REQUIRED");
+        assertCode(catchThrown(() -> service.deleteRow(resume.getId(), ResumeSection.projects, 0, 5L)), "RESUME_STALE");
+        assertThat(stored(resume).projects()).extracting(ResumeContent.Project::name).containsExactly("Planetory", "JOBIS");
+        assertThat(service.addRow(resume.getId(), ResumeSection.projects, row(Map.of("name", "새 프로젝트")), null).count())
+                .isEqualTo(3);
     }
 
     @Test
     void updateBasicKeepsOtherSections() {
         saveReturnsArgument();
-        Resume resume = new Resume(OWNER_ID, "v1", "{\"basic\":{},\"skills\":[{\"name\":\"Python\"}]}");
-        resume.onCreate();
-        given(repository.findByIdAndOwnerId(resume.getId(), OWNER_ID)).willReturn(Optional.of(resume));
+        Resume resume = lockedResume("{\"basic\":{},\"skills\":[{\"name\":\"Python\"}]}");
 
         ResumeResponse updated = service.updateBasic(resume.getId(),
-                new ResumeContent.BasicInfo("테스트", null, null, null, null, null, null, "https://example.com/gh"));
+                new ResumeContent.BasicInfo("테스트", null, null, null, null, null, null, "https://example.com/gh"), null);
 
         assertThat(updated.content().basic().name()).isEqualTo("테스트");
         assertThat(updated.content().skills()).extracting(ResumeContent.Skill::name).containsExactly("Python");
@@ -184,9 +273,21 @@ class ResumeServiceTest {
     void otherOwnersResumeIsNotReachable() {
         UUID id = UUID.randomUUID();
         given(repository.findByIdAndOwnerId(id, OWNER_ID)).willReturn(Optional.empty());
+        given(repository.findOwnedForUpdate(id, OWNER_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.findById(id)).isInstanceOf(ResourceNotFoundException.class);
         assertThatThrownBy(() -> service.delete(id)).isInstanceOf(ResourceNotFoundException.class);
         assertThatThrownBy(() -> service.copy(id, new ResumeCopyRequest("x"))).isInstanceOf(ResourceNotFoundException.class);
+        assertThatThrownBy(() -> service.update(id, new ResumeRequest("x", null, null, 0L)))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    private static Throwable catchThrown(Runnable action) {
+        try {
+            action.run();
+        } catch (Throwable thrown) {
+            return thrown;
+        }
+        throw new AssertionError("예외가 나야 하는데 나지 않았다");
     }
 }

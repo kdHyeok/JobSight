@@ -15,6 +15,7 @@ import com.jobsight.company.resume.ResumeSection;
 import com.jobsight.company.resume.ResumeService;
 import com.jobsight.company.resume.dto.ResumeResponse;
 import com.jobsight.company.resume.dto.ResumeRowRequest;
+import com.jobsight.company.resume.dto.ResumeRowResult;
 import com.jobsight.company.user.AppUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -51,31 +52,40 @@ public class McpActions {
     }
 
     @Operation(summary = "이력서 기본정보 변경",
-            description = "basic 블록(성명·연락처·주소·링크)만 교체한다. 다른 섹션은 그대로다.")
-    public ResumeResponse updateResumeBasic(@PathVariable UUID id, @Valid @RequestBody ResumeContent.BasicInfo request) {
-        return resumes.updateBasic(id, request);
+            description = "basic 블록(성명·연락처·주소·링크)만 교체한다. 다른 섹션은 그대로다. "
+                    + "expectedVersion 은 선택이다(보내면 다를 때 RESUME_STALE).")
+    public ResumeResponse updateResumeBasic(@PathVariable UUID id, @Valid @RequestBody ResumeContent.BasicInfo request,
+                                            @RequestParam(required = false) Long expectedVersion) {
+        return resumes.updateBasic(id, request, expectedVersion);
     }
 
     @Operation(summary = "이력서 섹션에 행 추가",
             description = "section 은 educations/trainings/activities/experiences/awards/certificates/skills/projects. "
-                    + "request 에는 그 섹션의 필드만 넣는다(다른 섹션 필드는 UNKNOWN_ROW_FIELD). 맨 뒤에 붙는다.")
-    public ResumeResponse addResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
-                                       @Valid @RequestBody ResumeRowRequest request) {
-        return resumes.addRow(id, section, request);
+                    + "request 에는 그 섹션의 필드만 넣는다(다른 섹션 필드는 UNKNOWN_ROW_FIELD). 맨 뒤에 붙는다. "
+                    + "expectedVersion 은 선택이다. 응답은 {id, version, section, count, index, row} 개요이고, "
+                    + "version 을 다음 행 도구의 expectedVersion 으로 쓴다.")
+    public ResumeRowResult addResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
+                                        @Valid @RequestBody ResumeRowRequest request,
+                                        @RequestParam(required = false) Long expectedVersion) {
+        return resumes.addRow(id, section, request, expectedVersion);
     }
 
-    @Operation(summary = "이력서 섹션 행 교체",
-            description = "index 는 0부터. 그 행 전체를 request 로 바꾼다 — 먼저 resume_get 으로 읽고 유지할 필드를 함께 보낸다.")
-    public ResumeResponse updateResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
-                                          @PathVariable int index, @Valid @RequestBody ResumeRowRequest request) {
-        return resumes.updateRow(id, section, index, request);
+    @Operation(summary = "이력서 섹션 행 수정",
+            description = "index 는 0부터. 보낸 필드만 덮고 빠진 필드는 유지한다(\"\" 는 그 필드를 비움). "
+                    + "expectedVersion 필수: resume_get 이나 직전 행 도구 응답의 version. 다르면 RESUME_STALE — "
+                    + "같은 index 로 재시도하지 말고 이력서를 다시 읽어 고칠 행을 제목·기간으로 다시 찾는다.")
+    public ResumeRowResult updateResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
+                                           @PathVariable int index, @Valid @RequestBody ResumeRowRequest request,
+                                           @RequestParam Long expectedVersion) {
+        return resumes.updateRow(id, section, index, request, expectedVersion);
     }
 
     @Operation(summary = "이력서 섹션 행 삭제",
-            description = "index 는 0부터. 뒤 행이 앞으로 당겨지므로 여러 행을 지울 때는 큰 index 부터.")
-    public ResumeResponse deleteResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
-                                          @PathVariable int index) {
-        return resumes.deleteRow(id, section, index);
+            description = "index 는 0부터. 뒤 행이 앞으로 당겨진다. expectedVersion 필수이고, 응답의 version 을 "
+                    + "다음 호출에 쓴다. 다르면 RESUME_STALE — 같은 index 로 재시도하지 말고 다시 읽는다.")
+    public ResumeRowResult deleteResumeRow(@PathVariable UUID id, @PathVariable ResumeSection section,
+                                           @PathVariable int index, @RequestParam Long expectedVersion) {
+        return resumes.deleteRow(id, section, index, expectedVersion);
     }
 
     @Operation(summary = "기업 뉴스·유튜브 상세 조회")

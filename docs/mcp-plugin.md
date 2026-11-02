@@ -169,6 +169,7 @@ MCP용 `position_create`는 기존 `PositionService` 트랜잭션에서 공고 �
 MCP 는 문서 전체를 되돌려 보내기 어려워 서버가 조회→한 군데 수정→저장을 한 트랜잭션으로 묶는다(`ResumeService.mutateRows`).
 행 입력 `ResumeRowRequest` 는 8개 섹션 필드의 합집합 record 다 — 스키마 생성기가 Map 을 그리지 못하고 섹션별 도구는 24개가 되기 때문.
 서버가 `section` enum 의 record 로 엄격 변환해 다른 섹션 필드는 `UNKNOWN_ROW_FIELD` 로 거부한다. `index` 는 0부터.
+이력서 쓰기는 행을 잠그고 `version` 을 확인한다. `resume_update`·`resume_row_update`·`resume_row_delete` 는 `expectedVersion` 필수(`@RequestParam`), 추가·기본정보는 선택이다. 행 도구 응답은 이력서 전체가 아니라 `ResumeRowResult{id, version, section, count, index, row}` 다. `resume_update` 와 `resume_row_update` 는 null=유지라 `McpTools` 가 다른 update 도구에 붙이는 "전체 교체" 문구를 이력서에는 붙이지 않는다. 업무 오류 `VERSION_REQUIRED`·`RESUME_STALE`·`RESUME_BUSY` 와 `@Version` 충돌 `STALE_WRITE` 는 REST 와 MCP 가 같은 코드다 — docs/resumes.md 불변 조건 8~10.
 
 인증 테스트는 외부 Google 자격증명 없이 인증된 세션을 주입하고 실제 Spring OAuth 필터의 코드 발급/교환을 검증한다.
 실제 Google 왕복 및 ChatGPT 서비스 연결과 같다고 간주하지 않는다.

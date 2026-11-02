@@ -2,6 +2,7 @@ package com.jobsight.company.common;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -51,6 +52,17 @@ public class GlobalExceptionHandler {
     ResponseEntity<ApiError> handleNotFound(ResourceNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiError.of(
                 HttpStatus.NOT_FOUND.value(), "COMPANY_NOT_FOUND", exception.getMessage()
+        ));
+    }
+
+    /**
+     * @Version 충돌. 서비스가 잠금과 expectedVersion 으로 먼저 막으므로 보통은 오지 않지만,
+     * 오면 500 이 아니라 409 다 — 다시 읽고 고치면 되는 상황이기 때문이다(docs/resumes.md 불변 조건 8).
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> handleStaleWrite(OptimisticLockingFailureException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(
+                HttpStatus.CONFLICT.value(), "STALE_WRITE", "다른 곳에서 먼저 저장했습니다. 다시 읽고 고칠 대상을 확인한 뒤 보내세요."
         ));
     }
 

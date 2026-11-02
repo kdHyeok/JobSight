@@ -51,7 +51,9 @@ public class ResumeController {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.create(request));
     }
 
-    @Operation(summary = "이력서 저장", description = "이름과 content 를 통째로 교체한다. 행 단위 API 는 없다.")
+    @Operation(summary = "이력서 저장", description = "이름은 필수. content·positionIds·content 안의 빠진 섹션과 basic 은 "
+            + "null 이면 유지, [] 면 비움. expectedVersion 필수(조회한 version). 다르면 409 RESUME_STALE — 다시 읽고 고칠 대상을 확인한다. "
+            + "섹션 일부만 고칠 때는 MCP 행 도구(resume_row_*)가 안전하다.")
     @PutMapping("/{id}")
     public ResumeResponse update(@PathVariable UUID id, @Valid @RequestBody ResumeRequest request) {
         return service.update(id, request);
