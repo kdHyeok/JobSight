@@ -35,6 +35,7 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx + 임베딩 �
 | 관리자 콘솔·계정별 등록 수 | [docs/admin.md](docs/admin.md) |
 | 관리자 요청·피드백 | [docs/requests.md](docs/requests.md) |
 | MCP·OAuth 위임·플러그인 | [docs/mcp-plugin.md](docs/mcp-plugin.md) |
+| MCP Events(웹훅 이벤트)·지원 관리 알람·`application_agenda` | [docs/mcp-events.md](docs/mcp-events.md) — 설계, 미구현 |
 | `job.donyk.link` 도메인·OAuth·플러그인 전환 | [계획](docs/01-plan/features/custom-domain-oauth.plan.md) · [설계](docs/02-design/features/custom-domain-oauth.design.md) |
 | 화면 배치·색·컴포넌트 | [docs/design-system.md](docs/design-system.md) |
 | `nginx.conf`, `compose*.yaml`, `.github/**`, 배포 | [docs/nginx-deploy.md](docs/nginx-deploy.md) |
