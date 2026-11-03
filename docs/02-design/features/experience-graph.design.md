@@ -227,14 +227,14 @@ CREATE INDEX position_references_reference_idx ON position_references (reference
 | 경험 소재집 | 같은 레코드의 `experiences.dossier` (JSONB) | 사실에서 만든 **작성 재료**: 상세 서술, 문항별 활용 포인트, 표현 예시, 주의사항. 어느 사실 개정에서 만들었는지(`dossier_based_on`) 남긴다(6.5) |
 | 경험 종류 | `experiences.kind` CHECK | PROJECT→`projects`, ACTIVITY→`activities`, CAREER→`experiences`(제목은 `company`), TRAINING→`trainings`, OTHER는 이력서에 렌더하지 않는다 |
 | 기업별 경험 문구 | 기존 `resumes.content` 의 행 + 행의 `experienceId`·`experienceRevision` | **표현**이다. 쓴 문구를 그대로 보존하고, 원본이 바뀌어도 다시 그리지 않는다(6.1) |
-| 사건 | **4c(보류, 6.10)**. `episodes` (STAR) | 4단계 최소판에는 없다. 자소서 연결과 검색의 단위는 경험이고, 상세 서술은 소재집에 둔다(6.5) |
-| 결과 여러 개 | **4c**. `episodes.outcomes TEXT[]` | 4단계에서는 `facts.results[]` 다 |
-| 역량·문항 유형 | `competencies` (시스템 고정 코드 18개) | 문항 유형(2단계)과 사건 태그(4c)가 같은 어휘를 쓴다 |
+| 사건 | **4c-1(6.10.1, 2026-11-03 개정)**. 별도 테이블이 아니라 `experiences.facts.episodes[]` + 행동·결과 항목의 `episodeId` | 한 경험 안의 장면(하둡 성능 개선, 장애 대응, 갈등 조율). 4c-1 전에는 자소서 연결과 검색의 단위가 경험이다 |
+| 결과 여러 개 | `facts.results[]` 항목. 4c-1 에서 항목마다 `episodeId` 로 사건에 묶는다 | 옛 4c 초안의 `episodes.outcomes TEXT[]` 는 폐기 |
+| 역량·문항 유형 | `competencies` (시스템 고정 코드 18개) | **문항 유형(질의 해석)에만** 쓴다. 사건 분류에는 쓰지 않는다 — 사건은 자유 태그 + 의미 검색(6.10.1 E4). 옛 4c 초안의 `episode_competencies` 는 폐기 |
 | 기술·도메인 키 | `experiences.skills TEXT[]`·`domains TEXT[]` (4단계) | 값은 `KeyNormalizer`(3단계 산출물)로 정규화한 키다. 계정별 `keywords`·`experience_keywords` 테이블은 4c |
 | 회사 도메인 | 기존 `company_industries` | |
 | 직무 요구 | 이미 있는 다섯 칸: 공고 `job_postings.qualifications`(지원자격), 직무 `responsibilities`(담당업무), `required_skills`(요구 역량), `preferred_skills`(우대 역량), `position_tech_stack`(기술 환경). 저장하지 않은 공고도 같은 다섯 칸으로 받는다(4.1) | 칸을 섞지 않는다. 기술 환경 목록을 필수 자격으로 계산하지 않는다. `positions.experience` 는 "취득 경험"(입사하면 얻는 것, `PositionDetail.vue:103`)이라 요구로 쓰지 않는다. `position_requirements` 테이블은 두지 않는다(2.6) |
 | "이 답변을 어디에 냈나" | `self_introduction_positions` (신규) | **직접 출처** |
-| "이 답변에 어떤 경험을 썼나" | `self_introduction_experiences` (4단계) | 작성 근거 `(경험 id, 개정 번호)` 쌍. 사건 단위 연결(`self_introduction_episodes`)은 4c |
+| "이 답변에 어떤 경험을 썼나" | `self_introduction_experiences` (4단계) | 작성 근거 `(경험 id, 개정 번호)` 쌍. 4c-1 에서 같은 표에 사건 열(`episode_id`)을 더해 `(경험, 개정, 사건)` 으로 넓힌다(6.10.1 E6). 옛 초안의 `self_introduction_episodes` 는 폐기 |
 | 문항 유형 | `self_introduction_competencies` (신규) | 저장하지 않은 문항은 질의 때 정규식으로 추정한다 |
 | 제출 기록 | `submissions` (신규, 제출·작성 기준 트랙) | 공고별로 무엇을 냈는지. 확인 수준을 함께 남긴다(6.6) |
 | 개인 작성 기준 | `writing_guides` (계정당 하나) + 경험별 `dossier.cautions` | 선호 문체, 피할 표현, 성과 설명 범위(6.7) |
@@ -255,7 +255,8 @@ experiences (PROJECT|ACTIVITY|CAREER|TRAINING|OTHER, 사실·소재집·skills[]
  ├─1:N─ experience_revisions (쌓기만, seq 로 순서 비교)
  └─N:M─ resumes                                             resume_experiences ← JSON 행 experienceId·experienceRevision 에서 파생
 
-(4c 보류, 6.10) episodes(STAR) ─N:M─ competencies · keywords + experience_keywords · self_introduction_episodes · merged_into
+(4c-1, 6.10.1) experiences.facts.episodes[] (사건 = 경험 안의 장면, 자유 태그)  ← self_introduction_experiences.episode_id · experience_chunks.episode_id
+(4c 보류, 6.10) keywords + experience_keywords · merged_into
 
 (기존) resumes ─N:M─ positions ─N:1─ job_postings ─N:1─ companies ─1:N─ company_industries
 submissions (공고별 제출 기록, 확인 수준) · writing_guides (계정당 작성 기준 하나)        ← 제출·작성 기준 트랙
@@ -543,7 +544,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 | 작성 검토 이력 테이블 | 초기에는 작성 기준 문서 하나와 경험별 주의사항으로 충분하다 | 검토 결과를 질의해야 할 때 |
 | 첨부 바이너리의 MCP 전달, 첨부 형식 확대 | 근거는 텍스트 발췌로 서버에 둔다. 첨부는 메타와 웹 주소만 MCP로 준다(6.5) | 발췌로 부족한 사례가 나올 때 |
 | 사건(STAR)·병합 계보·키워드 테이블·`ROW` 복사·"원본 반영 검토" | 4단계 최소판에서 뺐다(사용자 결정, 10.7 R45). 6.10 에 설계와 다시 열 때의 조건을 둔다 | 4c: 필요가 확인될 때 |
-| 사건 단위 기술 태그 | 사건(4c)은 경험의 기술 태그를 물려받는다. 물려받은 일치는 `why` 에 `via: PARENT_EXPERIENCE` 로 표시한다(4.2) | 4c 뒤 필요가 보일 때 |
+| 사건 단위 기술 태그 | **4c-1 에서 정함**: 사건은 자유 태그(`episodes[].tags`)를 든다. 사건 태그에 없고 경험 `skills` 에만 있는 일치는 `via: PARENT_EXPERIENCE` (6.10.1 검색) | 4c-1c |
 | 고아 첨부 자동 정리 작업 | 1.4 T7. 사용자가 지우는 길은 6.9 에 둔다 | 용량이 문제가 될 때 |
 | `job_postings.target_position_id` 정리 | 쓰지도 지우지도 않는다(D9) | — |
 
@@ -556,7 +557,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 | 이력서 행 → 경험 | "경험에서 불러오기", "경험으로 등록", "다른 경험에 연결" | `resume_add_experiences`, 행 도구의 `experienceId` | 저장할 때 링커가 연결한다. (kind, title_key)가 정확히 1건 일치하고 시작 연월 숫자가 충돌하지 않을 때만 연결한다(6.2). 파생 관계라 출처가 없다. 같은 경험이 둘로 등록됐으면 병합(4c) 대신 행을 남길 경험에 다시 연결하고 쓰지 않는 경험을 지운다(6.4) |
 | 경험 → 기술 | 자동완성 칩 | `experience_save(skills)` | 웹 "경험 가져오기"를 하면 이력서 `techStack` 원문을 `, / · \|` 기준으로 나눈다. 값은 `experiences.skills` 에 정규화 키로 둔다. 키별 출처(USER/AI)는 두지 않고 경험의 검토 상태(`reviewed_revision`)를 따른다. 키별 출처는 4c `experience_keywords` |
 | 경험 → 도메인 | 칩(선택) | `experience_save(domains)` | **파생**: 경험이 실린 이력서 → 직무 → 회사 업종, 경력 행의 회사가 기업 탭에 있으면 그 회사 업종. trust "추정" |
-| 사건 → 역량 (4c) | 칩 | 4c `experience_save(episodes[].competencies)` | 5단계 이후: 사건 임베딩과 역량 설명 문장의 최근접 상위 2개를 화면에 "추천"으로만 보여 준다 |
+| ~~사건 → 역량 (4c)~~ 사건 → 자유 태그 (4c-1) | 칩(자유 입력) | `experience_save(episodes[].tags)` | 고정 역량 코드를 사건에 매기지 않는다(6.10.1 E4). 역량 코드는 문항 쪽 질의 확장에만 쓴다 |
 | 자소서 → 직무 (written_for) | 편집기에서 직무 선택. 출처가 없는 답변에는 "어느 지원용?" 후보 칩을 띄운다 | `self_intro_create/update(positionIds)` | 연결 이력서들의 직무 **전부**를 후보로 보여 준다. 개수 제한은 없고, 사용자가 클릭 한 번으로 고른다 |
 | 자소서 → 경험 (uses, 작성 근거) | "쓴 경험" 선택. 선택할 때의 경험 개정을 함께 저장한다 | `self_intro_create/update(experiences[{experienceId, experienceRevision}])` (6.8) | 5단계: 답변 조각과 경험 조각의 cosine 상위 후보. 사건 단위(`episodes`)는 4c |
 | 자소서 → 문항 유형 | 칩 | `questionTypes` | 정규식 상위 2개를 신뢰도와 함께 계산한다(4.1) |
@@ -599,7 +600,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 
 ### 4.2 후보와 신호
 
-**4단계 최소판에서 읽는 법** (10.7 R45): 사건은 4c 다. 4c 전의 후보는 경험(`type: EXPERIENCE`)과 미연결 행(`type: RESUME_ROW`) 둘이고 응답 형식은 같다. 아래의 사건 후보, `episodes[]` 묶음, `via: PARENT_EXPERIENCE`, 사건 태그를 쓰는 COMPETENCY 와 사건 벡터는 4c 가 열린 뒤에 켠다. PAST_USE·PAST_QUESTION 은 사건 대신 `self_introduction_experiences` 의 경험을 쓴다.
+**4단계 최소판에서 읽는 법** (10.7 R45): 사건은 4c 다. 4c 전의 후보는 경험(`type: EXPERIENCE`)과 미연결 행(`type: RESUME_ROW`) 둘이고 응답 형식은 같다. 아래의 사건 후보, `episodes[]` 묶음, `via: PARENT_EXPERIENCE`, 사건 벡터는 4c-1c 에서 켠다(6.10.1 검색이 정본). 사건 태그를 쓰는 COMPETENCY 신호는 폐기했다 — 사건에 역량 코드를 매기지 않는다(6.10.1 E4). PAST_USE·PAST_QUESTION 은 사건 대신 `self_introduction_experiences` 의 경험을 쓴다.
 
 **후보 단위**
 - **사건과 경험을 모두 후보로 둔다** (10.2 R4). 사건이 있는 경험도 경험 자체가 후보다(`type: EXPERIENCE`). Planetory에 '전처리 최적화' 사건만 있고 'HDFS 구축'은 경험 설명에만 있으면, HDFS 질의는 경험 후보로 돌아온다.
@@ -1118,11 +1119,129 @@ JobSight가 개인 취업 컨텍스트의 중앙 관리 지점이다(10.4 R23). 
 
 | 미룬 것 | 4단계 최소판의 대신 | 다시 열 신호 |
 |---|---|---|
-| 사건(STAR) `episodes`, `episode_competencies`, `self_introduction_episodes`, `EPISODE_*` 오류 코드 | 자소서 작성 근거는 `self_introduction_experiences` 의 `(경험 id, 개정)` 쌍. 상세 서술은 `dossier` | 골드셋에서 경험 단위 후보가 너무 굵어 문항 맞춤이 떨어지는 사례 |
+| ~~사건(STAR) `episodes`, `episode_competencies`, `self_introduction_episodes`~~ → **6.10.1 로 개정해 연다(2026-11-03 사용자 결정)** | 4c-1 전: 자소서 작성 근거는 `self_introduction_experiences` 의 `(경험 id, 개정)` 쌍. 상세 서술은 `dossier` | 신호 확인됨: 한 프로젝트에 직무별로 써야 할 사건이 여럿인데 경험 단위 후보로는 고를 수 없다(6.10.1 목적) |
 | 병합 계보 `merged_into`, 병합 절차(옛 6.3-3), 병합 경로 정정 검사(옛 6.8), `MERGE_CONFLICT`·`MERGE_CYCLE` | 행을 다른 경험에 다시 연결 + 쓰지 않는 경험 삭제(6.3-3, 6.4) | 중복 경험이 잦고, 지우면 자소서 작성 근거를 잃는 경우가 실제로 생길 때 |
 | `keywords`·`experience_keywords` | `experiences.skills`·`domains TEXT[]` (`KeyNormalizer`). 키별 출처 대신 경험의 검토 상태 | 계정별 별칭 편집이나 키별 출처가 필요할 때 |
 | `resume_add_experiences` 의 `ROW` 복사 | `FACTS` 만 | 기업용 문구를 다시 쓰자는 요구가 확인될 때 |
 | "원본 반영 검토" 휴리스틱 | 표시 없음. "재검토 필요"(정정)만 | 웹에서 이력서만 고쳐 원본이 낡는 사례가 확인될 때 |
+
+#### 6.10.1 4c-1 사건 — 개정 설계 (2026-11-03)
+
+> 이 절이 사건의 정본이다. 아래 "DDL 스케치"의 `episodes`·`episode_competencies`·`self_introduction_episodes`, "병합 경로의 정정과 사건 단위 작성 근거 계약"의 사건 단위 REST/MCP 계약, "그 밖에 미룬 동작"의 `experience_save` 사건 필드는 **폐기**다. 병합 계보·키워드 테이블은 그대로 보류다. 되돌린 이유는 `docs/decisions.md` 「사건은 경험 사실 안에, 분류는 자유 태그로」.
+
+**목적.** 한 경험(프로젝트 A) 안에 성격이 다른 장면이 여럿 있다 — 하둡 성능 개선, 서버 장애 대응, 팀원 갈등 조율. 이력서에는 두 직무(서버 관리, 하둡) 모두 A 를 적어도, 자소서는 문항마다 다른 장면을 써야 한다.
+
+- 직무 적합 문항: 하둡 직무 → 성능 개선 장면, 서버 관리 직무 → 장애 대응 장면.
+- 협업 문항: 직무와 무관하게 갈등 조율 장면.
+
+지금(4단계·5단계)은 후보와 작성 근거의 단위가 경험이라 "A 가 맞다"까지만 알 수 있다. 장면 고르기는 AI 가 사실 목록을 매번 다시 읽어야 하고, 저장 구조로 남지 않는다.
+
+**결정**
+
+| # | 결정 | 이유 | 버린 대안 |
+|---|---|---|---|
+| E1 | **사건은 `facts.episodes[]` 에 둔다.** 별도 테이블을 두지 않는다 | 사건도 사실이다. 개정 판정(항목 id 짝짓기·CORRECT)·개정 스냅샷·`expectedVersion`·OwnerLock 을 그대로 쓴다. 옛 초안은 `episodes` 행의 `version` 과 `experience_revisions.episodes` 스냅샷을 이중으로 들었다 | `episodes` 테이블(옛 초안) — 개정이 두 갈래가 된다 |
+| E2 | **사건의 행동·결과는 기존 항목에 `episodeId` 를 달아 묶는다.** 사건 자체는 `{id, title, context, tags[]}` 만 든다 | 같은 문장을 두 번 저장하지 않는다. S/T 는 `context`, A/R 은 항목이다. STAR 칸을 강제하지 않는다 — 짧은 장면도 제목과 항목 하나면 된다 | STAR 4칸 필수(옛 초안) — 형식이 다른 장면을 칸에 억지로 맞춘다 |
+| E3 | `episodeId` 가 없는 항목은 **경험 공통**이다 | 가져오기·구 데이터·AI 미분류가 그대로 유효하다. 사건이 0개인 경험도 정상이다 | 모든 항목에 사건 필수 — 가져온 경험이 전부 저장 거절된다 |
+| E4 | **사건 분류는 자유 태그(`tags[]`)와 의미 검색으로 한다.** 시스템 고정 코드(`competencies`)를 사건에 붙이지 않는다. `competencies` 는 문항이 무엇을 묻는지 해석하는 데만 쓴다 | 고정 어휘에 없는 장면(예: 데이터 이관 협상, 규제 대응)도 정리되어야 한다. 문항 쪽은 고정 어휘가 쓸모 있다(정규식 추정·검색 모드) | `episode_competencies`(옛 초안) — 예상 못 한 장면이 맞지 않는 칸에 들어가거나 빠진다 |
+| E5 | **"비슷한 사건" 간선은 저장하지 않는다.** 저장하는 관계는 사실에서 나오는 셋뿐: 사건 → 경험(소속, JSON 안), 사건 → 태그(JSON 안), 자소서 → 사건(E6). 비슷함은 질의 때 벡터로 계산한다 | 저장한 유사 간선은 사실이 바뀔 때마다 낡는다. 계정당 사건 수백 개 규모라 질의 때 계산해도 수십 ms 다(5단계 D11 실측) | 유사 간선 테이블·그래프 DB(첫 구상, D3·D6 에서 이미 폐기) |
+| E6 | **자소서 작성 근거를 `(경험, 개정, 사건)` 으로 넓힌다.** `self_introduction_experiences` 에 `episode_id` 열을 더한다(빈 문자열 = 경험 전체) | 같은 경험의 두 사건을 한 답변에 쓸 수 있어야 하고, 기존 근거(경험 전체)는 그대로 유효해야 한다 | `self_introduction_episodes` 별도 표(옛 초안) — 근거가 두 표로 갈라져 재검토 판정을 두 번 한다 |
+| E7 | **"재검토 필요"를 사건 범위로 좁힌다.** 개정 이력에 그 CORRECT 가 건드린 사건 id 집합을 남긴다 | 하둡 사건만 정정했는데 갈등 사건으로 쓴 자소서까지 재검토가 뜨면 표시가 의미를 잃는다 | 경험 단위 재검토 유지 — 사건이 늘수록 거짓 경보가 는다 |
+
+**데이터 모양** (예시는 합성 값)
+
+```jsonc
+// experiences.facts (4c-1)
+{
+  "period": "2024.03~2024.12", "role": "백엔드",
+  "episodes": [
+    { "id": "ep1", "title": "하둡 배치 성능 개선", "context": "야간 집계가 6시간 걸려 아침 리포트가 늦었다",
+      "tags": ["하둡", "배치 튜닝", "성능 개선"] },
+    { "id": "ep2", "title": "서버 디스크 장애 대응", "context": null, "tags": ["장애 대응", "리눅스"] },
+    { "id": "ep3", "title": "API 설계 이견 조율", "context": "프런트와 응답 형식을 두고 일주일 대립",
+      "tags": ["협업", "의견 조율"] }
+  ],
+  "actions": [
+    { "id": "a1", "text": "파티션 키를 날짜+지역으로 바꿨다", "episodeId": "ep1", "evidenceIds": [] },
+    { "id": "a2", "text": "디스크 사용량 경보를 붙였다",       "episodeId": "ep2", "evidenceIds": [] },
+    { "id": "a3", "text": "두 안의 비용을 표로 비교해 공유했다", "episodeId": "ep3", "evidenceIds": [] },
+    { "id": "a4", "text": "주간 코드 리뷰를 운영했다",          "evidenceIds": [] }   // 경험 공통
+  ],
+  "results": [ { "id": "r1", "text": "집계 6시간 → 1시간 40분", "episodeId": "ep1", "evidenceIds": [] } ]
+}
+```
+
+- 사건 id 는 항목 id 와 같은 할당기(`ExperienceBankService` 의 `unique`, 접두 `ep`)를 쓰고, 경험 안에서 유일하다. 명시 id 를 먼저 비켜서 붙이는 규칙도 같다.
+- 상한: 사건 30개, `title` 200자, `context` 2000자(사실 항목과 같음), 태그 사건당 10개·각 50자. 넘으면 400 `EPISODE_LIMIT`.
+- 항목의 `episodeId` 가 그 경험의 사건이 아니면 400 `EPISODE_NOT_FOUND`. 사건을 지우면(목록에서 빠지면) 그 사건을 가리키던 항목은 거절이 아니라 **경험 공통으로 돌린다**(`episodeId` 제거). 응답 `warnings` 에 `EPISODE_ITEMS_DETACHED` 를 싣는다.
+- 태그는 **사용자·AI 가 쓴 원문만** 저장한다(`"배치 튜닝"`). 비교용 키는 질의 때 `KeyNormalizer` 로 계산한다. `skills` 가 키만 저장해 토큰 경계를 잃은 함정(docs/experience-graph-search.md 「함정」)을 되풀이하지 않는다. 같은 사건 안의 태그는 키가 같으면 하나로 합친다.
+
+**개정 판정** (지금 규칙의 연장 — `ExperienceBankService.changeKind`)
+
+| 바뀐 것 | 종류 | 재검토 범위(E7) |
+|---|---|---|
+| 새 사건, 새 항목(사건 소속 포함) | ADD | 없음 |
+| 기존 사건의 `title`·`context` 수정·삭제 | CORRECT | 그 사건 |
+| 사건에 속한 항목의 `text` 수정·삭제 | CORRECT | 그 항목의 (수정 전) 사건 |
+| 경험 공통 항목·`period`·`role`·`measurement` 수정 | CORRECT | 경험 전체 |
+| 항목의 `episodeId` 만 바뀜(소속 이동) | ADD | 없음 — 주장 문장은 그대로다 |
+| 사건 `tags` 만 바뀜 | 개정 없음(NONE) | — 검색 메타데이터라 사실 해시에서 뺀다. 임베딩은 다시 계산한다 |
+
+- `experience_revisions` 에 `corrected_episodes TEXT[] NULL` 을 더한다. CORRECT 가 경험 전체에 닿으면 `NULL`(= 전체), 사건에만 닿으면 그 사건 id 들. ADD·INIT 은 `'{}'`.
+- 재검토 판정: 근거의 기준 `seq` 보다 큰 CORRECT 중 `corrected_episodes IS NULL OR episode_id = ANY(corrected_episodes)` 가 있으면 "재검토 필요". 이력서 행(사건 없음)과 사건 없는 자소서 근거는 지금처럼 모든 CORRECT 를 본다.
+
+**자소서 작성 근거** (E6)
+
+```sql
+-- V{n}__experience_episodes.sql (4c-1)
+ALTER TABLE experience_revisions ADD COLUMN corrected_episodes TEXT[];        -- NULL = 경험 전체, '{}' = 정정 없음
+ALTER TABLE self_introduction_experiences ADD COLUMN episode_id VARCHAR(40) NOT NULL DEFAULT '';  -- '' = 경험 전체
+ALTER TABLE self_introduction_experiences DROP CONSTRAINT self_introduction_experiences_pkey;
+ALTER TABLE self_introduction_experiences ADD PRIMARY KEY (self_introduction_id, experience_id, episode_id);
+ALTER TABLE experience_chunks ADD COLUMN episode_id VARCHAR(40);             -- NULL = 경험 공통 조각
+```
+
+- REST/MCP: `experiences[{experienceId, experienceRevision, episodeId?}]`. `episodeId` 는 그 **개정 스냅샷**(`experience_revisions.facts`)에 있어야 한다 — 없으면 404 `EPISODE_NOT_FOUND`. 지금 개정에서 사건이 지워졌어도 과거 근거는 유효하다(개정 스냅샷이 증거).
+- 기존 행은 `episode_id = ''` 로 그대로다. 같은 경험을 경험 전체와 사건으로 함께 근거로 둘 수 있다(서로 다른 행).
+- 사건 이름은 근거에 복사하지 않는다. 조회 때 그 개정 스냅샷에서 읽는다.
+
+**검색** (5단계 위에 더한다)
+
+- **조각**: 사건마다 "경험 제목 + 사건 제목 + context + 소속 항목 + 태그" 를 한 조각으로 만든다(`experience_chunks.episode_id`). 800자를 넘으면 지금 `EmbeddingTexts` 규칙으로 나누고 모든 조각이 같은 `episode_id` 를 든다. 경험 공통 조각은 지금 그대로(`episode_id` NULL).
+- **후보**: 응답의 경험 후보는 그대로 두고 그 안에 `episodes[{episodeId, title, rank, why}]` 를 더한다. 경험 점수는 지금처럼 경험 조각의 max-sim, 사건 순위는 그 사건 조각들의 max-sim 과 BM25(사건 텍스트)의 RRF. `why` 에 `episodeId` 와 `sourceField` 를 싣는다. 응답 모양을 깨지 않는다(4단계 불변 조건 4).
+- **태그 일치**: 직무 요구 키와 사건 태그 키(질의 때 `KeyNormalizer`)가 맞으면 REQUIREMENT 신호. 사건 태그에 없고 경험 `skills` 에만 있으면 `via: PARENT_EXPERIENCE` 로 표시한다(옛 4.2 규칙 유지).
+- **그래프 확장(1홉)**: 상위 사건과 태그 키를 공유하는 다른 경험의 사건을 `related[]` 로 덧붙인다(점수에 넣지 않는다). 두 홉 이상은 하지 않는다.
+- **이미 쓴 사건 표시**: 같은 공고(`self_introduction_positions` → 공고)에 연결된 다른 자소서가 근거로 쓴 사건은 `usedInSameApplication: true` 로 표시한다. 걸러 내지는 않는다 — 고르는 것은 사용자다.
+- 문항 유형(`competencies`)은 질의 확장에만 쓴다: 협업 문항이면 질의에 그 역량의 설명 문장을 붙여 임베딩한다. 사건에 코드를 매기지 않는다.
+
+**사건을 나누는 흐름** — 저장 구조보다 이것이 없을 때 실패한다
+
+1. 가져오기(이력서 행 → 경험)는 사건을 만들지 않는다. 모든 항목이 경험 공통이다.
+2. MCP `experience_save(episodes[], actions[].episodeId …)`: AI 가 경험 공통 항목을 사건으로 나눈다. 저장은 지금처럼 'AI 기록'(`reviewed:false`)이고, 사용자가 웹에서 검토 확정한다.
+3. 웹 원본 편집: 사건 추가·이름 고치기·태그, 항목마다 소속 사건 고르기(드롭다운). 사건 순서는 배열 순서.
+4. 점검 표시: `experience_index` 에 "사건 없는 경험"(항목 3개 이상인데 사건 0개) 수를 싣는다. 자동으로 나누지 않는다.
+
+**측정 (구현 전에 먼저)**
+
+- 골드셋: 실제 경험 3~5개, 사건 10~20개, 문항 × 직무 질의 20개 이상, 질의마다 정답 사건. 위 목적의 세 문항(하둡 직무 적합, 서버 직무 적합, 협업)을 반드시 넣는다.
+- 판정: 정답 사건이 경험 후보 안 `episodes` 상위 2위 안에 드는 비율. 경험 단위(지금)와 사건 단위를 같은 골드셋으로 비교한다.
+- 관련도 하한 `0.45` 는 경험 조각으로 잰 값이다. 사건 조각(짧다)으로 다시 재고, 바뀌면 `searchConfig` 를 올린다.
+
+**단계** (각 단계가 끝날 때 smoke PASS·문서 갱신)
+
+| 단계 | 내용 | 끝 조건 |
+|---|---|---|
+| 4c-1a | 골드셋 | 질의·정답 사건 표가 `backend/src/test/resources` 에 있다 |
+| 4c-1b | 저장: `facts.episodes[]`·`episodeId`·상한·개정 판정·`corrected_episodes`·MCP `experience_save`·웹 원본 편집 | 개정 판정 표의 모든 줄이 테스트로 있다 |
+| 4c-1c | 검색: 사건 조각·`episodes[]` 후보·태그 일치·1홉 `related`·이미 쓴 사건 | 골드셋에서 사건 단위가 경험 단위보다 나쁘지 않다 |
+| 4c-1d | 근거: `episode_id` 열·사건 범위 재검토·자소서 "쓴 경험"에 사건 고르기 | 하둡 사건 정정이 갈등 사건 근거에 재검토를 띄우지 않는다 |
+
+**4c-1 회귀 사례**: 사건 없는 경험(가져온 그대로) 저장·검색이 지금과 같은지. 사건을 지우면 항목이 경험 공통으로 돌아가고 개정이 CORRECT 인지. 태그만 바꾸면 개정이 오르지 않고 임베딩만 다시 도는지. 소속 이동만은 ADD. 지금 개정에서 지운 사건을 과거 개정 근거로 저장·조회할 수 있는지. 경험 공통 정정은 사건 근거 모두에 재검토를, 사건 정정은 그 사건 근거에만 재검토를 띄우는지. 같은 경험의 경험 전체 근거와 사건 근거가 함께 저장되는지. 남의 경험의 사건 id 는 404.
+
+**열린 질문 (구현 전에 정할 것)**
+
+- 사건에서 항목이 빠지는 이동(ep1 → 공통)을 ep1 기준 CORRECT 로 볼까? 지금 안은 ADD(주장 문장 불변). 그 사건으로 쓴 답변의 근거가 약해지는 경우가 실제로 생기면 다시 본다.
+- 소재집 `questionUses[].competency`(고정 코드)를 선택값으로 낮추고 `episodeId`·자유 문장 `angle` 을 더할지. E4 와 같은 문제지만 소재집은 AI 작성 재료라 4c-1 범위에서 뺐다.
 
 **병합을 넣을 때 지킬 조건** (리뷰 P1, 10.7 R37). 병합된 source 가 링커·검색·스위퍼에 새면 같은 제목 키가 2건이 되어, 링커의 "정확히 1건" 조건(6.2-5)이 영구히 실패하고 그 행은 계속 미연결로 남는다.
 - `experiences_owner_key_idx`·`experiences_embedding_dirty_idx` 를 `WHERE merged_into IS NULL` 부분 인덱스로 바꾼다.
@@ -1135,6 +1254,8 @@ JobSight가 개인 취업 컨텍스트의 중앙 관리 지점이다(10.4 R23). 
 - "재검토 필요"는 아래 병합 경로 전체에서 `seq` 로 비교한다.
 
 **DDL 스케치** (옛 4단계 DDL. 4단계 최소판 위에 더하는 모양으로 고쳤다)
+
+> 2026-11-03: 아래의 `episodes`·`episode_competencies`·`self_introduction_episodes`, `experience_revisions.episodes` 는 **폐기**(6.10.1). 사건이 경험 사실 안으로 들어가 병합 때 사건을 옮기는 단계(병합 절차 1)도 사실 합치기(4)에 흡수된다. 유효한 것은 `merged_into`·`keywords`·`experience_keywords` 뿐이다.
 
 ```sql
 -- V{n}__experience_episodes_merge.sql  (4c, 보류)
@@ -1442,7 +1563,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 1. ~~AI가 관계를 확정하게 할지~~ → **닫음**: 확정은 웹에서만 한다. MCP 쓰기는 "AI 기록"이다.
 2. ~~이력서 버전마다 경험 문구를 다르게 쓰는지~~ → **닫음**: 경험 원본이 정본이고 기업별 문구는 이력서 행에 보존한다(6.1, 10.4).
 3. ~~어느 이력서 버전을 실제로 제출했는지 기록이 필요한지~~ → **닫음**: 제출 기록을 확인 수준과 함께 남긴다(6.6).
-4. 사건 단위 기술 태그가 필요한지. 사건 자체가 4c 라 4c 를 열 때 함께 정한다.
+4. ~~사건 단위 기술 태그가 필요한지.~~ 정함(2026-11-03): 사건은 자유 태그를 든다(6.10.1 E4).
 5. 서버 로그나 MCP 대화 기록을 볼 수 있는지. "프로젝트 누락"의 원인을 가른다. MCP 호출 로그를 3단계 앞뒤에 넣는다(7절 운영 메모).
 6. 수작업 골드셋 10~20개를 언제 만들 수 있는지(0단계 선행 조건).
 7. GPU 오버라이드를 켤 시점. 5단계 CPU 리랭커 실측 뒤에 정한다.
