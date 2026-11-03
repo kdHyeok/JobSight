@@ -1,0 +1,17 @@
+# PR 게이트. 운영 머신과 무관하게 GitHub 호스티드 러너에서만 돈다.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml

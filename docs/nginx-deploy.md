@@ -46,12 +46,19 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 이 저장소 밖에 있다. 별도 compose 프로젝트다.
 
 ```
-브라우저 → https://job.donyk.link                (호스트 443, 192.168.0.211)
+브라우저 → https://job.donyk.link                Cloudflare 엣지 (DNS·TLS)
+        → cloudflared 컨테이너                    터널. 이 머신이 바깥으로 맺는다
         → reverse_proxy 컨테이너  nginx:1.28-alpine, listen 8443 ssl
            /home/quincy/HDD/apps/reverse-proxy/conf.d/41-job-donyk.conf
+           if ($request_from_tunnel = 0) return 403
         → jobsite-v006-frontend-1:80             jobsite-v006_app 네트워크, 컨테이너명 직결
         → backend:8080
 ```
+
+**호스트에 공개 인바운드 포트가 없다.** `ss -ltnp` 로 보면 443 은 `tailscale0` 에만,
+8088 은 `127.0.0.1` 에만 붙어 있다. `reverse_proxy` 컨테이너도 포트를 하나도 publish
+하지 않는다. 공개 트래픽은 `cloudflared` 가 바깥으로 맺어 둔 터널을 타고 역류해
+들어온다. 바깥에서 이 네트워크를 먼저 두드리는 경로가 없다.
 
 - TLS는 Let's Encrypt `donyk.link` 와일드카드 인증서로 덮는다. 구 도메인 인증서는 구 vhost와 ACME 갱신에 유지한다. 종단은 프록시가 하고 이 저장소는 평문 80만 다룬다.
 - 프록시가 `X-Forwarded-Proto https` 를 고정으로 넣는다. Spring 은 `forward-headers-strategy: framework` 로 이를 받아 secure 판정에 쓴다. `redirect_uri` 는 여기에 의존하지 않고 `PUBLIC_BASE_URL` 로 조립한다. 내부 nginx 가 이 값을 덮어쓰지 않아야 한다 — 덮어쓰면 authorize 진입점의 `Location` 이 평문으로 나간다.
@@ -62,9 +69,10 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 
 `SESSION_COOKIE_SECURE=true` 이므로 `http://127.0.0.1:8088` 로는 로그인할 수 없다(쿠키가 실리지 않는다). 8088 은 미인증 스모크·디버깅 경로다.
 
-## 배포 — 서버에서 직접 pull
+## 배포 — 서버가 origin/main 을 당겨간다
 
-CI/CD 파이프라인은 없다. 서버에 SSH 로 들어가 `git pull` 하고 다시 올린다.
+서버의 systemd timer 가 `origin/main` 을 보고 있다가 커밋이 올라가면 배포한다. 사람이 직접
+돌리는 경로(아래 「손으로 배포」)도 같은 `scripts/deploy.sh` 를 쓴다 — 두 경로가 갈라지지 않게.
 
 정식 저장소는 `https://github.com/kdHyeok/JobSight`다. 기존 clone은
 `git remote set-url origin https://github.com/kdHyeok/JobSight.git`으로 원격만 바꾼다.
@@ -100,14 +108,121 @@ code/state를 전달하지 않고 `/?authError=DOMAIN_CHANGED`로 보낸다. 구
 OAuth 프로토콜 경로는 400 `invalid_target`, 나머지 API·변경 요청은 410이다. metadata GET은 새 canonical JSON을 제공한다.
 Bearer·POST body·세션 쿠키를 새 도메인으로 프록시/리다이렉트하지 않는다. `/health`와 HTTP ACME 갱신은 유지한다.
 
-### 매 배포
+### 자동 배포 (pull 방식)
+
+```
+GitHub (공개)        이 머신
+─────────────        ─────────────────────────────────
+tests (호스티드)      systemd timer  1분마다
+                     └ scripts/watch-deploy.sh
+                        HEAD 가 origin/main 을 품고 있나?
+                        └ scripts/deploy.sh
+                           빌드 → up → 스모크 → 실패 시 롤백
+```
+
+**GitHub 에서 이 머신으로 들어오는 경로가 없다.** 이 머신이 GitHub 를 볼 뿐이다.
+배포를 위해 새로 연 인바운드도, 새 터널도, 셀프호스티드 러너도 없다(사이트를
+서비스하는 Cloudflare 터널은 그대로 쓰고 배포에는 관여시키지 않는다). 공개 저장소에 러너를 붙이지
+않기로 한 이유는 `docs/decisions.md` 에 있다 — 요약하면 포크 PR 이 워크플로 파일
+자체를 바꿔 보낼 수 있어서, 트리거를 하나라도 열어두면 이 호스트가 넘어간다.
+
+GitHub 쪽에 남는 것은 테스트뿐이다(`.github/workflows/ci.yml`, `tests.yml`,
+호스티드 러너). 배포 비밀값은 GitHub 에 올라가지 않는다 — 서버가 자기 디스크의
+`.env`·`.secrets/` 를 읽는다.
+
+`scripts/deploy.sh` 의 순서가 안전장치다.
+
+1. 작업 트리가 더러우면 중단한다. 배포 디렉터리에서 직접 고치지 않는다는 뜻이다.
+2. **빌드를 먼저 끝낸다.** 빌드가 깨져도 운영 컨테이너는 그대로다.
+3. `up` 하는 순간 공개 도메인이 바뀐다(위 「함정」).
+4. 스모크가 실패하면 직전 이미지로 되돌리고 종료코드 1 이다.
+
+**자동 롤백의 한계: Flyway 는 되돌리지 않는다.** 그래서 스크립트는 **마이그레이션이
+적용된 배포에서는 자동 롤백을 하지 않는다.** 되돌리면 옛 코드가 새 스키마를 만나
+`ddl-auto: validate` 에서 기동 자체가 실패하기 때문이다 — 되돌리는 쪽이 더 나쁘다.
+그 경우 상태와 선택지(덤프 복원 / 고쳐서 전진)를 찍고 종료코드 1 로 멈춘다.
+판정은 DB 의 `flyway_schema_history` 최대 버전과 저장소 `V*.sql` 최대 번호를 비교한다
+(git diff 로 보면 이미 pull 된 트리의 재배포를 놓친다). 스키마를 바꾸는 배포 전에는
+아래 덤프를 뜬다.
+
+**롤백 지점은 태그로 고정한다.** 기록하는 순간 `<project>-<svc>:rollback-<타임스탬프>`
+를 박는다. 이미지 ID 만 적어두면 빌드가 태그를 가져가고 컨테이너가 교체된 뒤 그
+이미지가 사라져 롤백이 `No such image` 로 죽는다 — 실제로 났다
+([트러블슈팅](troubleshooting/2026-11-03-deploy-rollback-no-such-image.md)).
+태그를 박으면 그 이미지는 회수되지 않으므로, 배포가 성공한 뒤 서비스별로 최근
+3개만 남기고 옛 `rollback-*` 태그를 지운다(`ROLLBACK_KEEP` 으로 바꾼다). embedder
+이미지는 한 장이 약 2GB 라 정리하지 않으면 디스크가 금방 찬다.
+
+**스모크는 실패하면 20초 뒤 한 번 더 본다.** 컨테이너 교체 직후에는 앞단 프록시의
+upstream 재해석이 안 끝나 연결 실패가 날 수 있다. 일시적 흔들림 하나로 운영을
+되돌리는 것이 더 위험하다.
+
+**배포가 실패한 뒤의 상태를 알아 둔다.** `deploy.sh` 는 빌드 전에 ff 머지를 하므로,
+실패해도 작업 트리는 새 커밋이다. **실행 이미지가 무엇인지는 경우에 따라 다르다** —
+되돌렸을 수도 있고, 마이그레이션이 적용된 배포라 되돌리지 않고 새 코드가 그대로 떠
+있을 수도 있다(위 「자동 롤백의 한계」). 워처 로그는 이것을 단정하지 않으니
+`deploy.sh` 쪽 로그에서 롤백 여부를 읽는다. 워처는 실패한 커밋을
+`.deploy-state.failed` 에 적고 **같은 커밋으로 재시도하지 않는다** — 1분마다 같은 실패를
+반복하지 않기 위해서다. 고친 뒤 그 파일을 지우거나, 다음 커밋이 올라오면 다시 돈다.
+
+이 검사는 「변화 없음」 검사보다 **먼저** 와야 한다. `deploy.sh` 가 빌드 전에 ff 머지를
+하므로 머지 뒤 실패하면 `HEAD == origin/main` 이 되고, 변화 없음을 먼저 보면 그 순간
+경보가 꺼져 "구 이미지가 도는데 아무도 모르는" 상태가 된다. 지금은 사람이 치울 때까지
+계속 종료코드 1 을 돌려 `systemctl --user status jobsight-deploy.service` 가 failed 로 남는다.
+
+**변화 판정은 동등 비교가 아니라 "HEAD 가 origin/main 을 품고 있는가"다.** 운영
+디렉터리가 기능 브랜치에 올라가 있거나 현장에서 커밋이 하나 얹히면 `HEAD != origin/main`
+이 영원히 참이 된다. 그런데 `deploy.sh` 의 `git merge --ff-only origin/main` 은 그 경우
+"Already up to date" 로 **성공**하므로, 동등 비교로는 깨어날 때마다 전체 재빌드를 되풀이한다.
+`git merge-base --is-ancestor` 로 물어 그 경우 한 줄만 남기고 넘어간다. 양쪽이 갈라진
+경우(ff 불가)는 그대로 배포를 시도하고 `deploy.sh` 가 ff 실패로 멈춘다.
+
+### 워처 설치 (1회)
+
+유닛은 `deploy/systemd/` 에 템플릿으로 있다. `@@JOBSITE_DIR@@` 를 운영 디렉터리로
+바꿔서 사용자 유닛으로 설치한다. root 가 필요 없고, `loginctl enable-linger` 가
+켜져 있으면 로그아웃·재부팅 뒤에도 돈다.
 
 ```bash
 cd ~/jobsite-v006
-git pull
-docker compose up -d --build   # 이 시점에 공개 도메인이 바뀐다
-bash scripts/smoke.sh          # PASS 여야 배포 완료
+mkdir -p ~/.config/systemd/user
+for u in jobsight-deploy.service jobsight-deploy.timer; do
+  sed "s|@@JOBSITE_DIR@@|$PWD|g" "deploy/systemd/$u" > ~/.config/systemd/user/$u
+done
+systemctl --user daemon-reload
+systemctl --user enable --now jobsight-deploy.timer
+loginctl enable-linger "$USER"      # 로그아웃해도 타이머가 살아 있게
 ```
+
+상태와 로그:
+
+```bash
+systemctl --user list-timers jobsight-deploy.timer
+systemctl --user status jobsight-deploy.service
+journalctl --user -u jobsight-deploy.service -n 100 --no-pager
+```
+
+주기를 바꾸려면 `~/.config/systemd/user/jobsight-deploy.timer` 의 `OnUnitActiveSec`
+을 고치고 `systemctl --user daemon-reload && systemctl --user restart jobsight-deploy.timer`.
+잠시 멈추려면 `systemctl --user stop jobsight-deploy.timer`.
+
+**주기가 1분인 이유.** 한 번 깨어나서 하는 일은 `git fetch` 와 `rev-parse` 두 번이
+전부다 — 변화가 없으면 네트워크로 수 KB 가 오간다. 이 비용으로 반영 지연을 5분에서
+1분으로 줄인다. 배포가 도는 동안에는 `OnUnitActiveSec` 이 유닛이 끝난 시점부터 다시
+세므로 중복으로 깨어나지 않고, 그래도 겹치면 `flock` 이 막는다.
+
+
+### 손으로 배포
+
+러너가 죽었거나 특정 커밋으로 올릴 때.
+
+```bash
+cd ~/jobsite-v006
+bash scripts/deploy.sh            # origin/main
+bash scripts/deploy.sh <ref>      # 특정 커밋 (앞으로만 간다 — ff-only)
+```
+
+되돌아가는 배포는 아래 「롤백」을 쓴다. `deploy.sh` 는 ff-only 라 과거로 가지 않는다.
 
 Windows 개발 환경에서는 `scripts/start.ps1`가 고정 Compose 프로젝트를 다른 worktree가 실행 중인지 먼저 확인한다. `-Takeover`는 컨테이너만 현재 작업공간 설정으로 재생성하고 DB 볼륨은 유지한다.
 
