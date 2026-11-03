@@ -227,6 +227,7 @@ CREATE INDEX position_references_reference_idx ON position_references (reference
 | 경험 소재집 | 같은 레코드의 `experiences.dossier` (JSONB) | 사실에서 만든 **작성 재료**: 상세 서술, 문항별 활용 포인트, 표현 예시, 주의사항. 어느 사실 개정에서 만들었는지(`dossier_based_on`) 남긴다(6.5) |
 | 경험 종류 | `experiences.kind` CHECK | PROJECT→`projects`, ACTIVITY→`activities`, CAREER→`experiences`(제목은 `company`), TRAINING→`trainings`, OTHER는 이력서에 렌더하지 않는다 |
 | 기업별 경험 문구 | 기존 `resumes.content` 의 행 + 행의 `experienceId`·`experienceRevision` | **표현**이다. 쓴 문구를 그대로 보존하고, 원본이 바뀌어도 다시 그리지 않는다(6.1) |
+| 경험 소속 (과정·회사 안의 프로젝트) | **4c-1(6.10.2)**. `experiences.parent_id` 한 단계 | 예: SSAFY 교육(TRAINING) → 프로젝트 3개(PROJECT). 사실이 아니라 분류라 개정·재검토에 영향 없음 |
 | 사건 | **4c-1(6.10.1, 2026-11-03 개정)**. 별도 테이블이 아니라 `experiences.facts.episodes[]` + 행동·결과 항목의 `episodeId` | 한 경험 안의 장면(하둡 성능 개선, 장애 대응, 갈등 조율). 4c-1 전에는 자소서 연결과 검색의 단위가 경험이다 |
 | 결과 여러 개 | `facts.results[]` 항목. 4c-1 에서 `scope` 와 `episodeId` 로 사건 소속/확인된 공통/미분류를 구분한다 | 옛 4c 초안의 `episodes.outcomes TEXT[]` 는 폐기 |
 | 역량·문항 유형 | `competencies` (시스템 고정 코드 18개) | **문항 유형(질의 해석)에만** 쓴다. 사건 분류에는 쓰지 않는다 — 사건은 자유 태그 + 의미 검색(6.10.1 E4). 옛 4c 초안의 `episode_competencies` 는 폐기 |
@@ -255,6 +256,7 @@ experiences (PROJECT|ACTIVITY|CAREER|TRAINING|OTHER, 사실·소재집·skills[]
  ├─1:N─ experience_revisions (쌓기만, seq 로 순서 비교)
  └─N:M─ resumes                                             resume_experiences ← JSON 행 experienceId·experienceRevision 에서 파생
 
+(4c-1, 6.10.2) experiences.parent_id ─N:1─ experiences   (과정·회사 → 프로젝트, 한 단계)
 (4c-1, 6.10.1) experiences.facts.episodes[] (사건 = 경험 안의 장면, 자유 태그)  ← self_introduction_experiences.episode_id · experience_chunks.episode_id
 (4c 보류, 6.10) keywords + experience_keywords · merged_into
 
@@ -1392,8 +1394,8 @@ MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이�
 | 단계 | 내용 | 끝 조건 |
 |---|---|---|
 | 4c-1a | 비식별/합성 골드셋·질의 그룹 분리·공고 검색 기준선 | 정답 30건 이상·정답 없음 10건 이상, 정답 사건 집합·관련도·평가용 고정 목록과 현재 API 미지원 범위 기록 |
-| 4c-1b | 저장: 사건·항목 scope·구 데이터 해석·소속 이동 CORRECT·corrected_episodes·MCP 저장·웹 편집 | 개정 판정·범위 정정·삭제 보존·기본값 정규화·잘못된 조합·동시성 사례를 테스트로 확인 |
-| 4c-1c | **요청 DTO/MCP 스키마 확장(question/q/questionMode/kinds/episodeLimit), 문항 성격 판정·FIT 대체 경로, Q 진입 조건(DENSE 하한, 장애 시 BM25 2어·상대 하한)·문항 상투어, 질의 길이 표시, 문항만 조회, 사건 우선 점수·후그룹화**, 응답 예시의 근거 포인터·1홉 related·사용 표시 | 필수 검색 사례 전부, 최종 응답 기준 품질 통과선·기준선 프로젝트 Hit@8 비하락. 잘못된 요청 400·소유자 404·읽기 전용·상한·degraded 계약 테스트. 전체 지연 p50/p95 는 표본·환경과 함께 실측하되 미측정을 성공으로 쓰지 않음 |
+| 4c-1b | 저장: 사건·항목 scope·구 데이터 해석·소속 이동 CORRECT·corrected_episodes·MCP 저장·웹 편집, 경험 소속 `parent_id`(6.10.2: 한 단계·종류 검사·삭제 시 해제·목록 들여쓰기) | 개정 판정·범위 정정·삭제 보존·기본값 정규화·잘못된 조합·동시성 사례를 테스트로 확인 |
+| 4c-1c | **요청 DTO/MCP 스키마 확장(question/q/questionMode/kinds/episodeLimit/parentId), 결과의 `parent` 맥락·조각 머리의 상위 제목(6.10.2), 문항 성격 판정·FIT 대체 경로, Q 진입 조건(DENSE 하한, 장애 시 BM25 2어·상대 하한)·문항 상투어, 질의 길이 표시, 문항만 조회, 사건 우선 점수·후그룹화**, 응답 예시의 근거 포인터·1홉 related·사용 표시 | 필수 검색 사례 전부, 최종 응답 기준 품질 통과선·기준선 프로젝트 Hit@8 비하락. 잘못된 요청 400·소유자 404·읽기 전용·상한·degraded 계약 테스트. 전체 지연 p50/p95 는 표본·환경과 함께 실측하되 미측정을 성공으로 쓰지 않음 |
 | 4c-1d | 근거: episode_id 열·사건 범위 재검토·자소서 사건 선택·작성 절차/목표 계약을 플러그인 스킬에 반영 | 하둡 사건 정정과 소속 이동이 필요한 답변에만 재검토를 띄움, 과거 근거·경험 전체 근거 호환 및 REST/MCP 왕복 검증 |
 
 **검증 경계.** 위 표는 향후 구현의 완료 기준이지 현재 테스트 결과가 아니다. 이번 문서 PR 에서 확인하는 것은 예시 JSON 파싱·문서 링크/코드 블록·계약 간 모순·문서 변경 범위와 기존 서비스 smoke 뿐이다. 사건 저장·검색 품질·새 API·DB 이행은 구현 PR 에서 검증한다.
@@ -1402,6 +1404,81 @@ MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이�
 
 - ~~사건에서 항목이 빠지는 이동을 CORRECT 로 볼까?~~ 결정함: 위 개정 판정 표대로 이전 사건을 포함해 CORRECT. 사건 삭제는 COMMON 이 아니라 UNASSIGNED 로 전환한다.
 - 소재집 `questionUses[].competency`(고정 코드)를 선택값으로 낮추고 `episodeId`·자유 문장 `angle` 을 더할지. E4 와 같은 문제지만 소재집은 AI 작성 재료라 4c-1 범위에서 뺐다.
+
+#### 6.10.2 4c-1 경험 소속 — 상위 경험 한 단계 (2026-11-03)
+
+> 설계, 미구현. 4c-1b(저장)·4c-1c(검색)에 함께 넣는다.
+
+**목적.** 교육 과정이나 회사 경력 **안에서** 한 프로젝트가 있다. 예: SSAFY 교육(TRAINING) 중 프로젝트 3개(PROJECT), 각 프로젝트 안에 사건들(6.10.1). 회사 경력(CAREER) 안의 사내 프로젝트도 같은 모양이다.
+
+```mermaid
+flowchart TD
+    S["SSAFY 교육 — 경험 TRAINING (이력서 「교육이수」 행)"]
+    P1["프로젝트 1 — 경험 PROJECT (「프로젝트 경험」 행)"]
+    P2["프로젝트 2 — 경험 PROJECT"]
+    P3["프로젝트 3 — 경험 PROJECT"]
+    S -->|parent_id| P1
+    S -->|parent_id| P2
+    S -->|parent_id| P3
+    P1 --> E1["사건 ep1 (facts.episodes)"]
+    P1 --> E2["사건 ep2"]
+```
+
+지금은 경험끼리 이을 방법이 없어 다음이 안 된다: 목록에서 과정 아래에 프로젝트를 묶어 보기, 검색 결과에 "SSAFY 과정 중 프로젝트" 맥락 붙이기, "SSAFY 에서 한 일" 질의. 자소서에 "교육 중 프로젝트에서…"라고 정확히 쓰려면 그 맥락이 근거로 있어야 한다.
+
+**결정**
+
+| # | 결정 | 이유 | 버린 대안 |
+|---|---|---|---|
+| P1 | **`experiences.parent_id` 한 열**(같은 계정의 경험). 하위 경험은 독립된 경험 그대로다 | 프로젝트는 자기 기간·기술·이력서 행·개정·사건을 가진다. 이력서도 과정(교육이수)과 프로젝트(프로젝트 경험)를 다른 섹션 행으로 적는다 | 프로젝트를 과정 경험의 사건으로 넣기 — 사건은 이력서 행에 연결될 수 없다 |
+| P2 | **한 단계만.** 상위 경험은 상위를 가질 수 없고, 하위가 있는 경험은 다른 경험의 하위가 될 수 없다. 자기 자신은 불가 | 필요한 모양은 "과정·회사 → 프로젝트" 하나다. 순환 검사·재귀 조회가 필요 없다 | 여러 단계 트리·임의 그래프 — 필요가 확인될 때 넓힌다 |
+| P3 | 상위가 될 수 있는 종류는 `TRAINING`·`CAREER`·`ACTIVITY`. 하위 종류는 `TRAINING` 을 뺀 전부 | 과정·회사·대외활동이 프로젝트·활동을 품는다. 교육 안의 교육은 실제 사례가 없다 | 종류 제한 없음 — "프로젝트 안의 경력" 같은 뒤집힌 소속이 들어온다 |
+| P4 | **소속은 사실이 아니라 분류다.** `facts` 밖에 두고, 바꿔도 개정·`changeKind`·"재검토 필요"·검토 상태에 영향이 없다 | 사건 태그(6.10.1)와 같은 이유. 소속을 바로잡았다고 기업용 문구의 주장이 틀어지지 않는다 | 소속 변경을 CORRECT 로 — 정리할 때마다 거짓 재검토가 뜬다 |
+| P5 | **상위를 지우면 하위는 지우지 않고 소속만 비운다** | 프로젝트는 상위 없이도 완전한 경험이다. 이력서 행·자소서 근거를 잃지 않는다 | CASCADE — 과정 하나를 지우면 프로젝트와 그 근거가 사라진다 |
+
+**스키마** (4c-1 마이그레이션에 함께)
+
+```sql
+ALTER TABLE experiences ADD COLUMN parent_id UUID;
+ALTER TABLE experiences ADD CONSTRAINT experiences_parent_fk
+    FOREIGN KEY (parent_id, owner_id) REFERENCES experiences (id, owner_id)
+    ON DELETE SET NULL (parent_id);                 -- PG15+ 열 지정. 그냥 SET NULL 이면 owner_id 까지 비우려다 NOT NULL 위반
+ALTER TABLE experiences ADD CONSTRAINT experiences_parent_not_self_ck CHECK (parent_id IS NULL OR parent_id <> id);
+CREATE INDEX experiences_parent_idx ON experiences (parent_id) WHERE parent_id IS NOT NULL;
+```
+
+- 한 단계·종류 제한(P2·P3)은 행 사이 조건이라 CHECK 로 못 건다. 서비스가 OwnerLock 아래에서 검사한다: 상위 후보를 같은 트랜잭션에서 읽어 `parent_id IS NULL`·종류를 보고, 자기에게 하위가 있으면 상위를 둘 수 없다. 위반은 400 `PARENT_NOT_ALLOWED`(사유 `DEPTH`·`KIND`·`SELF`), 남의 경험은 404.
+- 종류를 바꾸는 저장도 같은 검사를 거친다(예: 하위가 있는 TRAINING 을 PROJECT 로 바꾸면 400).
+- 상위 삭제는 경험 삭제의 기존 규칙(쓰이면 409)을 그대로 따르고, 통과하면 하위의 `parent_id` 가 비워진다. 응답 `warnings` 에 `CHILDREN_DETACHED`(하위 수)를 싣는다. 병합(4c 보류)을 열 때 병합된 source 가 상위였다면 하위를 target 으로 옮긴다 — 그때 정한다.
+
+**API**
+
+- `experience_save`·REST 저장: `parentId?` — 생략·null 은 유지, `""` 는 소속 해제, UUID 는 지정. MCP 로 바꾼 소속은 응답 `warnings` 에 `PARENT_CHANGED` 를 실어 사용자에게 알리게 한다(사실이 아니라 검토 확정 대상은 아니다).
+- `experience_index` 목록 한 줄에 `parentId`, 상위 경험에는 `childCount`. 상세는 `parent{id, title, kind, period}`·`children[{id, title, kind, period}]`.
+- 웹: 경험 목록에서 하위를 상위 카드 아래에 들여 보여 준다. 원본 편집에 "상위 경험" 선택(허용 종류의 상위 후보만, 하위가 있는 경험은 선택지에 없음).
+- 가져오기·`resume_add_experiences` 는 소속을 만들거나 하위를 함께 넣지 않는다. 과정 행을 불러와도 프로젝트 행은 따로 고른다.
+
+**검색** (6.10.1 계약에 더한다)
+
+- 요청 `parentId?`: 그 상위의 하위 경험(와 상위 자신)만 후보로 둔다. "SSAFY 에서 한 협업"이면 클라이언트가 SSAFY 경험 id 를 넣는다. 남의 id 는 404.
+- 응답 결과마다 `parent{id, title, kind}`(없으면 null). **점수에는 넣지 않는다** — 맥락 표시와 필터만이다.
+- 경험·사건 조각의 머리에 상위 제목을 붙인다(`"SSAFY 교육 > 프로젝트 1 > 사건 제목"`). 그래야 질의에 "SSAFY" 가 있을 때 하위 프로젝트의 사건이 키워드·의미 검색에 잡힌다. 소속을 바꾸면 하위 경험의 `embedding_dirty` 만 세운다(개정 없음). 상위 제목을 바꾸면 그 하위들도 dirty.
+- 상위 경험 자체가 후보로 오를 때 하위의 사건을 상위 아래에 펼치지 않는다. 하위는 자기 묶음으로 따로 오른다(사건은 소속 경험 안에서만 묶는다, 6.10.1 규칙 6).
+
+**수용 사례** (4c-1b·4c-1c)
+
+| 입력·조건 | 확인할 결과 |
+|---|---|
+| SSAFY(TRAINING) 아래 프로젝트 3개 지정 | 저장·목록 들여쓰기·상세 `children` 3개, 개정 번호 그대로 |
+| 하위가 있는 경험(SSAFY)에 상위 지정, 이미 하위인 경험(프로젝트 1) 아래에 다른 경험 지정, 자기 자신 | 400 `PARENT_NOT_ALLOWED`(DEPTH·DEPTH·SELF) |
+| 프로젝트 아래 프로젝트(PROJECT 를 상위로), TRAINING 을 하위로 | 400 `PARENT_NOT_ALLOWED`(KIND) |
+| 하위가 있는 TRAINING 을 PROJECT 로 바꾸는 저장 | 400 |
+| 남의 경험을 상위로 | 404 |
+| 상위(SSAFY) 삭제 | 하위 3개는 남고 `parent_id` null, `CHILDREN_DETACHED: 3`. 하위의 이력서 행·자소서 근거 그대로 |
+| 소속만 바꾼 저장 | 개정·재검토 표시 변화 없음, 하위 임베딩만 다시 계산 |
+| `parentId: SSAFY` + 협업 문항 | SSAFY 하위 프로젝트의 사건만 후보, 결과에 `parent` 표시 |
+| 질의에 "SSAFY" 가 있고 `parentId` 없음 | 하위 프로젝트 사건이 상위 제목 머리 덕에 후보에 오름 |
+| 다른 계정에 같은 제목의 상위 | 후보·`parent`·`children` 에 0건 |
 
 **병합을 넣을 때 지킬 조건** (리뷰 P1, 10.7 R37). 병합된 source 가 링커·검색·스위퍼에 새면 같은 제목 키가 2건이 되어, 링커의 "정확히 1건" 조건(6.2-5)이 영구히 실패하고 그 행은 계속 미연결로 남는다.
 - `experiences_owner_key_idx`·`experiences_embedding_dirty_idx` 를 `WHERE merged_into IS NULL` 부분 인덱스로 바꾼다.
