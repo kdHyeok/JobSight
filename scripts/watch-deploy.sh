@@ -36,10 +36,15 @@ fi
 
 # 단순 동등 비교로는 안 된다. HEAD 가 origin/main 보다 앞서 있으면(기능 브랜치에
 # 올라가 있거나 현장에서 커밋했을 때) 영원히 "다르다"가 되고, deploy.sh 의 ff 머지는
-# no-op 으로 성공해 5분마다 전체 재빌드를 되풀이한다. "HEAD 가 origin/main 을
+# no-op 으로 성공해 깨어날 때마다 전체 재빌드를 되풀이한다. "HEAD 가 origin/main 을
 # 이미 품고 있는가"로 묻는다.
 if git merge-base --is-ancestor "$REMOTE" "$LOCAL"; then
-  [ "$LOCAL" = "$REMOTE" ] || echo "HEAD 가 origin/main 보다 앞서 있다($LOCAL). 배포할 것이 없다." >&2
+  # 앞서 있는 상태는 고쳐야 할 상황이니 알리되, 1분마다 같은 줄을 찍으면 저널에서
+  # 진짜 배포 로그가 묻힌다. 커밋이 바뀔 때 한 번만 적는다.
+  if [ "$LOCAL" != "$REMOTE" ] && [ "$(cat "$STATE.ahead" 2>/dev/null)" != "$LOCAL" ]; then
+    echo "HEAD 가 origin/main 보다 앞서 있다($LOCAL). 배포할 것이 없다." >&2
+    echo "$LOCAL" > "$STATE.ahead"
+  fi
   exit 0
 fi
 

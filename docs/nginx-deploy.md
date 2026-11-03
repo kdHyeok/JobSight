@@ -106,7 +106,7 @@ Bearer·POST body·세션 쿠키를 새 도메인으로 프록시/리다이렉�
 ```
 GitHub (공개)        이 머신
 ─────────────        ─────────────────────────────────
-tests (호스티드)      systemd timer  5분마다
+tests (호스티드)      systemd timer  1분마다
                      └ scripts/watch-deploy.sh
                         HEAD 가 origin/main 을 품고 있나?
                         └ scripts/deploy.sh
@@ -154,7 +154,7 @@ upstream 재해석이 안 끝나 연결 실패가 날 수 있다. 일시적 흔�
 되돌렸을 수도 있고, 마이그레이션이 적용된 배포라 되돌리지 않고 새 코드가 그대로 떠
 있을 수도 있다(위 「자동 롤백의 한계」). 워처 로그는 이것을 단정하지 않으니
 `deploy.sh` 쪽 로그에서 롤백 여부를 읽는다. 워처는 실패한 커밋을
-`.deploy-state.failed` 에 적고 **같은 커밋으로 재시도하지 않는다** — 5분마다 같은 실패를
+`.deploy-state.failed` 에 적고 **같은 커밋으로 재시도하지 않는다** — 1분마다 같은 실패를
 반복하지 않기 위해서다. 고친 뒤 그 파일을 지우거나, 다음 커밋이 올라오면 다시 돈다.
 
 이 검사는 「변화 없음」 검사보다 **먼저** 와야 한다. `deploy.sh` 가 빌드 전에 ff 머지를
@@ -165,7 +165,7 @@ upstream 재해석이 안 끝나 연결 실패가 날 수 있다. 일시적 흔�
 **변화 판정은 동등 비교가 아니라 "HEAD 가 origin/main 을 품고 있는가"다.** 운영
 디렉터리가 기능 브랜치에 올라가 있거나 현장에서 커밋이 하나 얹히면 `HEAD != origin/main`
 이 영원히 참이 된다. 그런데 `deploy.sh` 의 `git merge --ff-only origin/main` 은 그 경우
-"Already up to date" 로 **성공**하므로, 동등 비교로는 5분마다 전체 재빌드를 되풀이한다.
+"Already up to date" 로 **성공**하므로, 동등 비교로는 깨어날 때마다 전체 재빌드를 되풀이한다.
 `git merge-base --is-ancestor` 로 물어 그 경우 한 줄만 남기고 넘어간다. 양쪽이 갈라진
 경우(ff 불가)는 그대로 배포를 시도하고 `deploy.sh` 가 ff 실패로 멈춘다.
 
@@ -197,6 +197,11 @@ journalctl --user -u jobsight-deploy.service -n 100 --no-pager
 주기를 바꾸려면 `~/.config/systemd/user/jobsight-deploy.timer` 의 `OnUnitActiveSec`
 을 고치고 `systemctl --user daemon-reload && systemctl --user restart jobsight-deploy.timer`.
 잠시 멈추려면 `systemctl --user stop jobsight-deploy.timer`.
+
+**주기가 1분인 이유.** 한 번 깨어나서 하는 일은 `git fetch` 와 `rev-parse` 두 번이
+전부다 — 변화가 없으면 네트워크로 수 KB 가 오간다. 이 비용으로 반영 지연을 5분에서
+1분으로 줄인다. 배포가 도는 동안에는 `OnUnitActiveSec` 이 유닛이 끝난 시점부터 다시
+세므로 중복으로 깨어나지 않고, 그래도 겹치면 `flock` 이 막는다.
 
 
 ### 손으로 배포
