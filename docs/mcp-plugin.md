@@ -19,6 +19,7 @@ MCP·Google OAuth의 공개 origin과 callback, Docker 프로젝트·볼륨·기
 `plugins/jobsight`를 ChatGPT/Codex용 플러그인으로 패키징한다. MCP는 기존 Spring 애플리케이션의
 `/mcp`에서 JSON 응답형 Streamable HTTP로 실행하고, 기존 CRUD 컨트롤러·서비스와 DTO 검증을 재사용한다.
 도구 설명은 기존 `@Operation`, 입력 스키마는 실제 요청 DTO에서 만든다. `SKILL.md`는 사이트 조작과 데이터 관계를 설명한다.
+서버가 먼저 보내는 알림(SSE·`notifications/*`)은 없다. 에이전트가 먼저 알려 주는 지원 관리 알람(MCP Events 웹훅)은 [docs/mcp-events.md](mcp-events.md) 에 설계만 있다(미구현).
 
 ## 인증과 불변 조건
 
