@@ -22,6 +22,7 @@
 | 2026-11-03 | [같은 경험 중복 연결이 "개정 번호를 바꿀 수 없다" 400 으로 가려짐](2026-11-03-experience-duplicate-row-masked-by-revision-error.md) | 버그 | 해결 |
 | 2026-11-03 | [저장 성공 뒤에도 앞선 저장 실패 문구가 남음](2026-11-03-resume-save-stale-error-notice.md) | 버그 | 해결 |
 | 2026-11-03 | [에이전트 Bash 도구에서 heredoc·여러 줄 명령이 `unexpected EOF` 로 깨짐](2026-11-03-agent-bash-multiline-eof.md) | 환경·호환성 | 우회 |
+| 2026-11-03 | [스모크 1개 실패로 돈 롤백이 `No such image` 로 죽음](2026-11-03-deploy-rollback-no-such-image.md) | 버그 | 해결 |
 
 ## 관찰(조치하지 않음)
 

@@ -54,12 +54,18 @@ PROJECT="$(dc config --format json | python3 -c "import json,sys; print(json.loa
 mapfile -t BUILT_SERVICES < <(dc config --format json | python3 -c \
   "import json,sys; [print(n) for n,s in json.load(sys.stdin)['services'].items() if s.get('build')]")
 
+# 이미지 ID 만 적어두면 안 된다. 빌드가 태그를 가져가고 옛 컨테이너가 교체되면
+# 그 이미지는 참조가 없어져 사라질 수 있다 — 2026-11-03 배포에서 실제로 롤백이
+# "No such image" 로 죽었다. 기록하는 순간 태그를 박아 고정한다.
+STAMP="$(date +%Y%m%d-%H%M%S)"
 declare -A ROLLBACK_IMAGE=()
 for svc in "${BUILT_SERVICES[@]}"; do
   cid="$(dc ps -aq "$svc" 2>/dev/null | head -1)"
-  if [ -n "$cid" ]; then
-    ROLLBACK_IMAGE["$svc"]="$(docker inspect "$cid" --format '{{.Image}}')"
-  fi
+  [ -n "$cid" ] || continue
+  img="$(docker inspect "$cid" --format '{{.Image}}')"
+  tag="${PROJECT}-${svc}:rollback-${STAMP}"
+  docker tag "$img" "$tag"
+  ROLLBACK_IMAGE["$svc"]="$tag"
 done
 log "롤백 지점"
 if [ ${#ROLLBACK_IMAGE[@]} -eq 0 ]; then
@@ -69,14 +75,46 @@ else
 fi
 
 rollback() {
-  [ ${#ROLLBACK_IMAGE[@]} -gt 0 ] || { echo "되돌릴 이미지가 없다. 수동 조치가 필요하다." >&2; return; }
+  # set -e 로 중간에 죽으면 반만 되돌아간 상태가 된다. 여기서만 끈다.
+  set +e
+  if [ ${#ROLLBACK_IMAGE[@]} -eq 0 ]; then
+    echo "되돌릴 이미지가 없다. 수동 조치가 필요하다." >&2
+    set -e; return 1
+  fi
   log "롤백 — 직전 이미지로 되돌린다"
+  local failed=0
   for svc in "${!ROLLBACK_IMAGE[@]}"; do
-    docker tag "${ROLLBACK_IMAGE[$svc]}" "${PROJECT}-${svc}:latest"
+    if docker tag "${ROLLBACK_IMAGE[$svc]}" "${PROJECT}-${svc}:latest"; then
+      echo "   $svc ← ${ROLLBACK_IMAGE[$svc]}"
+    else
+      echo "   $svc 태그 실패: ${ROLLBACK_IMAGE[$svc]}" >&2; failed=1
+    fi
   done
-  dc up -d --no-build --no-deps --wait --wait-timeout 180 "${!ROLLBACK_IMAGE[@]}" || true
+  dc up -d --no-build --no-deps --wait --wait-timeout 180 "${!ROLLBACK_IMAGE[@]}" || failed=1
   echo "롤백 후 상태:"; dc ps
+  [ "$failed" -eq 0 ] || echo "롤백이 온전히 끝나지 않았다. 직접 확인한다." >&2
+  set -e
+  return "$failed"
 }
+
+# ── 3.5 마이그레이션이 걸려 있는가 ──────────────────────────────
+# git diff 로 보면 안 된다. 이미 pull 된 트리를 재배포하는 경우를 놓친다.
+# 실제로 적용된 DB 버전과 저장소의 최대 버전을 비교한다.
+envval() { grep -E "^$1=" .env | cut -d= -f2- | tr -d '\r'; }
+DB_VERSION="$(dc exec -T db psql -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" \
+  -tAc "select coalesce(max(version::int),0) from flyway_schema_history where success" 2>/dev/null | tr -dc '0-9')"
+DB_VERSION="${DB_VERSION:-0}"
+REPO_VERSION="$(ls backend/src/main/resources/db/migration/V*__*.sql 2>/dev/null \
+  | sed -E 's|.*/V([0-9]+)__.*|\1|' | sort -n | tail -1)"
+REPO_VERSION="${REPO_VERSION:-0}"
+if [ "$REPO_VERSION" -gt "$DB_VERSION" ]; then
+  MIGRATION_PENDING=yes
+  log "주의: 마이그레이션이 적용된다 (DB V$DB_VERSION → 저장소 V$REPO_VERSION)"
+  echo "   실패해도 자동 롤백하지 않는다 — 옛 코드가 새 스키마를 만나면 기동이 깨진다."
+else
+  MIGRATION_PENDING=no
+  echo "마이그레이션 없음 (DB V$DB_VERSION, 저장소 V$REPO_VERSION)"
+fi
 
 # ── 4. 빌드 (운영 컨테이너를 건드리지 않는다) ───────────────────
 log "빌드"
@@ -98,10 +136,35 @@ log "스모크"
 set +e
 bash scripts/smoke.sh
 SMOKE=$?
+# 컨테이너를 막 교체한 직후라 앞단 프록시의 upstream 재해석이 아직 안 끝났을 수
+# 있다(docs/nginx-deploy.md 「resolver」). 실제로 2026-11-03 배포에서 66개 중
+# 1개가 연결 실패(actual=000)로 떨어졌다가 곧바로 통과했다. 되돌리는 쪽이 더
+# 위험하므로 한 번은 가라앉히고 다시 본다.
+if [ "$SMOKE" -ne 0 ]; then
+  echo "스모크 1차 실패($SMOKE). 20초 가라앉히고 한 번만 다시 본다."
+  sleep 20
+  bash scripts/smoke.sh
+  SMOKE=$?
+fi
 set -e
 echo "SMOKE_EXIT=$SMOKE"
+
 if [ "$SMOKE" -ne 0 ]; then
-  rollback
+  if [ "$MIGRATION_PENDING" = yes ]; then
+    log "자동 롤백하지 않는다 — 이 배포는 마이그레이션을 포함했다"
+    cat >&2 <<MSG
+스키마는 이미 V$REPO_VERSION 이다. 이미지만 옛것으로 되돌리면 옛 코드의
+ddl-auto: validate 가 새 스키마와 어긋나 기동이 아예 실패한다. 되돌리는 쪽이
+지금보다 나쁘다. 사람이 판단한다.
+
+지금 상태: 새 코드가 떠 있고 스모크가 실패했다.
+  - 되돌리려면: 덤프 복원 + 아래 이미지 태그
+$(for svc in "${!ROLLBACK_IMAGE[@]}"; do echo "      $svc  ${ROLLBACK_IMAGE[$svc]}"; done)
+  - 앞으로 가려면: 실패 항목을 고쳐 새 커밋으로 다시 배포한다.
+MSG
+    exit 1
+  fi
+  rollback || true
   die "스모크 실패($SMOKE). 롤백했다. 배포는 완료되지 않았다."
 fi
 
