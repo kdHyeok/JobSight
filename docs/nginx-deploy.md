@@ -46,12 +46,19 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 이 저장소 밖에 있다. 별도 compose 프로젝트다.
 
 ```
-브라우저 → https://job.donyk.link                (호스트 443, 192.168.0.211)
+브라우저 → https://job.donyk.link                Cloudflare 엣지 (DNS·TLS)
+        → cloudflared 컨테이너                    터널. 이 머신이 바깥으로 맺는다
         → reverse_proxy 컨테이너  nginx:1.28-alpine, listen 8443 ssl
            /home/quincy/HDD/apps/reverse-proxy/conf.d/41-job-donyk.conf
+           if ($request_from_tunnel = 0) return 403
         → jobsite-v006-frontend-1:80             jobsite-v006_app 네트워크, 컨테이너명 직결
         → backend:8080
 ```
+
+**호스트에 공개 인바운드 포트가 없다.** `ss -ltnp` 로 보면 443 은 `tailscale0` 에만,
+8088 은 `127.0.0.1` 에만 붙어 있다. `reverse_proxy` 컨테이너도 포트를 하나도 publish
+하지 않는다. 공개 트래픽은 `cloudflared` 가 바깥으로 맺어 둔 터널을 타고 역류해
+들어온다. 바깥에서 이 네트워크를 먼저 두드리는 경로가 없다.
 
 - TLS는 Let's Encrypt `donyk.link` 와일드카드 인증서로 덮는다. 구 도메인 인증서는 구 vhost와 ACME 갱신에 유지한다. 종단은 프록시가 하고 이 저장소는 평문 80만 다룬다.
 - 프록시가 `X-Forwarded-Proto https` 를 고정으로 넣는다. Spring 은 `forward-headers-strategy: framework` 로 이를 받아 secure 판정에 쓴다. `redirect_uri` 는 여기에 의존하지 않고 `PUBLIC_BASE_URL` 로 조립한다. 내부 nginx 가 이 값을 덮어쓰지 않아야 한다 — 덮어쓰면 authorize 진입점의 `Location` 이 평문으로 나간다.
@@ -114,7 +121,8 @@ tests (호스티드)      systemd timer  1분마다
 ```
 
 **GitHub 에서 이 머신으로 들어오는 경로가 없다.** 이 머신이 GitHub 를 볼 뿐이다.
-인바운드 포트도, 터널도, 셀프호스티드 러너도 없다. 공개 저장소에 러너를 붙이지
+배포를 위해 새로 연 인바운드도, 새 터널도, 셀프호스티드 러너도 없다(사이트를
+서비스하는 Cloudflare 터널은 그대로 쓰고 배포에는 관여시키지 않는다). 공개 저장소에 러너를 붙이지
 않기로 한 이유는 `docs/decisions.md` 에 있다 — 요약하면 포크 PR 이 워크플로 파일
 자체를 바꿔 보낼 수 있어서, 트리거를 하나라도 열어두면 이 호스트가 넘어간다.
 
