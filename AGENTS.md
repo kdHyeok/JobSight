@@ -39,6 +39,7 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx + 임베딩 �
 | 화면 배치·색·컴포넌트 | [docs/design-system.md](docs/design-system.md) |
 | `nginx.conf`, `compose*.yaml`, `.github/**`, 배포 | [docs/nginx-deploy.md](docs/nginx-deploy.md) |
 | "왜 이렇게 했지?" | [docs/decisions.md](docs/decisions.md) — 되돌리기 전에 반드시 읽는다 |
+| 겪은 버그·오진·작업 도구 문제(증상 → 원인 → 조치), 같은 오류 문구를 다시 만났을 때 | [docs/troubleshooting/](docs/troubleshooting/README.md) — 사건마다 `YYYY-MM-DD-주제.md`, README 목차에 행 추가 |
 | API 목록과 목적 | 관리자 로그인 후 `/swagger-ui/index.html`. 손으로 쓴 목록은 없다(썩는다). |
 
 ## 깨면 안 되는 것 (불변 조건)
