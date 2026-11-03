@@ -29,12 +29,17 @@ REMOTE="$(git rev-parse origin/main)"
 # "구 이미지가 도는데 조용한" 상태가 된다. 사람이 고치고 이 파일을 지울 때까지
 # 계속 1 을 돌려 systemd 가 failed 로 남게 한다.
 if [ -f "$STATE.failed" ] && [ "$(cat "$STATE.failed")" = "$REMOTE" ]; then
-  echo "$REMOTE 배포가 실패한 상태 그대로다. 실행 이미지는 이전 것이다." >&2
+  echo "$REMOTE 배포가 실패한 상태 그대로다. 무엇이 떠 있는지는 실패한 실행의 로그를 본다." >&2
   echo "고친 뒤 $STATE.failed 를 지우면 다시 시도한다." >&2
   exit 1
 fi
 
-if [ "$LOCAL" = "$REMOTE" ]; then
+# 단순 동등 비교로는 안 된다. HEAD 가 origin/main 보다 앞서 있으면(기능 브랜치에
+# 올라가 있거나 현장에서 커밋했을 때) 영원히 "다르다"가 되고, deploy.sh 의 ff 머지는
+# no-op 으로 성공해 5분마다 전체 재빌드를 되풀이한다. "HEAD 가 origin/main 을
+# 이미 품고 있는가"로 묻는다.
+if git merge-base --is-ancestor "$REMOTE" "$LOCAL"; then
+  [ "$LOCAL" = "$REMOTE" ] || echo "HEAD 가 origin/main 보다 앞서 있다($LOCAL). 배포할 것이 없다." >&2
   exit 0
 fi
 
@@ -45,6 +50,8 @@ if bash scripts/deploy.sh origin/main; then
   echo "=== $(date -Is)  배포 성공 $REMOTE"
 else
   echo "$REMOTE" > "$STATE.failed"
-  echo "=== $(date -Is)  배포 실패 $REMOTE — 롤백됐다. 실행 이미지는 이전 것이고 작업 트리는 새 커밋이다." >&2
+  # 무엇이 떠 있는지 여기서 단정하지 않는다. deploy.sh 는 되돌리고 실패할 수도,
+  # 마이그레이션이 적용돼 되돌리지 않고 실패할 수도 있다(새 코드가 그대로 떠 있다).
+  echo "=== $(date -Is)  배포 실패 $REMOTE — 위 deploy.sh 로그에서 롤백 여부를 확인한다." >&2
   exit 1
 fi

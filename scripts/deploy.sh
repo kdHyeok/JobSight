@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 배포 1회분. CD 워크플로(.github/workflows/cd.yml)와 사람이 같은 경로를 쓴다.
+# 배포 1회분. 워처(scripts/watch-deploy.sh)와 사람이 같은 경로를 쓴다.
 #
 #   bash scripts/deploy.sh                 # origin/main 으로 배포
 #   bash scripts/deploy.sh <ref>           # 특정 커밋/태그로 배포
@@ -101,8 +101,11 @@ rollback() {
 # git diff 로 보면 안 된다. 이미 pull 된 트리를 재배포하는 경우를 놓친다.
 # 실제로 적용된 DB 버전과 저장소의 최대 버전을 비교한다.
 envval() { grep -E "^$1=" .env | cut -d= -f2- | tr -d '\r'; }
+# db 가 떠 있지 않으면(스택이 내려가 있거나 첫 배포) 물어볼 데가 없다. 그때는
+# 0 으로 보고 넘어간다 — `|| true` 가 없으면 set -e 가 여기서 조용히 죽는다.
 DB_VERSION="$(dc exec -T db psql -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" \
-  -tAc "select coalesce(max(version::int),0) from flyway_schema_history where success" 2>/dev/null | tr -dc '0-9')"
+  -tAc "select coalesce(max(version::int),0) from flyway_schema_history where success" 2>/dev/null \
+  | tr -dc '0-9' || true)"
 DB_VERSION="${DB_VERSION:-0}"
 REPO_VERSION="$(ls backend/src/main/resources/db/migration/V*__*.sql 2>/dev/null \
   | sed -E 's|.*/V([0-9]+)__.*|\1|' | sort -n | tail -1)"
@@ -167,5 +170,20 @@ MSG
   rollback || true
   die "스모크 실패($SMOKE). 롤백했다. 배포는 완료되지 않았다."
 fi
+
+# ── 7. 옛 롤백 태그 정리 ────────────────────────────────────────
+# 태그를 박는다는 것은 그 이미지가 영원히 회수되지 않는다는 뜻이다. 배포마다
+# 서비스당 한 장씩 쌓이고 embedder 는 한 장이 약 2GB 다. 최근 것만 남긴다.
+# 실패한 배포에서는 여기까지 오지 않으므로 되돌릴 태그를 지울 일이 없다.
+ROLLBACK_KEEP="${ROLLBACK_KEEP:-3}"
+for svc in "${BUILT_SERVICES[@]}"; do
+  mapfile -t stale < <(docker images --format '{{.Tag}}' "${PROJECT}-${svc}" 2>/dev/null \
+    | grep '^rollback-' | sort -r | tail -n "+$((ROLLBACK_KEEP + 1))")
+  for t in "${stale[@]}"; do
+    if docker rmi "${PROJECT}-${svc}:$t" >/dev/null 2>&1; then
+      echo "   옛 롤백 태그 정리 ${PROJECT}-${svc}:$t"
+    fi
+  done
+done
 
 log "배포 완료  $AFTER"
