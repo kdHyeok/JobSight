@@ -227,14 +227,14 @@ CREATE INDEX position_references_reference_idx ON position_references (reference
 | 경험 소재집 | 같은 레코드의 `experiences.dossier` (JSONB) | 사실에서 만든 **작성 재료**: 상세 서술, 문항별 활용 포인트, 표현 예시, 주의사항. 어느 사실 개정에서 만들었는지(`dossier_based_on`) 남긴다(6.5) |
 | 경험 종류 | `experiences.kind` CHECK | PROJECT→`projects`, ACTIVITY→`activities`, CAREER→`experiences`(제목은 `company`), TRAINING→`trainings`, OTHER는 이력서에 렌더하지 않는다 |
 | 기업별 경험 문구 | 기존 `resumes.content` 의 행 + 행의 `experienceId`·`experienceRevision` | **표현**이다. 쓴 문구를 그대로 보존하고, 원본이 바뀌어도 다시 그리지 않는다(6.1) |
-| 사건 | **4c(보류, 6.10)**. `episodes` (STAR) | 4단계 최소판에는 없다. 자소서 연결과 검색의 단위는 경험이고, 상세 서술은 소재집에 둔다(6.5) |
-| 결과 여러 개 | **4c**. `episodes.outcomes TEXT[]` | 4단계에서는 `facts.results[]` 다 |
-| 역량·문항 유형 | `competencies` (시스템 고정 코드 18개) | 문항 유형(2단계)과 사건 태그(4c)가 같은 어휘를 쓴다 |
+| 사건 | **4c-1(6.10.1, 2026-11-03 개정)**. 별도 테이블이 아니라 `experiences.facts.episodes[]` + 행동·결과 항목의 `episodeId` | 한 경험 안의 장면(하둡 성능 개선, 장애 대응, 갈등 조율). 4c-1 전에는 자소서 연결과 검색의 단위가 경험이다 |
+| 결과 여러 개 | `facts.results[]` 항목. 4c-1 에서 `scope` 와 `episodeId` 로 사건 소속/확인된 공통/미분류를 구분한다 | 옛 4c 초안의 `episodes.outcomes TEXT[]` 는 폐기 |
+| 역량·문항 유형 | `competencies` (시스템 고정 코드 18개) | **문항 유형(질의 해석)에만** 쓴다. 사건 분류에는 쓰지 않는다 — 사건은 자유 태그 + 의미 검색(6.10.1 E4). 옛 4c 초안의 `episode_competencies` 는 폐기 |
 | 기술·도메인 키 | `experiences.skills TEXT[]`·`domains TEXT[]` (4단계) | 값은 `KeyNormalizer`(3단계 산출물)로 정규화한 키다. 계정별 `keywords`·`experience_keywords` 테이블은 4c |
 | 회사 도메인 | 기존 `company_industries` | |
 | 직무 요구 | 이미 있는 다섯 칸: 공고 `job_postings.qualifications`(지원자격), 직무 `responsibilities`(담당업무), `required_skills`(요구 역량), `preferred_skills`(우대 역량), `position_tech_stack`(기술 환경). 저장하지 않은 공고도 같은 다섯 칸으로 받는다(4.1) | 칸을 섞지 않는다. 기술 환경 목록을 필수 자격으로 계산하지 않는다. `positions.experience` 는 "취득 경험"(입사하면 얻는 것, `PositionDetail.vue:103`)이라 요구로 쓰지 않는다. `position_requirements` 테이블은 두지 않는다(2.6) |
 | "이 답변을 어디에 냈나" | `self_introduction_positions` (신규) | **직접 출처** |
-| "이 답변에 어떤 경험을 썼나" | `self_introduction_experiences` (4단계) | 작성 근거 `(경험 id, 개정 번호)` 쌍. 사건 단위 연결(`self_introduction_episodes`)은 4c |
+| "이 답변에 어떤 경험을 썼나" | `self_introduction_experiences` (4단계) | 작성 근거 `(경험 id, 개정 번호)` 쌍. 4c-1 에서 같은 표에 사건 열(`episode_id`)을 더해 `(경험, 개정, 사건)` 으로 넓힌다(6.10.1 E6). 옛 초안의 `self_introduction_episodes` 는 폐기 |
 | 문항 유형 | `self_introduction_competencies` (신규) | 저장하지 않은 문항은 질의 때 정규식으로 추정한다 |
 | 제출 기록 | `submissions` (신규, 제출·작성 기준 트랙) | 공고별로 무엇을 냈는지. 확인 수준을 함께 남긴다(6.6) |
 | 개인 작성 기준 | `writing_guides` (계정당 하나) + 경험별 `dossier.cautions` | 선호 문체, 피할 표현, 성과 설명 범위(6.7) |
@@ -255,7 +255,8 @@ experiences (PROJECT|ACTIVITY|CAREER|TRAINING|OTHER, 사실·소재집·skills[]
  ├─1:N─ experience_revisions (쌓기만, seq 로 순서 비교)
  └─N:M─ resumes                                             resume_experiences ← JSON 행 experienceId·experienceRevision 에서 파생
 
-(4c 보류, 6.10) episodes(STAR) ─N:M─ competencies · keywords + experience_keywords · self_introduction_episodes · merged_into
+(4c-1, 6.10.1) experiences.facts.episodes[] (사건 = 경험 안의 장면, 자유 태그)  ← self_introduction_experiences.episode_id · experience_chunks.episode_id
+(4c 보류, 6.10) keywords + experience_keywords · merged_into
 
 (기존) resumes ─N:M─ positions ─N:1─ job_postings ─N:1─ companies ─1:N─ company_industries
 submissions (공고별 제출 기록, 확인 수준) · writing_guides (계정당 작성 기준 하나)        ← 제출·작성 기준 트랙
@@ -543,7 +544,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 | 작성 검토 이력 테이블 | 초기에는 작성 기준 문서 하나와 경험별 주의사항으로 충분하다 | 검토 결과를 질의해야 할 때 |
 | 첨부 바이너리의 MCP 전달, 첨부 형식 확대 | 근거는 텍스트 발췌로 서버에 둔다. 첨부는 메타와 웹 주소만 MCP로 준다(6.5) | 발췌로 부족한 사례가 나올 때 |
 | 사건(STAR)·병합 계보·키워드 테이블·`ROW` 복사·"원본 반영 검토" | 4단계 최소판에서 뺐다(사용자 결정, 10.7 R45). 6.10 에 설계와 다시 열 때의 조건을 둔다 | 4c: 필요가 확인될 때 |
-| 사건 단위 기술 태그 | 사건(4c)은 경험의 기술 태그를 물려받는다. 물려받은 일치는 `why` 에 `via: PARENT_EXPERIENCE` 로 표시한다(4.2) | 4c 뒤 필요가 보일 때 |
+| 사건 단위 기술 태그 | **4c-1 에서 정함**: 사건은 자유 태그(`episodes[].tags`)를 든다. 경험 `skills` 에만 있는 일치는 설명(`via: PARENT_EXPERIENCE`)일 뿐 사건 점수에는 넣지 않는다(6.10.1) | 4c-1c |
 | 고아 첨부 자동 정리 작업 | 1.4 T7. 사용자가 지우는 길은 6.9 에 둔다 | 용량이 문제가 될 때 |
 | `job_postings.target_position_id` 정리 | 쓰지도 지우지도 않는다(D9) | — |
 
@@ -556,7 +557,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 | 이력서 행 → 경험 | "경험에서 불러오기", "경험으로 등록", "다른 경험에 연결" | `resume_add_experiences`, 행 도구의 `experienceId` | 저장할 때 링커가 연결한다. (kind, title_key)가 정확히 1건 일치하고 시작 연월 숫자가 충돌하지 않을 때만 연결한다(6.2). 파생 관계라 출처가 없다. 같은 경험이 둘로 등록됐으면 병합(4c) 대신 행을 남길 경험에 다시 연결하고 쓰지 않는 경험을 지운다(6.4) |
 | 경험 → 기술 | 자동완성 칩 | `experience_save(skills)` | 웹 "경험 가져오기"를 하면 이력서 `techStack` 원문을 `, / · \|` 기준으로 나눈다. 값은 `experiences.skills` 에 정규화 키로 둔다. 키별 출처(USER/AI)는 두지 않고 경험의 검토 상태(`reviewed_revision`)를 따른다. 키별 출처는 4c `experience_keywords` |
 | 경험 → 도메인 | 칩(선택) | `experience_save(domains)` | **파생**: 경험이 실린 이력서 → 직무 → 회사 업종, 경력 행의 회사가 기업 탭에 있으면 그 회사 업종. trust "추정" |
-| 사건 → 역량 (4c) | 칩 | 4c `experience_save(episodes[].competencies)` | 5단계 이후: 사건 임베딩과 역량 설명 문장의 최근접 상위 2개를 화면에 "추천"으로만 보여 준다 |
+| ~~사건 → 역량 (4c)~~ 사건 → 자유 태그 (4c-1) | 칩(자유 입력) | `experience_save(facts.episodes[].tags)` | 고정 역량 코드를 사건에 매기지 않는다(6.10.1 E4). 문항 유형은 보조 해석이며 원문 검색을 대신하지 않는다 |
 | 자소서 → 직무 (written_for) | 편집기에서 직무 선택. 출처가 없는 답변에는 "어느 지원용?" 후보 칩을 띄운다 | `self_intro_create/update(positionIds)` | 연결 이력서들의 직무 **전부**를 후보로 보여 준다. 개수 제한은 없고, 사용자가 클릭 한 번으로 고른다 |
 | 자소서 → 경험 (uses, 작성 근거) | "쓴 경험" 선택. 선택할 때의 경험 개정을 함께 저장한다 | `self_intro_create/update(experiences[{experienceId, experienceRevision}])` (6.8) | 5단계: 답변 조각과 경험 조각의 cosine 상위 후보. 사건 단위(`episodes`)는 4c |
 | 자소서 → 문항 유형 | 칩 | `questionTypes` | 정규식 상위 2개를 신뢰도와 함께 계산한다(4.1) |
@@ -574,7 +575,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
    - 태그 신호(REQUIREMENT, DOMAIN, COMPETENCY)는 `AI` 와 "추정"을 0.5배로 반영한다.
 5. **`trust` 문자열**은 `"확정"`(USER), `"AI 기록"`, `"추정"`(파생·계산) 셋 중 하나다. 웹과 MCP가 같은 값을 쓴다.
    - `trust` 는 **이 관계를 누가 확인했나**만 뜻한다(10.2 R8). "확정"은 사용자가 연결이 맞다고 눌렀다는 뜻이지, 실제 구현·개인 기여·운영 성과를 검증했다는 뜻이 아니다. SKILL에도 이 구분을 적는다.
-   - 원문 출처는 따로 돌려준다: 이력서 행은 `source{resumeId, resumeName, section, index, resumeVersion, textHash, excerpt}`, 경험은 `{experienceId, revision}`(사건 `{episodeId, version}` 은 4c).
+   - 원문 출처는 따로 돌려준다: 이력서 행은 `source{resumeId, resumeName, section, index, resumeVersion, textHash, excerpt}`, 경험은 `{experienceId, revision}`, 사건은 4c-1 에서 그 경험 개정과 episodeId 를 함께 쓴다(사건 자체 version 없음).
 
 ---
 
@@ -582,11 +583,13 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 
 ### 4.1 질의 모드
 
+아래는 전체 목표 구상이다. **4c-1c 에 포함할 입력과 검증·문항 원문 우선 검색은 6.10.1 이 정본**이다. 현재 구현의 입력은 7절 "3단계 구현 메모"이며, question·q 지원은 아직 없다.
+
 | 입력 | 쓰는 신호 |
 |---|---|
 | `positionId` / `postingId` / 저장하지 않은 `posting` (FIT) | REQUIREMENT, DOMAIN, PAST_USE, DENSE·LEXICAL(다섯 칸 본문을 질의로). 저장하지 않은 공고는 `companyName` 이 등록 기업과 맞을 때만 PAST_USE를 쓴다 |
 | `question` | 먼저 문항 유형을 정한다. 순서는 입력값 → 저장된 USER 태그 → 정규식 → (5단계 이후) 가장 가까운 과거 문항의 USER 유형이다. **상위 2개를 다중 라벨**로 두고 `query.questionTypes[{code, confidence, from}]` 에 싣는다. 두 라벨의 search_mode가 다르면 두 모드의 신호를 합친다 |
-| ↳ COMPETENCY 유형 | COMPETENCY, PAST_QUESTION, DENSE, LEXICAL |
+| ↳ COMPETENCY 유형 | 4c-1: 문항 원문 DENSE·LEXICAL 우선, 직무 신호는 보조(6.10.1). 고정 코드로 사건을 필터하는 COMPETENCY 신호는 폐기. PAST_QUESTION 은 6단계 |
 | ↳ FIT 유형 (지원동기, 포부, 직무 이해) | 직무(등록 id 또는 저장하지 않은 본문)가 주어지면 FIT 신호 전부. **PAST_QUESTION은 같은 회사·같은 업종의 written_for로 제한**한다. 직무가 없으면 DENSE와 `warnings:["NO_POSITION"]` 을 준다 |
 | ↳ SEMANTIC 유형 | DENSE, PAST_QUESTION |
 | `q` (자유 문장) | LEXICAL, DENSE |
@@ -599,12 +602,12 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 
 ### 4.2 후보와 신호
 
-**4단계 최소판에서 읽는 법** (10.7 R45): 사건은 4c 다. 4c 전의 후보는 경험(`type: EXPERIENCE`)과 미연결 행(`type: RESUME_ROW`) 둘이고 응답 형식은 같다. 아래의 사건 후보, `episodes[]` 묶음, `via: PARENT_EXPERIENCE`, 사건 태그를 쓰는 COMPETENCY 와 사건 벡터는 4c 가 열린 뒤에 켠다. PAST_USE·PAST_QUESTION 은 사건 대신 `self_introduction_experiences` 의 경험을 쓴다.
+**4단계 최소판에서 읽는 법** (10.7 R45): 사건은 4c 다. 4c 전의 후보는 경험(`type: EXPERIENCE`)과 미연결 행(`type: RESUME_ROW`) 둘이고 응답 형식은 같다. 아래의 사건 후보, `episodes[]` 묶음, `via: PARENT_EXPERIENCE`, 사건 벡터는 4c-1c 에서 켠다(6.10.1 검색이 정본). 사건 태그를 쓰는 COMPETENCY 신호는 폐기했다 — 사건에 역량 코드를 매기지 않는다(6.10.1 E4). PAST_USE·PAST_QUESTION 은 사건 대신 `self_introduction_experiences` 의 경험을 쓴다.
 
 **후보 단위**
 - **사건과 경험을 모두 후보로 둔다** (10.2 R4). 사건이 있는 경험도 경험 자체가 후보다(`type: EXPERIENCE`). Planetory에 '전처리 최적화' 사건만 있고 'HDFS 구축'은 경험 설명에만 있으면, HDFS 질의는 경험 후보로 돌아온다.
 - **같은 근거는 묶는다.** 한 경험과 그 사건이 함께 오르면 경험 한 줄 아래에 사건을 `episodes[]` 로 묶는다. 순위는 묶음 안 최고 점수다.
-- **물려받은 일치는 경로를 밝힌다.** 사건에는 기술 태그가 없어 경험의 태그로 일치한다. 이때 `why` 에 `via: PARENT_EXPERIENCE` 를 붙인다.
+- **물려받은 일치는 경로를 밝힌다.** 4c-1 사건은 직접 자유 태그가 있다. 경험의 기술만 맞으면 `why` 에 `via: PARENT_EXPERIENCE` 를 붙여 설명하되 사건의 직접 기술 신호·점수로 쓰지 않는다(6.10.1).
 - **은행에 없는 이력서 경험 행**도 후보로 넣는다(`type: RESUME_ROW`, 출처 `source{resumeId, resumeName, section, index, resumeVersion, textHash, excerpt}`). 그래서 가져오기 전에도 검색이 비지 않는다. RESUME_ROW에는 LEXICAL과 REQUIREMENT(행 `techStack` 과 본문)만 적용한다. **3단계는 이 후보만으로 동작한다.** 4단계부터 연결된 행은 경험 후보로 바뀌고 미연결 행만 남는다. 응답 형식은 그대로 두고 자료원만 바꾸는 전환 경로다(10.4 R29). 같은 (kind, title_key) 행은 한 줄로 묶고 출처를 모두 싣는다.
 
 | 신호 | 계산 | 출처 반영 |
@@ -612,7 +615,7 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 | REQUIREMENT | **요구는 공고에서 뽑고, 내 어휘로 뽑지 않는다**(10.3 R12). ① 요구 목록은 클라이언트가 공고 원문에서 뽑아 `requirements[{text, field, kind: SKILL\|QUALIFICATION, quote}]` 로 넘긴다. 내 자료에 없는 기술도 요구로 남아야 `uncovered` 에 나오기 때문이다. 넘기지 않으면 서버가 기술 환경 목록과 일반 별칭 시드 사전(내 어휘가 아니다)으로 뽑고 `query.requirementsSource: SERVER_DICTIONARY` 와 `warnings:["REQUIREMENTS_PARTIAL"]` 를 준다. ② 뽑은 요구를 내 경험과 대조한다. 내 SKILL 어휘(4단계부터 `experiences.skills`, 3단계는 행 `techStack` 을 `KeyNormalizer` 로 정규화한 값)는 별칭 일치와 검색 확장에만 쓴다. ③ `kind: QUALIFICATION`(경력 연수, 학력, 고용 조건)은 점수에 넣지 않고 `qualifications[]` 로 공고 인용과 함께 돌려준다. 충족 판단은 사용자와 클라이언트가 한다. 일치는 정확 일치, 별칭 일치, ASCII 토큰 포함 관계("AWS EC2"⊇"AWS")이고 포함 관계는 0.5배다. **칸마다 가중이 다르다**: 지원자격·요구 역량 1, 담당업무 0.7, 우대 역량 0.5, 기술 환경 0.3(초기값, 골드셋으로 조정). 채널 안 점수는 Σ 칸 가중 × 희소도 `ln(1 + N/df)` 다(N = 후보 경험 수, df = 그 기술을 가진 경험 수, 3단계는 행 묶음 수). 1 ≤ df ≤ N 이라 늘 ln 2 이상이고, 흔한 기술일수록 작다. 예전 식 `log(N/(1+df))` 는 N = df = 1 에서 −0.69가 되어 일치가 감점이 됐다(10.2 R7). `why` 에 맞은 칸(`field`)과 공고 인용(`quote`)을 적는다 | AI·추정 0.5배 |
 | DOMAIN | 대상 회사 `company_industries` 정규화 값 = 경험의 DOMAIN 키워드(USER/AI), 또는 3절의 파생 도메인(추정) | AI·추정 0.5배 |
 | PAST_USE | 같은 직무(3) > 같은 회사(2) > 같은 업종(1)에 written_for로 낸 답변이 uses로 쓴 경험(4c 뒤에는 사건) | USER 1배, AI 0.5배 |
-| COMPETENCY (4c 뒤) | 문항 유형 코드가 사건에 붙어 있음 | AI 0.5배 |
+| ~~COMPETENCY (옛 4c)~~ | 폐기. 사건에 문항 유형 코드를 붙이지 않는다. 4c-1 은 문항 원문과 직접 사건 텍스트를 검색한다(6.10.1) | — |
 | PAST_QUESTION | 문항↔과거 문항 벡터 상위 30 → 리랭커 K=10 → 그 문항들이 uses로 쓴 경험(4c 뒤에는 사건). FIT 유형이면 같은 회사·업종으로 제한 | USER·AI 모두. AI는 0.5배 |
 | DENSE | 질의 임베딩과 경험 조각 벡터(max-sim), 4c 뒤에는 사건 벡터의 cosine. owner로 좁힌 뒤 Java에서 정확히 정렬 | — |
 | LEXICAL | 기존 `rank()`(df를 루프 밖으로 뺀 판)를 경험 텍스트(사실·소재집·메모), RESUME_ROW 텍스트, 4c 뒤에는 사건 텍스트에 적용. 직무 다섯 칸 본문은 요구 태그 유무와 관계없이 **항상** 질의에 넣는다 | — |
@@ -628,10 +631,10 @@ ALTER TABLE self_introductions ADD COLUMN writing_context JSONB;  -- 작성 당�
 ### 4.3 융합, 필터, 다양성, 트랜잭션
 
 1. **융합은 가중 RRF(k=60)** 다. 척도가 다른 점수는 더하지 않는다. 후보의 신호별 기여는 `w × 1/(k + rank)` 이고, `w` 는 그 후보의 출처 가중(USER 1, AI·추정 0.5)이다. 0.5배를 신호 목록 안의 순위에만 넣으면, 후보가 하나이거나 모두 AI 기록일 때 순위가 그대로라 기여가 줄지 않는다(10.2 R7). 신호가 드문드문한 구조에서 RRF가 "몇 개 목록에 나왔나"로 기우는지는 4.5 평가로 확인한다.
-2. **신호는 하나씩 켠다.** 3단계는 LEXICAL·REQUIREMENT, 5단계에 DENSE를 더한다. DOMAIN·PAST_USE·COMPETENCY·PAST_QUESTION은 골드셋에서 이득이 확인된 것만 6단계에 넣는다.
+2. **신호는 하나씩 켠다.** 3단계는 LEXICAL·REQUIREMENT, 5단계에 DENSE를 더한다. 4c-1c 의 사건·문항 검색은 6.10.1, DOMAIN·PAST_USE·PAST_QUESTION 은 골드셋에서 이득이 확인된 것만 6단계에 넣는다. 고정 코드 COMPETENCY 사건 신호는 폐기했다.
 3. 계정당 후보가 수백 개라 신호마다 후보를 자르지 않는다.
 4. 하드 필터는 USER 간선에만 적용한다.
-5. **다양성**: 상위 `limit` 안에서 한 경험 묶음에는 사건을 2개까지만 펼친다(4c 뒤).
+5. **다양성**: 4c-1c 는 사건 후보를 먼저 평가한 뒤 경험으로 묶는다. 묶음 수 limit 과 묶음별 episodeLimit(기본 2)을 구분한다. 순서·동점·수용 기준은 6.10.1 이다.
 6. **트랜잭션**: 오케스트레이터 `ExperienceSearch` 에는 `@Transactional` 이 없다.
    1. 질의 벡터를 받는다. 트랜잭션 밖이고 타임아웃은 2초, 실패하면 `degraded:["dense"]` 로 표시하고 계속한다.
    2. readOnly 메서드 하나로 SQL 4~6회와 벡터 로드를 한다.
@@ -689,7 +692,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 | 문항·자유 문장 → 답변 조각 | `query: ` | `passage: ` |
 
 **길이 처리** (1200자가 512토큰에서 조용히 잘린 실측, `docs/experience-graph-search.md:150`):
-- **사건 (4c)**: STAR 4필드 + 성과 합계 900자 상한을 서비스에서 검사한다. 900자는 실측 비례로 낸 추정이고, 토크나이저로 다시 잰다. 그래도 `truncated` 가 오면 저장 응답에 경고를 싣는다.
+- **사건 (4c-1, 미구현)**: 옛 STAR 4필드·합계 900자 상한은 폐기했다. 6.10.1 의 필드별 상한과 800자 조각을 쓰고 잘림을 검사한다. 사건 전체를 한 임베딩 입력에 몰아넣지 않는다.
 - **경험**: 경험 원본의 사실(`facts`)·소재집(`dossier`)·메모 텍스트를 필드·문단 경계로 480토큰 이하 조각으로 나눈다. 점수는 조각들의 max-sim이다. 기업별 이력서 문구는 경험 조각에 넣지 않는다(미연결 행만 RESUME_ROW 후보로 따로 본다). 사건이 생겨도 경험 조각은 유지한다. 사건으로 정리되지 않은 업무가 설명이나 성과에만 있을 수 있기 때문이다.
 - **자소서**: 질문 1조각, 답변은 480토큰 조각들.
 
@@ -741,7 +744,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 | 도구 | 입력 | 출력 | 쓰기 |
 |---|---|---|---|
 | `experience_index` | `kinds?[]`, `ids?[]`(10개 이하. 주면 상세 모드), `cursor?` | 응답은 늘 `{counts, complete, importHint?, experiences[], unlinkedRows[]}` 모양이다. 3단계 최소판도 같은 모양이다(아래, 10.7 R44). **맨 앞**: `counts`(종류별 경험 수, AI 기록 수, 미등록 행 수, 출처 미상 자소서 수)와 `complete`. 미등록 행이 있으면 `importHint`(웹 가져오기 화면 안내). 경험 한 줄: `{id, kind, title, period, revision, reviewed, skills[], domains[], inResumes[{id,name}], usedInSelfIntros}`. 그다음 **`unlinkedRows[]`**: 은행에 없는 행을 `(kind, title_key, 시작 연월 숫자)` 로 묶은 것(3단계 묶음 함수). 정렬은 PROJECT → CAREER → ACTIVITY → TRAINING → OTHER, 한 쪽에 60개. 상세 모드는 `version`(다음 `experience_save` 의 `expectedVersion`), 사실·소재집·근거(인용·주변 문맥·위치·해시, 첨부는 메타와 웹 주소), 개정 번호와 검토 상태, 연결된 이력서 행의 개정 번호와 "재검토 필요" 표시, `skills`·`domains`, 이 경험을 작성 근거로 쓴 자소서 `{id, question, company · position, experienceRevision, trust}`. 사건·"원본 반영 검토"는 4c | × |
-| `experience_search` | `positionId?`, `postingId?`, `posting?`(저장하지 않는 공고 다섯 칸, 4.1), `requirements?[]`(클라이언트가 공고에서 뽑은 요구, 4.2), `question?`, `q?`, `competencies?[]`, `kinds?[]`, `limit?=8 (≤20)` | `query`(직무, 회사, 업종, 요구 키와 칸, 문항 유형과 신뢰도, 이 직무용 직접 출처 자소서 `{id, question}`), `results[]`(5.4), `uncovered[]`, `coverageIncomplete`, `warnings[]`, `degraded[]` | × |
+| `experience_search` | MCP 는 `{request:{positionId?, posting?, requirements?, question?, q?, kinds?, limit?, episodeLimit?}}`. 4c-1c 의 지원 조합·상한은 6.10.1 이 정본. 공고 없이 문항/q 만 허용. postingId·competencies 는 이번 단계에 넣지 않음 | 기존 결과 틀에 사건 후보·근거 포인터·원문 query·질의 모드·related 를 추가한다(6.10.1 요청·응답 예시). 기존 직무 검색은 유지 | × |
 | `experience_save` | `{id?, expectedVersion?, kind, title, startYm, memo, facts?, dossier?, skills?[], domains?[]}`. null=유지. `facts`·`dossier` 는 6.5 모양이다. **기존 경험(`id` 있음)에 `facts`·`dossier` 를 보내면 `expectedVersion` 이 필수**다. 없으면 400 `VERSION_REQUIRED`, 다르면 409 `EXPERIENCE_STALE`(현재 버전은 싣지 않는다, T2 와 같은 이유). `changeKind` 입력은 없다(10.7 R39). 서버가 `facts` 배열 항목의 안정 `id` 로 ADD·CORRECT 를 판정한다(6.5). `facts` 내용 해시가 직전 개정과 같으면 개정을 만들지 않는다. 근거에 인용이 없거나 로컬 경로뿐이면 400. 기술·도메인은 이름으로 받아 `KeyNormalizer` 로 정규화한다. 사건 필드(`episodes`, `removeEpisodeIds`)는 4c | `{id, version, revision, changeKind: INIT\|ADD\|CORRECT\|NONE, needsReview[](정정으로 재검토가 필요해진 이력서·자소서), normalizedSkills[], warnings[]}` | ○ (출처 AI) |
 | `resume_add_experiences` | `id`, `items[{experienceId}]`, `expectedVersion?`(행 추가라 선택) | 경험마다 행을 만들어 종류에 맞는 섹션 끝에 붙인다. 경험 원본의 사실로 중립 문구를 만들고(`FACTS`), 행에 `experienceId` 와 지금의 `experienceRevision` 을 쓴다. 기존 기업용 행에서 복사하는 `ROW` 는 4c 다(6.10). 전부 들어가거나 전부 실패한다. 이 전제는 섹션 상한 검증(T6, 4단계)이다. 이미 있는 경험은 건너뛴다. 반환은 outline 모양과 새 `version` | ○ |
 | `writing_guide_get` | 없음 | `{version, body, updatedAt}`. 경험별 주의사항은 `experience_index` 상세에 있다(6.7) | × |
@@ -775,7 +778,7 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 
 ### 5.4 응답 예시 (`experience_search`)
 
-6단계까지 켜고 4c(사건)까지 연 모습이다. 4c 전에는 `episodes[]`·`via`·`competencies` 가 없고, 결과는 경험과 RESUME_ROW 뿐이며 형식은 같다. `trust` 는 관계를 누가 확인했나이고, 원문이 어디 있는지는 `source` 다.
+아래는 옛 6단계 전체 목표 예시다. **4c-1 의 현재 목표 계약과 실행 가능한 JSON 예시는 6.10.1 이 정본**이며, 아래 competencies·사건 표현을 그대로 구현하지 않는다. 4c 전에는 결과가 경험과 RESUME_ROW 뿐이다. `trust` 는 관계를 누가 확인했나이고 원문 출처는 별개다.
 
 ```json
 {
@@ -845,11 +848,11 @@ SELECT experience_id, embedding FROM experience_chunks WHERE owner_id = :o;
 
    규칙: 행 도구는 병렬로 부르지 않는다. 직전 응답의 `version` 을 다음 호출의 `expectedVersion` 으로 넘긴다. **409를 받으면 같은 행 번호로 다시 보내지 않는다.** 이력서를 다시 읽고, 고칠 행을 제목·기간으로 다시 찾은 뒤 보낸다. 찾지 못하면 사용자에게 묻는다. 4단계부터는 경험 행을 `experienceId` 로 지목한다. 행을 고쳐 보낼 때 `experienceId`·`experienceRevision` 을 지우거나 바꾸지 않는다.
 2. **지원 맞춤 경험 찾기**
-   1. 등록된 직무면 `positionId`, 아니면 공고 본문을 다섯 칸으로 나눠 `posting` 으로 넘겨 `experience_search` 를 부른다. **고르기 전에는 공고를 저장하지 않는다.** 공고 여러 개를 추릴 때도 같다.
+   1. 등록된 직무면 `positionId`, 아니면 공고 본문을 다섯 칸으로 나눠 `posting` 으로 넘겨 `experience_search` 를 부른다. **4c-1c 뒤에는 문항 원문(question)·보충 질의(q)를 함께 보내고, 문항만 조회해도 된다**(6.10.1). 고르기 전에는 공고를 저장하지 않는다. 공고 여러 개를 추릴 때도 같다.
    2. 후보를 `why` 와 원문 출처(`source`)와 함께 보여 준다. `why` 에 DENSE만 있으면 "의미상 비슷할 뿐"이라고 밝힌다. `uncovered` 를 알리되, `coverageIncomplete` 면 결핍을 단정하지 않는다. `trust: 확정` 은 "사용자가 연결을 확인함"이지 성과 검증이 아니라고 구분해 말한다.
    3. 사용자가 지원할 공고와 경험을 고른다. 고른 공고만 `posting_create` 로 저장한다.
-   4. `writing_guide_get` 과 후보의 주의사항(`cautions`)을 읽고 작성한다. "재검토 필요"·"AI 기록" 표시가 있는 사실은 사용자에게 확인받는다.
-   5. `self_intro_create(positionIds, experiences, questionTypes, writingContext)` 로 저장한다. `experiences` 는 쓴 경험과 읽은 개정의 쌍이다(4c 뒤에는 사건 단위 `episodes`). 이 연결은 "AI 기록"이고 웹에서 확정해야 한다고 사용자에게 알린다.
+   4. `writing_guide_get` 과 후보의 `experience_index(ids)` 상세를 읽고 작성한다. 4c-1 뒤에는 사건별 항목·근거를 COMMON·UNASSIGNED 와 구분하고 검색 때 revision 과 달라지면 재검색한다(6.10.1). "재검토 필요"·"AI 기록" 표시가 있는 사실은 사용자에게 확인받는다.
+   5. `self_intro_create(positionIds, experiences, questionTypes, writingContext)` 로 저장한다. `experiences` 는 쓴 경험과 읽은 개정의 쌍이고 4c-1d 에서 `episodeId?` 를 더한다(별도 episodes 입력 아님). 이 연결은 "AI 기록"이고 웹에서 확정해야 한다고 사용자에게 알린다.
 3. **새 경험 등록과 경험 정리** (중앙 관리, 6.5)
    1. 사용자가 준 설명·자료를 읽고 `experience_index` 로 기존 경험과 겹치는지 먼저 찾는다. 자소서 답변은 "어느 경험을 썼나"를 찾는 데만 쓰고 사실 근거로 쓰지 않는다.
    2. 역할·행동·결과·측정 범위를 근거(인용·주변 문맥·위치)와 함께 정리하고, 확인하지 못한 것과 자료끼리 어긋나는 것을 따로 적는다. 로컬 파일은 경로가 아니라 필요한 발췌를 근거로 넣는다.
@@ -1009,7 +1012,7 @@ JobSight가 개인 취업 컨텍스트의 중앙 관리 지점이다(10.4 R23). 
      - 근거·미확인·충돌 칸(`evidence[]`, `unverified[]`, `conflicts[]`)만 바뀌었으면 `ADD` 다. 주장 자체는 그대로라 기업용 문구의 재검토가 필요 없다.
   3. 기존 경험에 `facts`·`dossier` 를 보내면 `expectedVersion` 이 필수다(5.2). 개정은 `@Version` 검사와 같은 트랜잭션에서 T9 잠금 아래에 만든다.
 - `reviewed_revision` 이 `revision` 보다 낮으면 "AI 기록"이다. 사용자가 웹에서 검토하면 확정된다.
-- 사건 STAR(900자 상한, 검색용 요약)는 4c 다. 4단계는 상세를 소재집에 둔다.
+- 사건은 4c-1 설계(6.10.1, 미구현)다. 옛 STAR 4칸·900자 강제 규칙은 폐기했다. 현재 4단계는 상세를 소재집에 둔다.
 - 검색(LEXICAL·DENSE)은 사실과 소재집을 경험 텍스트로 쓴다. `unverified`·`cautions` 는 검색에 넣지 않고 결과에 함께 싣는다.
 
 **근거와 MCP 접근** (R27). 근거를 서버에 저장하는 것과 Codex가 읽을 수 있는 것은 별개다.
@@ -1118,11 +1121,287 @@ JobSight가 개인 취업 컨텍스트의 중앙 관리 지점이다(10.4 R23). 
 
 | 미룬 것 | 4단계 최소판의 대신 | 다시 열 신호 |
 |---|---|---|
-| 사건(STAR) `episodes`, `episode_competencies`, `self_introduction_episodes`, `EPISODE_*` 오류 코드 | 자소서 작성 근거는 `self_introduction_experiences` 의 `(경험 id, 개정)` 쌍. 상세 서술은 `dossier` | 골드셋에서 경험 단위 후보가 너무 굵어 문항 맞춤이 떨어지는 사례 |
+| ~~사건(STAR) `episodes`, `episode_competencies`, `self_introduction_episodes`~~ → **6.10.1 로 개정해 연다(2026-11-03 사용자 결정)** | 4c-1 전: 자소서 작성 근거는 `self_introduction_experiences` 의 `(경험 id, 개정)` 쌍. 상세 서술은 `dossier` | 신호 확인됨: 한 프로젝트에 직무별로 써야 할 사건이 여럿인데 경험 단위 후보로는 고를 수 없다(6.10.1 목적) |
 | 병합 계보 `merged_into`, 병합 절차(옛 6.3-3), 병합 경로 정정 검사(옛 6.8), `MERGE_CONFLICT`·`MERGE_CYCLE` | 행을 다른 경험에 다시 연결 + 쓰지 않는 경험 삭제(6.3-3, 6.4) | 중복 경험이 잦고, 지우면 자소서 작성 근거를 잃는 경우가 실제로 생길 때 |
 | `keywords`·`experience_keywords` | `experiences.skills`·`domains TEXT[]` (`KeyNormalizer`). 키별 출처 대신 경험의 검토 상태 | 계정별 별칭 편집이나 키별 출처가 필요할 때 |
 | `resume_add_experiences` 의 `ROW` 복사 | `FACTS` 만 | 기업용 문구를 다시 쓰자는 요구가 확인될 때 |
 | "원본 반영 검토" 휴리스틱 | 표시 없음. "재검토 필요"(정정)만 | 웹에서 이력서만 고쳐 원본이 낡는 사례가 확인될 때 |
+
+#### 6.10.1 4c-1 사건 — 개정 설계 (2026-11-03)
+
+> 이 절이 사건의 정본이다. 아래 "DDL 스케치"의 `episodes`·`episode_competencies`·`self_introduction_episodes`, "병합 경로의 정정과 사건 단위 작성 근거 계약"의 사건 단위 REST/MCP 계약, "그 밖에 미룬 동작"의 `experience_save` 사건 필드는 **폐기**다. 병합 계보·키워드 테이블은 그대로 보류다. 되돌린 이유는 `docs/decisions.md` 「사건은 경험 사실 안에, 분류는 자유 태그로」.
+
+**목적.** 한 경험(프로젝트 A) 안에 성격이 다른 장면이 여럿 있다 — 하둡 성능 개선, 서버 장애 대응, 팀원 갈등 조율. 이력서에는 두 직무(서버 관리, 하둡) 모두 A 를 적어도, 자소서는 문항마다 다른 장면을 써야 한다.
+
+- 직무 적합 문항: 하둡 직무 → 성능 개선 장면, 서버 관리 직무 → 장애 대응 장면.
+- 협업 문항: 직무와 무관하게 갈등 조율 장면.
+
+지금(4단계·5단계)은 후보와 작성 근거의 단위가 경험이라 "A 가 맞다"까지만 알 수 있다. 장면 고르기는 AI 가 사실 목록을 매번 다시 읽어야 하고, 저장 구조로 남지 않는다.
+
+**결정**
+
+| # | 결정 | 이유 | 버린 대안 |
+|---|---|---|---|
+| E1 | **사건은 `facts.episodes[]` 에 둔다.** 별도 테이블을 두지 않는다 | 사건도 사실이다. 개정 판정(항목 id 짝짓기·CORRECT)·개정 스냅샷·`expectedVersion`·OwnerLock 을 그대로 쓴다. 옛 초안은 `episodes` 행의 `version` 과 `experience_revisions.episodes` 스냅샷을 이중으로 들었다 | `episodes` 테이블(옛 초안) — 개정이 두 갈래가 된다 |
+| E2 | **사건의 행동·결과는 기존 항목에 `episodeId` 를 달아 묶는다.** 사건 자체는 `{id, title, context, tags[]}` 만 든다 | 같은 문장을 두 번 저장하지 않는다. S/T 는 `context`, A/R 은 항목이다. STAR 칸을 강제하지 않는다 — 짧은 장면도 제목과 항목 하나면 된다 | STAR 4칸 필수(옛 초안) — 형식이 다른 장면을 칸에 억지로 맞춘다 |
+| E3 | 항목 범위를 **사건 소속 / 확인된 경험 공통 / 미분류**로 나눈다 | `episodeId` 가 없다는 이유만으로 모든 사건에 적용되는 사실이 되지 않는다. 구 데이터는 미분류로 읽어 저장 호환성을 지킨다 | 사건 미지정 = 경험 공통 — 가져온 성과가 관련 없는 사건에 섞인다 |
+| E4 | **사건 분류는 자유 태그(`tags[]`)와 의미 검색으로 한다.** 시스템 고정 코드(`competencies`)를 사건에 붙이지 않는다. `competencies` 는 문항이 무엇을 묻는지 해석하는 데만 쓴다 | 고정 어휘에 없는 장면(예: 데이터 이관 협상, 규제 대응)도 정리되어야 한다. 문항 쪽은 고정 어휘가 쓸모 있다(정규식 추정·검색 모드) | `episode_competencies`(옛 초안) — 예상 못 한 장면이 맞지 않는 칸에 들어가거나 빠진다 |
+| E5 | **"비슷한 사건" 간선은 저장하지 않는다.** 저장하는 관계는 사실에서 나오는 셋뿐: 사건 → 경험(소속, JSON 안), 사건 → 태그(JSON 안), 자소서 → 사건(E6). 비슷함은 질의 때 벡터로 계산한다 | 저장한 유사 간선은 사실이 바뀔 때마다 낡는다. 계정당 사건 수백 개 규모라 질의 때 계산해도 수십 ms 다(5단계 D11 실측) | 유사 간선 테이블·그래프 DB(첫 구상, D3·D6 에서 이미 폐기) |
+| E6 | **자소서 작성 근거를 `(경험, 개정, 사건)` 으로 넓힌다.** `self_introduction_experiences` 에 `episode_id` 열을 더한다(빈 문자열 = 경험 전체) | 같은 경험의 두 사건을 한 답변에 쓸 수 있어야 하고, 기존 근거(경험 전체)는 그대로 유효해야 한다 | `self_introduction_episodes` 별도 표(옛 초안) — 근거가 두 표로 갈라져 재검토 판정을 두 번 한다 |
+| E7 | **"재검토 필요"를 사건 범위로 좁힌다.** 개정 이력에 그 CORRECT 가 건드린 사건 id 집합을 남긴다 | 하둡 사건만 정정했는데 갈등 사건으로 쓴 자소서까지 재검토가 뜨면 표시가 의미를 잃는다 | 경험 단위 재검토 유지 — 사건이 늘수록 거짓 경보가 는다 |
+| E8 | **문항·자유 질의 입력과 사건 우선 순위 계산을 4c-1c 에 포함한다.** 6단계 추가 신호를 기다리지 않는다 | 사건을 저장해도 문항을 받지 못하면 지원서 작성에 쓸 수 없다. 고정 문항 유형은 보조 해석이고 원래 문항으로 항상 검색한다 | 사건 저장·벡터만 구현하고 `question`·`q` 입력은 이후로 미룸 |
+
+**상태와 적용 범위.** 이 절 전체는 **설계, 미구현**이다. 현재 `ExperienceSearchRequest` 는 `positionId` 또는 `posting`, `requirements`, `limit` 만 받고 공고 없는 검색을 거절한다. 아래 요청·응답은 4c-1c 목표 계약이며 현재 API 사용법이 아니다. 이번 PR에서는 DTO·서비스·DB·플러그인·웹 코드를 바꾸지 않는다. 4.1·4.2·5.2·5.4 에 남은 이후 단계 구상과 충돌하면 사건 관련 계약은 이 절을 따른다.
+
+**데이터 모양** (예시는 합성 값)
+
+```jsonc
+// experiences.facts (4c-1)
+{
+  "period": "2024.03~2024.12", "role": "백엔드",
+  "episodes": [
+    { "id": "ep1", "title": "하둡 배치 성능 개선", "context": "야간 집계가 6시간 걸려 아침 리포트가 늦었다",
+      "tags": ["하둡", "배치 튜닝", "성능 개선"] },
+    { "id": "ep2", "title": "서버 디스크 장애 대응", "context": null, "tags": ["장애 대응", "리눅스"] },
+    { "id": "ep3", "title": "API 설계 이견 조율", "context": "프런트와 응답 형식을 두고 일주일 대립",
+      "tags": ["협업", "의견 조율"] }
+  ],
+  "actions": [
+    { "id": "a1", "text": "파티션 키를 날짜+지역으로 바꿨다", "scope": "EPISODE", "episodeId": "ep1", "evidenceIds": [] },
+    { "id": "a2", "text": "디스크 사용량 경보를 붙였다", "scope": "EPISODE", "episodeId": "ep2", "evidenceIds": [] },
+    { "id": "a3", "text": "두 안의 비용을 표로 비교해 공유했다", "scope": "EPISODE", "episodeId": "ep3", "evidenceIds": [] },
+    { "id": "a4", "text": "주간 코드 리뷰를 운영했다", "scope": "COMMON", "evidenceIds": [] },
+    { "id": "a5", "text": "이력서에서 가져왔으나 사건을 아직 확인하지 않은 행동", "scope": "UNASSIGNED", "evidenceIds": [] }
+  ],
+  "results": [ { "id": "r1", "text": "집계 6시간 → 1시간 40분", "scope": "EPISODE", "episodeId": "ep1", "evidenceIds": [] } ]
+}
+```
+
+- 사건 id 는 항목 id 와 같은 할당기(`ExperienceBankService` 의 `unique`, 접두 `ep`)를 쓰고, 경험 안에서 유일하다. 명시 id 를 먼저 비켜서 붙이는 규칙도 같다.
+- 상한: 사건 30개, `title` 200자, `context` 2000자(사실 항목과 같음), 태그 사건당 10개·각 50자. 넘으면 400 `EPISODE_LIMIT`.
+- 항목의 `episodeId` 가 그 경험의 사건이 아니면 400 `EPISODE_NOT_FOUND`. 직전 저장본에 있던 사건을 목록에서 지웠을 때만 그 항목을 **미분류로 돌린다**(`scope: UNASSIGNED`, `episodeId` 제거, `EPISODE_ITEMS_DETACHED` 경고). 새로 입력한 오타 id 를 같은 규칙으로 묵인하지 않는다.
+- 태그는 **사용자·AI 가 쓴 원문만** 저장한다(`"배치 튜닝"`). 비교용 키는 질의 때 `KeyNormalizer` 로 계산한다. `skills` 가 키만 저장해 토큰 경계를 잃은 함정(docs/experience-graph-search.md 「함정」)을 되풀이하지 않는다. 같은 사건 안의 태그는 키가 같으면 하나로 합친다.
+
+**항목 범위와 구 데이터** (E3)
+
+| 저장된 범위 | 의미 | 사건 상세·검색에서의 취급 |
+|---|---|---|
+| `scope: EPISODE` + `episodeId` | 해당 사건에서 한 행동·결과 | 그 사건의 본문·주장·근거에 포함 |
+| `scope: COMMON`, `episodeId` 없음 | 경험 전체에 적용됨을 확인한 사실 | 공통 자료로 별도 표시. 사건의 직접 행동·성과나 사건별 점수로 복제하지 않음 |
+| `scope: UNASSIGNED`, `episodeId` 없음 | 아직 어느 사건인지 확인하지 못함 | 경험 전체 검색에는 남기되, 사건의 행동·성과에는 넣지 않음. `UNASSIGNED_FACTS` 경고와 별도 목록 |
+
+- `scope` 생략 + 유효한 `episodeId` 는 EPISODE, 둘 다 생략하면 UNASSIGNED 로 정규화한다. `COMMON`·`UNASSIGNED` 와 `episodeId` 동시 지정, `EPISODE` 인데 id 없음은 400 `EPISODE_SCOPE_CONFLICT` 다. 빈 문자열은 사건 id 로 쓰지 않는다.
+- 적용 대상은 사실 항목(`actions`, `results`, `unverified`, `conflicts`)이다. `period`·`role`·`measurement` 는 경험 공통 맥락이며, 측정 범위를 특정 사건 전체의 성과로 확대하지 않는다. 근거(`evidence`)는 항목의 `evidenceIds` 로 따라간다.
+- 기존 스냅샷을 다시 쓰거나 사건으로 자동 분류하지 않는다. 구 항목은 조회 때 UNASSIGNED 로 해석하고 현재 원본을 다음에 저장할 때 정규화한다. 비교는 직전 사실과 새 사실 **양쪽에 같은 유효 범위 기본값을 적용한 내용**으로 한다. 구 facts_hash 문자열과 새 정규화 해시가 다르다는 이유만으로 개정을 만들거나 과거 해시를 덮어쓰지 않는다. 실제 사건 배정·공통 확정은 아래 개정 판정을 따른다.
+- COMMON 은 사건 유형이 아니라 사실의 적용 범위다. AI 가 가져오기나 사건 삭제를 이유로 자동 COMMON 으로 승격하지 않는다. MCP 는 기존처럼 AI 기록만 남기고 확정은 웹에서 한다.
+
+**개정 판정** (지금 규칙의 연장 — `ExperienceBankService.changeKind`)
+
+| 바뀐 것 | 종류 | 재검토 범위(E7) |
+|---|---|---|
+| 새 사건, 새 항목(사건 소속 포함) | ADD | 없음 |
+| 기존 사건의 `title`·`context` 수정·삭제 | CORRECT | 그 사건 |
+| 사건에 속한 항목의 `text` 수정·삭제 | CORRECT | 수정 전 사건. 동시에 다른 사건으로 옮기면 변경 후 사건도 포함 |
+| COMMON·UNASSIGNED 항목의 `text` 수정·삭제, 기존 `period`·`role`·`measurement` 수정·삭제 | CORRECT | 경험 전체. 미분류는 적용 범위를 모르므로 보수적으로 판정 |
+| 기존 항목 EPISODE(ep1) → EPISODE(ep2), 또는 EPISODE → UNASSIGNED | CORRECT | 변경 전·후 사건 id 의 합집합(UNASSIGNED 는 id 없음) |
+| 기존 항목의 범위 변경에 COMMON 이 포함됨 | CORRECT | 경험 전체. 단 UNASSIGNED → COMMON 은 아래 ADD |
+| UNASSIGNED → EPISODE 또는 COMMON, 주장 문장 불변 | ADD | 없음. 이전에는 특정 사건이나 전체에 적용된다고 확정하지 않았음 |
+| 사건 삭제 후 남은 항목의 UNASSIGNED 전환 | CORRECT | 삭제한 사건. COMMON 으로 자동 전환하지 않음 |
+| 사건 `tags` 만 바뀜 | 개정 없음(NONE) | — 검색 메타데이터라 사실 해시에서 뺀다. 임베딩은 다시 계산한다 |
+
+- `experience_revisions` 에 `corrected_episodes TEXT[] NULL` 을 더한다. CORRECT 가 경험 전체에 닿으면 `NULL`(= 전체), 사건에만 닿으면 그 사건 id 들. ADD·INIT 은 `'{}'`.
+- 재검토 판정: 근거의 기준 `seq` 보다 큰 CORRECT 중 `corrected_episodes IS NULL OR episode_id = ANY(corrected_episodes)` 가 있으면 "재검토 필요". 이력서 행(사건 없음)과 사건 없는 자소서 근거는 지금처럼 모든 CORRECT 를 본다.
+- 한 저장에 여러 변경이 있으면 범위는 합집합이고 경험 전체 정정이 하나라도 있으면 NULL 이 우선한다. 과거 자소서의 `(경험, 개정, 사건)` 은 옮기거나 다시 쓰지 않는다. 예: `a2` 를 ep1 에 잘못 붙였다 ep2 로 고치면 ep1 근거의 기존 답변에 재검토가 뜬다. "문장은 같으므로 ADD"였던 초안 규칙은 폐기했다.
+
+**자소서 작성 근거** (E6)
+
+```sql
+-- V{n}__experience_episodes.sql (4c-1)
+ALTER TABLE experience_revisions ADD COLUMN corrected_episodes TEXT[];        -- NULL = 경험 전체, '{}' = 정정 없음
+ALTER TABLE self_introduction_experiences ADD COLUMN episode_id VARCHAR(40) NOT NULL DEFAULT '';  -- '' = 경험 전체
+ALTER TABLE self_introduction_experiences DROP CONSTRAINT self_introduction_experiences_pkey;
+ALTER TABLE self_introduction_experiences ADD PRIMARY KEY (self_introduction_id, experience_id, episode_id);
+ALTER TABLE experience_chunks ADD COLUMN episode_id VARCHAR(40);             -- NULL = 경험 공통 조각
+```
+
+- REST/MCP: `experiences[{experienceId, experienceRevision, episodeId?}]`. `episodeId` 는 그 **개정 스냅샷**(`experience_revisions.facts`)에 있어야 한다 — 없으면 404 `EPISODE_NOT_FOUND`. 지금 개정에서 사건이 지워졌어도 과거 근거는 유효하다(개정 스냅샷이 증거).
+- 기존 행은 `episode_id = ''` 로 그대로다. 같은 경험을 경험 전체와 사건으로 함께 근거로 둘 수 있다(서로 다른 행).
+- 사건 이름은 근거에 복사하지 않는다. 조회 때 그 개정 스냅샷에서 읽는다.
+
+**검색 요청 계약** (4c-1c, 5단계 위에 더한다)
+
+새 도구를 만들지 않고 REST 와 MCP 가 같은 `ExperienceSearchRequest` 를 쓴다. MCP 의 `{request:{...}}` 래퍼와 기존 네 필드는 유지한다. 문항 검색을 6단계의 DOMAIN·PAST_USE·PAST_QUESTION·리랭커에 의존시키지 않는다.
+
+| 필드 | 4c-1c 목표 계약 |
+|---|---|
+| `positionId?`, `posting?` | 등록 직무 또는 저장하지 않는 공고(지금의 다섯 칸). 둘을 동시에 주면 400 `QUERY_CONFLICT`. 둘 다 없어도 문항·자유 질의가 있으면 정상. 이름만 있는 posting 도 맥락으로 쓸 수 있지만 실제 담당업무가 없으면 `POSITION_CONTEXT_THIN` 경고 |
+| `question?` | 공백 제외 1~2000자. 자소서 문항 원문. 회사·직무와 함께 주거나 문항만 줘도 된다. 의미 검색에는 앞 800자만 쓴다(아래 "질의 길이") |
+| `questionMode?` | `AUTO`(기본) · `FIT` · `COMPETENCY`. 문항이 직무 적합을 묻는지 클라이언트가 알면 명시한다. 명시값이 정규식 추정보다 우선한다(아래 "문항 성격 판정") |
+| `q?` | 공백 제외 1~2000자. 자유 문장 보충 질의. `question` 과 함께 주면 질문 원문을 보존하고 둘을 검색에 사용한다. "AX 개발자"처럼 직무명만 줘도 허용하되 구체 경험이 있다고 단정하지 않는다 |
+| `requirements?` | 기존 상한 60개·다섯 칸·SKILL/QUALIFICATION 계약 유지. positionId 또는 posting 없이 주면 400 `REQUIREMENTS_WITHOUT_POSITION` |
+| `kinds?` | 경험 종류 1~5개(PROJECT/ACTIVITY/CAREER/TRAINING/OTHER), 생략하면 전부. 사건 역량 유형으로는 필터하지 않는다 |
+| `limit?` | 반환할 경험 묶음 수, 기본 8·1~20. 생략한 기존 호출도 유효 |
+| `episodeLimit?` | 묶음마다 펼칠 사건 수, 기본 2·1~5. `limit` 과 단위를 구분한다 |
+
+- `positionId`, 유효 내용이 있는 posting, question, q 중 하나 이상이 필요하다. 빈 문자열은 생략으로 취급하고, 전부 없으면 400 `QUERY_REQUIRED`. 공고·직무 없이 문항만 오는 것은 `NO_POSITION` 안내일 뿐 오류가 아니다. 상한·잘못된 enum·정수가 아닌 limit 등은 400이며 조용히 자르지 않는다.
+- 소유자 밖의 positionId 는 404 다. posting·q 에 적힌 회사명은 검색 맥락이지 다른 계정 자료를 읽는 권한이 아니다. 조회로 공고·경험·연결을 생성하지 않는다.
+- **문항 원문은 분류 결과와 무관하게 항상 검색한다.** 고정 코드 일치가 사건의 진입 조건이 되지 않는다. `postingId`·명시 `competencies` 입력과 추가 신호는 이번 범위에 넣지 않는다.
+- **문항 성격 판정** (PR #21 2차 리뷰). 분류는 사건을 거르지 않지만 아래 가중표의 **행을 고르므로 순위에 영향을 준다** — 이 점을 숨기지 않고, 분류가 틀려도 정답 사건이 사라지지 않게 다음 순서로 정한다.
+  1. `questionMode` 가 `FIT`·`COMPETENCY` 면 그대로 쓴다(`query.questionMode.from: CLIENT`).
+  2. `AUTO` 면 4.1 정규식(`Competency`)으로 추정한다. 상위 코드가 FIT 모드(지원동기·입사 후 포부·직무 이해·적합성)면 FIT, 신뢰도 있는 COMPETENCY/SEMANTIC 코드면 비FIT.
+  3. 코드가 없거나 신뢰도가 낮은데 **직무(J)가 있으면 FIT 행**을 쓰고 `QUESTION_TYPE_UNCERTAIN` 을 준다. 직무 맥락을 받은 요청에서 직무 신호를 0.15로 깎아 정답 기술 사건을 잃는 쪽이 더 나쁘다. 직무가 없으면 "문항 또는 q 만" 행이다.
+  4. 비FIT 행으로 평가했는데 직무가 있고 **진입 조건(규칙 5)을 통과한 사건 후보가 0건**이면, 같은 요청을 FIT 행으로 한 번 더 평가하고 `QUESTION_MODE_FALLBACK` 을 준다(`query.questionMode: {value: FIT, from: FALLBACK}`). 재평가는 한 번뿐이다.
+  - 정규식은 "전문성"을 `TECH_EXPERTISE`(COMPETENCY)로, "직무 이해·적합·관련"만 `JOB_FIT`(FIT)으로 잡는다(`Competency.java`). "지원 분야에서 전문성을 키운 경험", "이 포지션에서 기여할 수 있는 역량" 같은 직무 적합 문항은 2번에서 비FIT 으로 갈 수 있다 — 3·4번과 `questionMode` 가 그 구멍을 막는다. 골드셋에 이런 문항을 반드시 넣는다(측정 절).
+
+**후보·점수·묶음 규칙** (E8)
+
+1. **내용의 경계를 먼저 지킨다.** 사건 조각은 "경험 제목 + 사건 제목 + context + 그 사건의 actions/results + 자유 태그"다. 지금처럼 800자 이하로 나누고 모든 조각이 같은 `episode_id` 를 든다. 다른 사건, COMMON·UNASSIGNED 항목과 프로젝트 전체 skills 를 사건 텍스트에 복제하지 않는다. 경험 전체 후보는 유지하여 미분류 사실·사건이 없는 업무도 찾을 수 있게 한다. 사건별 `max-sim` 은 그 사건 조각 안에서만 계산한다.
+2. **두 질의를 분리한다.** Q 는 question 원문과 q, J 는 직무명·담당업무·지원/요구/우대 역량·기술 환경이다. Q 가 없으면 J 로 기존 직무 검색을 한다. 회사명·업종은 응답 맥락에 남기고 사건의 기술 사용·역량 증거로 취급하지 않는다. 원문 Q 는 태그나 추정 코드로 대체하지 않는다. 코드 설명을 붙이는 질의 확장은 기본 OFF 이며 골드셋 이득을 확인한 뒤 searchConfig 를 바꿔 켠다.
+3. **경험 전체와 사건 각각을 먼저 평가한다.** 모든 소유 경험의 후보를 만들고, 부모 프로젝트 상위 limit 을 먼저 잘라 그 안의 사건만 검색하지 않는다. 같은 조회에서 후보·자료 버전은 함께 읽는다. 사건 태그·사건 본문의 기술 일치는 사건의 REQUIREMENT 에 쓰되, 부모 skills 에만 있는 일치는 사건 점수에 넣지 않고 설명(`via: PARENT_EXPERIENCE`)에만 남긴다. 부모의 기술이 사건에서 사용됐다고 추론하지 않는다.
+4. **융합은 가중 RRF(k=60)** 다. 아래는 구현 전 고정할 초기 가중이며, 신호마다 순위를 만든 뒤 `가중 / (60 + 순위)`를 더한다. BM25 원점수와 cosine 을 직접 더하지 않는다. 기존 USER/AI 가중(1/0.5)은 각 후보의 REQUIREMENT 기여에 적용하고 DENSE·LEXICAL 에 새로 붙이지 않는다. 관련도 하한·신호 가중을 바꾸면 searchConfig 를 올린다.
+
+| 질의 | Q-DENSE | Q-LEXICAL | J-DENSE | J-LEXICAL | 사건 직접 REQUIREMENT |
+|---|---|---|---|---|---|
+| 문항·q 없이 직무만 | — | — | 1 | 1 | 1 |
+| 직무 적합(FIT) 문항 + 직무 — 명시·추정·유형 미확신·대체 경로 포함 | 1 | 1 | 0.5 | 0.5 | 1 |
+| 협업 등 비FIT 문항 또는 q + 직무 (신뢰도 있는 비FIT 추정 또는 `questionMode: COMPETENCY`) | 1 | 1 | 0.15 | 0.15 | 0.15 |
+| 문항 또는 q 만 | 1 | 1 | — | — | — |
+
+5. **보조 직무 신호로 관련 없는 사건을 채우지 않는다.** 비FIT Q 가 있으면 **Q-DENSE 가 사건용 하한을 넘는 후보만** 본 순위에 들어간다. Q-LEXICAL 은 진입을 정하지 않고 들어온 후보의 순위에만 쓴다 — `Bm25` 는 불용어 없이 단어 일치를 보므로 "문제", "해결", "프로젝트", "팀" 하나만 겹쳐도 양수가 되어, "양수면 진입"은 무정답 오추천률(≤ 0.10)을 지킬 수 없다(PR #21 2차 리뷰). Q 의 BM25 질의어에서는 문항 상투어(`QUESTION_STOPWORDS`: 경험·사례·본인·자신·설명·기술·서술·작성·하시오·주십시오 등, 목록은 4c-1a 에서 골드셋 문항으로 정해 코드 상수로 둔다)를 뺀다. J·부모 태그만 맞는 후보는 협업·목표 달성 등의 문항 근거로 추천하지 않는다. **FIT + J 는 예외로 직접 사건의 J-DENSE/J-LEXICAL/REQUIREMENT 일치로도 진입**한다. "직무에 적합한 이유"처럼 일반적인 질문 문구만으로 기술 사건을 탈락시키지 않기 위해서다. 이때도 부모 skills 일치만으로 사건이 진입하지 않는다. 하한은 4c-1a 골드셋으로 정하고 관련 없는 사건·정답 없는 문항을 포함해 검증한다. 모든 후보가 진입 조건 미달이면 `results:[]`, `NO_RELEVANT_MATCH` 다. 의미 유사도는 사실 확인이나 정답 확률이 아니다.
+6. **그다음 경험으로 묶는다.** 사건 후보와 경험 전체 후보를 같은 신호 목록에서 평가한 뒤 경험 묶음 점수는 그 안 최고 후보의 융합 점수다. `results[].rank` 는 묶음 순위, `episodes[].rank` 는 그 묶음 안 순위, `globalRank` 는 묶기 전 사건 전체 순위다. 동점은 experienceId → 후보 종류 → episodeId 오름차순으로 고정한다. `limit` 묶음, 각 `episodeLimit` 사건만 펼친다. 부모 기술 일치는 사건의 why 로 복사하지 않는다. 경험 전체만 맞으면 `matchedUnit: EXPERIENCE`·그 why 를 남기고 관련 없는 사건을 억지로 펼치지 않는다.
+7. **그래프 확장은 순위와 분리한다.** 반환 사건과 자유 태그 키를 공유하는 다른 경험의 사건을 계정 안에서만 1홉으로 찾아 `related[]` 에 최대 5개 덧붙인다. `{from:{experienceId,episodeId}, tag, via:SHARED_TAG}` 로 경로를 밝힌다. 두 홉·유사 간선 영구 저장은 없고, related 는 정답 후보 수나 Hit@N 에 섞지 않는다. 같은 태그는 사실상 같은 사건이라는 뜻이 아니다.
+8. **실패와 중복 사용을 드러낸다.** embedder 실패는 `degraded:["dense"]` 로 BM25·직접 REQUIREMENT 만 쓰되 Q 관련도 조건은 유지한다. 이때 비FIT 진입 조건은 Q-DENSE 대신 **불용어를 뺀 Q 질의어 중 서로 다른 2개 이상이 사건 텍스트에 있고, BM25 점수가 후보 최고점의 0.5 이상**인 후보로 바꾼다(문항 질의어가 1개뿐이면 그 1개 일치). 하한은 골드셋으로 다시 정한다. 미분류 항목이 있으면 `UNASSIGNED_FACTS`·`coverageIncomplete:true`, 사건으로 나누지 않은 경험이 있으면 `EPISODE_COVERAGE_INCOMPLETE`·true 다. 기존 미등록 행 등의 불완전 표시도 유지한다. `NO_RELEVANT_MATCH` 는 "내게 그런 경험이 없음"의 확정이 아니다. 등록 직무로 같은 공고를 확인할 수 있으면 사건을 근거로 쓴 기존 답변 id 와 `usedInSameApplication` 을 준다. 문항만/미등록 공고는 공고 정체성을 모르므로 null 이고, 같은 회사명만으로 같은 지원서라 추정하지 않는다. 이미 쓴 사건도 제외하지 않는다.
+
+**질의 길이** (PR #21 2차 리뷰 — 현재 코드와 맞춘다). 지금 `DenseIndex` 는 질의를 임베딩 전에 `EmbeddingTexts.MAX_CHARS`(800자, ≈ 400토큰)로 **조용히 자른다**(`DenseIndex.java:57`). 그래서 embedder 의 `truncated` 는 질의에서 거의 나오지 않는다. 규칙:
+- **J**(직무 다섯 칸)는 지금처럼 앞 칸(지원자격·담당업무)부터 이어 800자에서 자른다. 실제 공고는 대부분 넘으므로 정상 동작이고 **경고하지 않는다**. 재현용으로 `query.truncated: ["position"]` 만 싣는다. J-DENSE 채널은 그대로 쓴다.
+- **Q**(question + q)는 BM25 에 원문 전체를 쓰고, 의미 검색에는 앞 800자만 쓴다. 800자를 넘으면 `query.truncated: ["question"]` 과 `QUERY_TEXT_TRUNCATED` 경고를 준다 — 문항 뒤쪽 요구가 의미 검색에서 빠졌다는 뜻이다. Q-DENSE 채널은 빼지 않는다(문항 앞부분이 대개 핵심이다).
+- 서버가 800자로 자른 뒤에도 embedder 가 `truncated:true` 를 돌려주면(토크나이저 비율이 예상과 다를 때) 그 채널만 빼고 `QUERY_TEXT_TRUNCATED`·`degraded:["dense"]` 를 준다. 이 경우는 `EmbeddingTexts.MAX_CHARS` 를 다시 잴 신호다.
+- 응답 `query` 에는 원문을 보존하므로 사용자가 질의를 줄여 다시 찾을 수 있다.
+
+**요청·응답 예시** (모두 합성 값, 미구현 계약)
+
+MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이나 "AX"만으로 역할을 추정하지 않도록 실제 담당업무도 받는다.
+
+```json
+{
+  "request": {
+    "posting": {
+      "companyName": "예시 IT 서비스 기업",
+      "industries": ["IT 서비스"],
+      "positionName": "AX 개발자",
+      "responsibilities": "현업 요구를 분석하고 데이터 기반 업무 자동화 서비스를 개발한다",
+      "requiredSkills": "Python을 활용한 개발과 부서 간 협업",
+      "techStack": ["Python"]
+    },
+    "question": "서로 다른 의견을 가진 팀원과 협력해 문제를 해결한 경험을 설명하세요.",
+    "kinds": ["PROJECT"],
+    "limit": 8,
+    "episodeLimit": 2
+  }
+}
+```
+
+```json
+{
+  "query": {
+    "position": "예시 IT 서비스 기업 / AX 개발자", "saved": false,
+    "question": "서로 다른 의견을 가진 팀원과 협력해 문제를 해결한 경험을 설명하세요.",
+    "q": null, "searchMode": "COMPETENCY", "requirementsSource": "SERVER_DICTIONARY",
+    "requirements": [{"key": "python", "field": "requiredSkills"}],
+    "questionTypes": [{"code": "COLLABORATION", "confidence": 0.8, "from": "REGEX"}],
+    "questionMode": {"value": "COMPETENCY", "from": "REGEX"}, "truncated": [],
+    "kinds": ["PROJECT"], "limit": 8, "episodeLimit": 2
+  },
+  "context": {
+    "dataVersion": "synthetic-data-v1", "searchConfig": "search-v3-episode-context",
+    "embeddingModel": "multilingual-e5-small-ko-v2",
+    "indexGeneration": "2026-11-03T04:00:00Z", "indexBehind": false
+  },
+  "coverageIncomplete": true, "warnings": ["UNASSIGNED_FACTS", "REQUIREMENTS_PARTIAL"], "degraded": [],
+  "uncovered": [], "qualifications": [],
+  "results": [{
+    "rank": 1, "type": "EXPERIENCE", "kind": "PROJECT", "title": "A프로젝트",
+    "experienceId": "11111111-1111-4111-8111-111111111111", "revision": 3, "reviewed": true,
+    "period": "2024.03~2024.12", "source": null, "alsoIn": [],
+    "matchedUnit": "EPISODE", "why": [],
+    "episodes": [{
+      "episodeId": "ep3", "title": "API 설계 이견 조율", "rank": 1, "globalRank": 1,
+      "excerpt": "두 안의 비용을 표로 비교해 공유했다",
+      "itemIds": ["a3"], "evidenceIds": [],
+      "why": [{"signal": "LEXICAL", "rank": 1, "queryField": "question",
+        "sourceField": "facts.episodes.context", "episodeId": "ep3", "via": "EPISODE"}],
+      "usedInSameApplication": null, "usedBySelfIntroIds": []
+    }]
+  }],
+  "related": []
+}
+```
+
+- 예시의 confidence 는 합성 값이며 추정 문항 유형의 신뢰도일 뿐 사건 선택·성과 검증의 확률이 아니다. `itemIds`·`evidenceIds` 는 해당 개정의 직접 사건 항목에서만 온다. 빈 근거 목록을 검증 완료로 읽지 않는다. `reviewed` 는 기존처럼 사용자가 원본을 확인했다는 뜻이다.
+- 위와 같은 posting 에 직무 적합 문항을 주면 실제 역할과 직접 기술 신호를 더 반영한다. 예를 들어 하둡 담당업무와 직무 적합 문항은 ep1, 서버 운영 담당업무와 직무 적합 문항은 ep2, 협업 문항은 양쪽 직무에서 ep3 가 기대 정답이다. 이는 골드셋 합성 예시의 정답이며 프로젝트명·태그를 하드코딩하는 규칙이 아니다.
+- 자유 질의: `{"request":{"q":"IT 서비스 회사의 AX 개발자로서 스스로 높은 수준의 목표를 세워 달성한 경험","kinds":["PROJECT"],"limit":8,"episodeLimit":2}}`.
+- 공고 없는 문항: `{"request":{"question":"서로 다른 의견을 조율한 경험을 설명하세요.","limit":8}}`. 정상 응답에 `NO_POSITION` 을 넣는다. 유형을 모르는 새 질문도 원문으로 검색한다.
+- 정답 없는 질의는 같은 응답 모양에서 `results:[]`, `related:[]`, `warnings:["NO_RELEVANT_MATCH"]` 다. 자료가 미분류·미등록 상태면 coverageIncomplete·해당 경고도 함께 준다. dense 장애는 이와 별개로 degraded 에 표시한다.
+- **Codex 작성 절차**: 후보를 why 와 함께 비교 → 선택한 experienceId 를 `experience_index(ids)` 로 상세 조회 → 검색 응답과 상세의 revision 일치 확인(달라지면 재검색) → 해당 사건의 항목·근거·공통 맥락·미확인·주의사항을 구분해 읽기 → 근거를 고른 뒤 문항에 맞춰 작성 → `(경험, 개정, 사건)` 을 저장한다. 제목·태그·검색 발췌만으로 자소서를 완성하거나 다른 사건의 성과를 가져오지 않는다. 경험 전체 후보를 쓸 때는 사건을 꾸며 만들지 않고 경험 전체 근거를 쓴다.
+
+**사건을 나누는 흐름** — 저장 구조보다 이것이 없을 때 실패한다
+
+1. 가져오기(이력서 행 → 경험)는 사건을 만들지 않는다. 모든 항목이 UNASSIGNED 다. 사건 없는 경험도 저장·경험 전체 검색이 된다.
+2. MCP `experience_save(facts.episodes[], facts.actions[].scope/episodeId …)`: AI 가 미분류 항목의 사건 소속이나 공통 적용 범위를 제안한다. 저장은 지금처럼 'AI 기록'(`reviewed:false`)이고, 사용자가 웹에서 검토 확정한다.
+3. 웹 원본 편집: 사건 추가·이름 고치기·태그, 항목마다 사건 / 확인된 경험 공통 / 미분류를 고른다. 사건 순서는 배열 순서다. 삭제 때는 항목이 미분류가 되고 해당 사건을 쓴 답변에 재검토가 뜬다는 점을 보여 준다.
+4. 점검 표시: `experience_index` 에 "사건 없는 경험"(항목 3개 이상인데 사건 0개) 수와 미분류 항목 수를 싣는다. 자동으로 나누거나 COMMON 으로 바꾸지 않는다. 상세는 COMMON·UNASSIGNED·사건별 항목을 구분해서 준다.
+
+**측정 (구현 전에 먼저)**
+
+- 골드셋: 사용자 검토를 거친 비식별 경험 3~5개·사건 10~20개. 정답 있는 질의 30개 이상과 정답 없는 질의 10개 이상을 고정한다. 질의마다 회사/직무/문항 입력과 정답 `(경험 id, 사건 id)` 집합, 관련도 2(직접 적합)/1(보조)/0(무관)을 둔다. 문항 표현만 바꾼 변형은 같은 그룹으로 묶어 튜닝용·평가용에 나눠 새지 않게 한다. **정규식이 FIT 으로 잡지 못하는 직무 적합 문항**(예: "지원 분야에서 전문성을 키운 경험", "이 포지션에서 기여할 수 있는 역량")과 **흔한 단어만 겹치는 무정답 문항**을 각각 3개 이상 넣는다. 질의마다 `questionMode` 를 AUTO 로 두고 잰다(명시 FIT 은 별도 표시). 실제 자료를 공개 테스트 경로에 넣기 전 개인정보·비공개 코드·근거 URL 을 제거하거나 합성 fixture 로 대체한다.
+- **최종 응답 전체로 측정한다.** results 에서 실제 반환한 episodes 만 펼쳐 globalRank 순으로 평가한다. 부모 경험이 limit 밖으로 빠지거나 episodeLimit 때문에 정답이 응답에서 사라지면 실패다. 정답 부모 안에서만 계산한 조건부 적중률이나 related 의 정답으로 성공을 주장하지 않는다.
+- 지표: Hit@5(허용 정답 중 하나 이상), Recall@5(정답 여러 개 중 회수 비율), nDCG@5, 정답 없는 질의의 오추천률. 초기 통과선은 정답 질의 Hit@5 ≥ 0.90·nDCG@5 ≥ 0.80, 정답 없는 질의 오추천률 ≤ 0.10 이다. 표본이 작으므로 비율과 분자/분모·실패 질의 목록을 함께 기록하고 일반 채용 문항 전체의 성능으로 확대하지 않는다.
+- 기준선: 현재 경험 단위 검색은 같은 사실·질의의 **프로젝트 Hit@8** 을 기록하고 새 검색이 낮아지지 않아야 한다. 현재 API 는 사건을 반환하지 않으므로 사건 지표의 기준선은 N/A 이며 가상의 기존 사건 적중률을 만들지 않는다. 4c-1a 에서 문항 질의를 현재 API 로 실행할 수 없으면 공고 검색 비교만 별도로 표시한다.
+- 가중과 하한은 튜닝용에서만 정하고 평가용 결과를 보고 임계값을 반복 조정하지 않는다. 기존 `0.45` 는 경험 조각에서 정한 값이므로 사건에 자동 복사하지 않는다. 가중·하한·질의 확장을 바꾸면 searchConfig 를 올리고 자료 버전·모델·인덱스 세대·전체 요청을 함께 기록한다. 품질 수치는 이 PR에서 측정하지 않았다.
+
+**필수 수용 사례** (4c-1c 에서 모두 통과, 순위는 해당 합성 fixture 기준)
+
+| 입력·조건 | 반드시 확인할 결과 |
+|---|---|
+| 하둡 직무 + 직무 적합 문항 | A/ep1 이 사건 전체 1위, 부모를 먼저 잘라 누락하지 않음 |
+| 서버 관리 직무 + 직무 적합 문항 | A/ep2 가 사건 전체 1위 |
+| 위 두 직무 각각 + 협업 문항 | 둘 다 A/ep3 가 1위. 부모의 하둡 skills 만으로 ep1 을 우선하지 않음 |
+| 직무 없는 협업 문항, 표현을 바꾼 문항 | 정상 응답·NO_POSITION, 기대 사건 상위 5 |
+| 하둡 직무 + 정규식이 FIT 으로 못 잡는 직무 적합 문항(AUTO) | A/ep1 상위 5. 유형 미확신이면 FIT 행·`QUESTION_TYPE_UNCERTAIN`, 비FIT 으로 0건이면 `QUESTION_MODE_FALLBACK` 으로 재평가. `questionMode: FIT` 명시면 대체 없이 FIT 행 |
+| 하둡 직무 + 협업 문항 + `questionMode: COMPETENCY` | A/ep3 1위, 대체 경로를 타지 않음 |
+| 흔한 단어("문제", "해결", "프로젝트")만 사건과 겹치는 무관 문항 — dense 정상 / dense 장애 | 둘 다 `results:[]`·`NO_RELEVANT_MATCH`. Q-LEXICAL 양수만으로 진입하지 않음, 문항 상투어는 BM25 질의어에서 빠짐 |
+| 담당업무가 긴 공고(J 800자 초과) / 900자 문항 | 앞은 J-DENSE 유지·`query.truncated:["position"]`·경고 없음, 뒤는 BM25 원문·Q-DENSE 앞 800자·`QUERY_TEXT_TRUNCATED` |
+| 고정 코드에 없는 새 문항 + 태그 없는 관련 사건 | 원문 BM25·DENSE 로 기대 사건 상위 5. 코드 없음으로 제외하지 않음 |
+| q 만, question+q, kinds 필터, 같은 점수 | 유효 조회·둘 다 검색, 종류 필터 준수·동점 순서 재현 |
+| 낮은 프로젝트 기술 일치지만 문항에 맞는 사건 / 높은 기술 일치지만 문항에 무관한 사건 | 앞 사건이 살아남음. 부모 기술만으로 뒤 사건을 문항 후보에 넣지 않음 |
+| 정답 없는 질의 / 미분류뿐인 자료 | 앞은 빈 후보·NO_RELEVANT_MATCH, 뒤는 coverageIncomplete·미분류 경고를 함께 표시 |
+| dense 장애 / 인덱스 지연 | degraded 또는 indexBehind 표시. 직접 키워드 사례는 동작하고 의미 검색 품질을 충족했다고 주장하지 않음 |
+| 서로 다른 계정에 같은 태그·사건 id | 후보·related·근거·사용 이력에 다른 계정 자료 0건 |
+| limit·episodeLimit 적용, 같은 사건을 쓴 기존 답변 | 반환 수 상한 준수, 이미 쓴 사건은 남기고 실제 같은 공고일 때만 사용 표시 |
+
+**저장·근거 수용 사례** (4c-1b/1d)
+
+- `a2: ep1 → ep2` 뒤 CORRECT·정정 범위 `{ep1,ep2}`, 과거 ep1 답변 재검토 true, 무관한 ep3 답변 false. 과거 스냅샷과 자소서의 근거 쌍은 그대로다.
+- `ep1 → UNASSIGNED` 는 ep1 재검토 true. COMMON 이 관련된 범위 정정은 경험 전체 재검토, UNASSIGNED 의 첫 사건 배정은 ADD 다. 같은 저장에서 전체 정정이 있으면 사건 집합보다 우선한다.
+- 사건 삭제는 관련 항목을 UNASSIGNED 로 보존하고 경고·CORRECT 를 낸다. 없는 새 사건 id 는 400 이고 자동 해제하지 않는다. 구 스냅샷을 고치거나 범위 미지정 항목을 자동 COMMON 으로 바꾸지 않는다.
+- COMMON/UNASSIGNED 항목을 사건의 직접 성과로 반환하지 않음, 범위 기본값만 정규화한 재저장은 개정 없음, claims·scope 가 바뀐 저장의 개정 판정, 태그만 바뀌면 개정 없이 임베딩 재계산을 확인한다.
+- REST/MCP 왕복에서 `(experienceId,experienceRevision,episodeId)` 보존, 과거 개정에만 남은 사건도 참조 가능, 다른 소유자·없는 개정·없는 사건 거절, 기존 경험 전체 근거와 사건 근거 동시 저장, expectedVersion 경쟁은 기존 409 를 유지한다.
+
+**단계** (각 단계가 끝날 때 smoke PASS·문서 갱신)
+
+| 단계 | 내용 | 끝 조건 |
+|---|---|---|
+| 4c-1a | 비식별/합성 골드셋·질의 그룹 분리·공고 검색 기준선 | 정답 30건 이상·정답 없음 10건 이상, 정답 사건 집합·관련도·평가용 고정 목록과 현재 API 미지원 범위 기록 |
+| 4c-1b | 저장: 사건·항목 scope·구 데이터 해석·소속 이동 CORRECT·corrected_episodes·MCP 저장·웹 편집 | 개정 판정·범위 정정·삭제 보존·기본값 정규화·잘못된 조합·동시성 사례를 테스트로 확인 |
+| 4c-1c | **요청 DTO/MCP 스키마 확장(question/q/questionMode/kinds/episodeLimit), 문항 성격 판정·FIT 대체 경로, Q 진입 조건(DENSE 하한, 장애 시 BM25 2어·상대 하한)·문항 상투어, 질의 길이 표시, 문항만 조회, 사건 우선 점수·후그룹화**, 응답 예시의 근거 포인터·1홉 related·사용 표시 | 필수 검색 사례 전부, 최종 응답 기준 품질 통과선·기준선 프로젝트 Hit@8 비하락. 잘못된 요청 400·소유자 404·읽기 전용·상한·degraded 계약 테스트. 전체 지연 p50/p95 는 표본·환경과 함께 실측하되 미측정을 성공으로 쓰지 않음 |
+| 4c-1d | 근거: episode_id 열·사건 범위 재검토·자소서 사건 선택·작성 절차/목표 계약을 플러그인 스킬에 반영 | 하둡 사건 정정과 소속 이동이 필요한 답변에만 재검토를 띄움, 과거 근거·경험 전체 근거 호환 및 REST/MCP 왕복 검증 |
+
+**검증 경계.** 위 표는 향후 구현의 완료 기준이지 현재 테스트 결과가 아니다. 이번 문서 PR 에서 확인하는 것은 예시 JSON 파싱·문서 링크/코드 블록·계약 간 모순·문서 변경 범위와 기존 서비스 smoke 뿐이다. 사건 저장·검색 품질·새 API·DB 이행은 구현 PR 에서 검증한다.
+
+**열린 질문 (구현 전에 정할 것)**
+
+- ~~사건에서 항목이 빠지는 이동을 CORRECT 로 볼까?~~ 결정함: 위 개정 판정 표대로 이전 사건을 포함해 CORRECT. 사건 삭제는 COMMON 이 아니라 UNASSIGNED 로 전환한다.
+- 소재집 `questionUses[].competency`(고정 코드)를 선택값으로 낮추고 `episodeId`·자유 문장 `angle` 을 더할지. E4 와 같은 문제지만 소재집은 AI 작성 재료라 4c-1 범위에서 뺐다.
 
 **병합을 넣을 때 지킬 조건** (리뷰 P1, 10.7 R37). 병합된 source 가 링커·검색·스위퍼에 새면 같은 제목 키가 2건이 되어, 링커의 "정확히 1건" 조건(6.2-5)이 영구히 실패하고 그 행은 계속 미연결로 남는다.
 - `experiences_owner_key_idx`·`experiences_embedding_dirty_idx` 를 `WHERE merged_into IS NULL` 부분 인덱스로 바꾼다.
@@ -1135,6 +1414,8 @@ JobSight가 개인 취업 컨텍스트의 중앙 관리 지점이다(10.4 R23). 
 - "재검토 필요"는 아래 병합 경로 전체에서 `seq` 로 비교한다.
 
 **DDL 스케치** (옛 4단계 DDL. 4단계 최소판 위에 더하는 모양으로 고쳤다)
+
+> 2026-11-03: 아래의 `episodes`·`episode_competencies`·`self_introduction_episodes`, `experience_revisions.episodes` 는 **폐기**(6.10.1). 사건이 경험 사실 안으로 들어가 병합 때 사건을 옮기는 단계(병합 절차 1)도 사실 합치기(4)에 흡수된다. 유효한 것은 `merged_into`·`keywords`·`experience_keywords` 뿐이다.
 
 ```sql
 -- V{n}__experience_episodes_merge.sql  (4c, 보류)
@@ -1288,9 +1569,9 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | **3. 공고를 저장하지 않는 경험 찾기 (첫 완성 목표)** | **적용함**(`feat/experience-search-v0`, 아래 "3단계 구현 메모"). 마이그레이션 없음. 4단계 산출물에 기대지 않는다(10.7 R42~R44). ① **`KeyNormalizer`·별칭 시드 사전**(2.5). 4단계가 재사용한다 ② **묶음 함수** `(kind, title_key, 시작 연월 숫자)`. `unlinkedRows`·`missing[]`·4단계 가져오기 계획(6.3)이 같이 쓴다 ③ `experience_search` 첫 판: 입력은 `positionId` 또는 저장하지 않는 `posting`(4.1)과 클라이언트가 뽑은 `requirements[]`(4.2), 후보는 RESUME_ROW 묶음뿐, 신호는 LEXICAL·REQUIREMENT(다섯 칸, 칸별 가중, 요구 키는 `KeyNormalizer`), 결과마다 원문 출처 `source` ④ `experience_index` 최소판을 4단계 모양 `{counts, complete, experiences: [], unlinkedRows}` 로(5.2) ⑤ `resume_get(view=outline)`(version, 섹션별 count, 행 머리, `missing[]`, `unlinkedRows`), full `resume_get`·`resume_create` 응답 머리의 묶음 기반 `missing` 요약(5.3) ⑥ SKILL 1번(목차·outline·`missing` 대조)과 2번("고른 뒤에 저장") 절차. **전환 경로다**: 4단계에서 응답 형식은 그대로 두고 자료원만 경험 원본으로 바꾼다. 이력서 검색과 경험 검색을 따로 운영하지 않는다 | 공고 20개를 넘겨도 `job_postings` 행 수가 그대로인지. 기술 환경 칸에만 있는 키가 `uncovered` 에 나오지 않는지. 내 자료에 없는 필수 기술이 `uncovered` 에 나오는지. 지원 자격이 점수에 섞이지 않고 `qualifications[]` 로 나오는지. `KeyNormalizer` 단위 테스트(별칭, 대소문자·공백·기호). 다른 이력서에만 있는 프로젝트를 빼고 만든 `resume_create` 응답의 `missing` 에 그 묶음이 나오는지. `experience_index` 응답에 `experiences: []` 가 늘 있는지. 골드셋에서 정답 경험 행이 상위 5에 있는지와 출처가 맞는지. 하네스에 붙여 "프로젝트 누락"이 줄었는지 | 낮음. 도구 등록과 응답 필드를 빼면 끝난다 |
 | **4a. 경험 원본 백엔드 (최소판)** | **적용함**(`feat/experience-bank-backend`, 아래 "4a 구현 메모"). **먼저 내는 배포(확장)**: ① P8 `Resume.replacePositions` 를 `clear()+addAll()` 로(1.3) ② 앵커 확장: `ResumeContent` 4개 행 record 에 `experienceId`·`experienceRevision`, `ResumeRowRequest` 에 `experienceId` 만, 프런트 `fillRow` 앵커 통과와 그 테스트(이 항목만 프런트를 함께 낸다, 6.1). 링커는 아직 없다. **그다음 배포(사용)**: ③ `V{n}__experiences`(2.5 최소판: `experiences`·`experience_revisions`(`seq`)·`resume_experiences`·`self_introduction_experiences`, 개정 참조 FK·CHECK, 지연 FK 셋) ④ `OwnerLock` 과 호출자 전부(T9 잠금 규약) ⑤ `ResumeWriter`(T6 섹션 상한, 링커, 차이 반영, `SET CONSTRAINTS ALL IMMEDIATE`), 우회 저장 금지 아키텍처 테스트, `rebuildResumeExperiences`·JSON↔표 대조 질의(6.2) ⑥ 링커: 앵커 이어받기·개정 검사·`refreshExperienceIds`(6.2) ⑦ 경험 서비스: 생성·수정(개정 판정, `facts_hash`, `expectedVersion`, 6.5), 검토 확정, 삭제(409·`detach`, 6.4), 가져오기 계획·적용(`Persistable`, 6.3) ⑧ 자소서 `experiences` 쌍(REST·MCP, 6.8) ⑨ MCP `experience_save`·`experience_index` 전체판·`resume_add_experiences`(`FACTS`), 행 도구의 `experienceId` 지목(5.2·5.3) ⑩ `missing[]` 에 은행 경험을 더하고, `resume_update` 래퍼에 `LINKED_ROWS_MISSING` ⑪ `experience_search` 자료원을 경험 원본으로 교체(응답 형식 유지, REQUIREMENT 는 `experiences.skills`) ⑫ 공용 오류 변환에 23503(제약 이름·테이블 필드)·23505 와 원인 체인 탐색(2.3) ⑬ 경험 REST 경로를 `ApiPaths`·`routes.ts`·`nginx.conf` 표에 함께 | 확장 배포: `experienceId`·`experienceRevision` PUT→GET 왕복, 프런트 "로드 → 다른 칸 수정 → 저장 payload 에 두 키 그대로". 사용 배포: `now at version vN`. 실제 스키마에서 계정 삭제 cascade 통과(지연 FK 가 필요한지 재확인). `TEXT[]` 매핑 validate 통과. 링커 멱등. 제목 키가 2건 맞으면 미연결로 남는지. 개정 없는 행이 저장된 개정을 이어받는지, 키가 빠진 행이 저장된 앵커를 이어받는지, 클라이언트가 바꾼 개정 → 400, 없는 개정 → 404, `refreshExperienceIds` 만 개정을 올리는지. 대조 질의 0건, 우회 저장을 아키텍처 테스트가 잡는지. 경험 원본을 고쳐도 과거 이력서 행의 문구와 개정 번호가 그대로인지. 정정(`CORRECT`) 뒤 그 경험을 쓴 이력서·자소서에 "재검토 필요"가 붙고, 추가(`ADD`)·근거만 바뀐 개정·표현 차이에는 붙지 않는지. 같은 `facts` 재저장은 개정을 만들지 않는지. `facts` 를 보내며 `expectedVersion` 이 없으면 400. 복합 FK가 다른 소유자 연결을 거부(404). 사용 중 확인 직후 다른 트랜잭션이 연결한 경험의 삭제가 거부되는지. 경험 삭제의 409 가 REST 와 MCP 도구 오류 코드로 같게 나오는지, 커밋 시점 지연 FK 위반도 409 인지(Testcontainers). 같은 계정의 동시 저장이 줄을 서고 `lock_timeout` 을 넘기면 409 `BUSY`, 다른 계정은 기다리지 않는지. 로컬 경로만 있는 근거 → 400. 운영 사본은 집계 비교 SQL만. 골드셋 재측정. 로그인 왕복 | 중간. **확장 배포보다 앞선 코드로는 되돌리지 않는다.** 그 코드는 앵커 키를 모르는 record 로 읽어 저장할 때마다 키를 버린다. 사용 배포만 되돌리면 JSON 앵커는 남고, 다시 올린 뒤 `rebuildResumeExperiences` 를 돈다. 테이블은 남아도 무해하고 MCP 등록을 빼면 멈춘다 |
 | **4b. 경험 웹 화면** | **적용함**(`feat/experience-bank-web`, 아래 "4b 구현 메모"). ① 경험 목록·원본 편집(사실 항목 `id` 유지, `expectedVersion`)·검토 확정(`reviewed_revision`)·"AI 기록"·"소재집 갱신 필요" 표시 ② 가져오기 화면(계획 → 묶음별 CREATE/SKIP/LINK_TO, `mergeCandidates` 표시, 409 면 계획 다시) ③ 이력서 편집기: "경험에서 불러오기"·"경험으로 등록"·"다른 경험에 연결", "재검토 필요" 표시와 "원본으로 갱신"(`refreshExperienceIds`), `unlinkedWarnings` 토스트 ④ 경험 삭제(409 목록 표시, `detach` 확인)로 끝나는 중복 처리 흐름(6.4) ⑤ 자소서 편집기의 "쓴 경험" 선택(`experiences` 쌍) | `npm run type-check && npm test`. 편집기 저장 payload 에 앵커가 그대로인지. "원본으로 갱신" 뒤 재검토 표시가 사라지는지. 다른 경험에 연결 → 쓰지 않는 경험 삭제 흐름이 끝까지 되는지. 로그인 왕복 | 낮음. 화면을 빼면 된다. 백엔드는 그대로다 |
-| **4c. (보류)** | 사건(STAR)·병합 계보·키워드 테이블·`ROW` 복사·"원본 반영 검토". 설계와 다시 열 때의 조건은 6.10 | 6.10 의 4c 회귀 사례 | — |
+| **4c-1. 사건 (설계, 미구현)** | 6.10.1 의 4c-1a~d: 골드셋 → scope·이동 정정·저장 → 문항/q 입력·사건 우선 검색·응답 → 근거 연결·플러그인 절차. 병합 계보·키워드 테이블·ROW 복사·원본 반영 검토는 계속 보류 | 6.10.1 의 저장/검색 계약과 최종 응답 품질 기준. 이번 문서 PR 에서 구현하거나 병합하지 않음 | 별도 구현 PR 에서 정함 |
 | **5. 의미 검색과 필요시 리랭커** | **적용함(리랭커 제외 — 6단계, `feat/semantic-search`, 아래 "5단계 구현 메모").** `embedder` 컨테이너(기본 CPU), `compose.gpu.yaml`, `V{n}__self_intro_embeddings`, `V{n}__experience_embeddings`(`experience_chunks`, 2.5), 스위퍼(원문 버전 조건, 행마다 CAS 한 문장, D13·D14, 4.4), `self_intro_list(q)` 에 DENSE + 리랭커 K=10(6단계로 미룰지는 9.2), `experience_search` 에 DENSE와 재현 정보 `context`(6.7). **벡터 저장은 `REAL[]` 과 pgvector를 비교해 정한다**(D11, 9.2). 컨테이너 3 → 4. `.env.example`·`compose.yaml`·`docs/local-dev.md` 동기화. **문항 의미 검색은 `self_introductions` 만 쓰므로 경험 은행과 무관하다.** 골드셋에서 BM25 부족이 확인되면 이 단계의 자소서 부분만 2단계 바로 뒤로 당긴다(R11) | 골드셋에서 앞 단계보다 회수율이 오르는지. CPU 리랭커 지연 실측. embedder를 멈춘 상태에서 저장 성공과 `degraded`, 재기동 후 dirty 0으로 수렴. 스위퍼가 읽은 뒤 원문이 바뀌면 그 회차는 쓰지 않는지. 해시가 같은 조각은 재계산하지 않는지. 벡터 열 매핑 validate 통과 | 낮음. 컨테이너를 내리면 이전 검색으로 돌아간다. **단 pgvector 를 고르면 일방향이다**: DB 이미지 교체(alpine → Debian)와 REINDEX 가 따라온다(D11) |
-| **6. 추가 신호와 정리** | DOMAIN·PAST_USE·COMPETENCY(4c 뒤)·PAST_QUESTION 중 골드셋에서 이득이 확인된 것만, `experience_index` 점검 플래그(사실이 빈 경험, AI 기록 수, 미등록 행, 출처 미상 자소서, truncated. 사건 플래그는 4c 뒤), 별칭 편집 UI(4c `keywords` 뒤), 사용률 로그를 근거로 쓰이지 않는 CRUD 도구 정리 검토 | 신호마다 켜기 전후 골드셋 기여 기록. 계정 단위 플래그 수 추적 | 낮음 |
+| **6. 추가 신호와 정리** | DOMAIN·PAST_USE·PAST_QUESTION 중 골드셋에서 이득이 확인된 것만. 고정 코드 COMPETENCY 사건 신호는 폐기. 문항/q 입력과 사건 검색은 4c-1c 에 포함되어 이 단계를 기다리지 않는다. 추가 점검 플래그·별칭 편집 UI·사용률 기반 도구 정리 | 신호마다 켜기 전후 골드셋 기여 기록. 계정 단위 플래그 수 추적 | 낮음 |
 | **성능 트랙** (단계와 별개) | **적용함**(`perf/query-cleanup`, `V29__indexes`, 실측은 1.3 표). `V{n}__indexes`(1.5), P3·P4·P6~P11. P8 의 `Resume` 은 4a 앞에 한다. T6 은 4단계로 옮겼다. 측정하면서 진행한다 | 토큰 조회 `EXPLAIN` Index Scan. SQL 상한 테스트. 1.0 방식으로 다시 잰 지연. nginx를 건드리면 로그인 왕복 | 코드 revert. 인덱스는 남아도 무해 |
 | **제출·작성 기준 트랙** (2단계 이후 언제든) | **적용함**(`feat/submissions-and-guides`, `V28__submissions_and_guides`, 아래 "제출·작성 기준 트랙 구현 메모"). `V{n}__submissions_and_guides`: 제출 기록(6.6: `SUBMITTED` 전환 때 `JobPostingService` 한 곳에서 LINKED 기록, T9 아래 스냅샷, `submission_attachments` 와 `attachments` 의 `UNIQUE (id, owner_id)`, 웹에서 사용자 확인·접수 근거 첨부), 작성 기준 문서(6.7)와 MCP `writing_guide_get`, 자소서 `writing_context` | 같은 상태 변경을 두 번 보내도 기록이 하나인지. 웹 드래그·공고 수정·공고 생성 세 경로 모두 LINKED 가 남는지. 뒤늦게 등록한 지원 건이 LINKED로만 남고 제출본이라 부르지 않는지. 기록이 가리키는 첨부의 삭제를 DB 가 막는지. 계정 삭제 cascade 통과. 작성 기준 버전이 자소서 `writing_context` 에 남는지 | 낮음. 기록 테이블은 무시해도 된다 |
 | **첨부 삭제 — 파이프라인 뒤** | **적용함**(`feat/attachment-delete`, 6.9 "구현 메모"). 6.9 그대로: 저장·이력서 삭제 성공 뒤 매번 묻기, [첨부 파일] 서랍(미사용·7일), `DELETE` 의 네이티브 `for update`·사용처 판정·409 `ATTACHMENT_IN_USE`, 규칙 B(`ResumeWriter`, 400 `ATTACHMENT_NOT_FOUND`), `copy` 원본 잠금, 서랍 목록 GET. 마이그레이션·경로 표·MCP 도구는 바꾸지 않는다. 4단계·제출 트랙이 먼저 들어와 있으면 판정에 그 절을 더한다(6.9 체크리스트) | 6.9 의 검증 | 낮음. 화면 버튼을 빼면 멈춘다. 지운 파일은 되돌릴 수 없다 |
@@ -1397,7 +1678,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 | D4 | 자소서는 이력서와만 N:M, `resumeIds` 1개 이상 (`docs/self-introductions.md:22`, `SelfIntroductionRequest.java:12`) | 직무·사건·문항 유형으로 연결을 넓힌다. 생성 시 "이력서 또는 직무 1개 이상", 수정 시 0개 허용. DTO를 분리한다 | "어느 회사용 답변인가"를 판별할 수 없는 구조가 증상 (b)의 원인 후보다 |
 | D5 | `resume_update` 통째 교체 (`docs/resumes.md:44`), 섹션 null → `[]` (`docs/resumes.md:45`), SKILL "수정은 전체 교체" (`SKILL.md:23-25`) | `resume_*`·`posting_update` 만 null=유지, `[]`=비움. 저장되는 모양은 그대로 정규화한다. 그 밖의 update 도구는 전체 교체를 유지한다 | AI의 섹션 누락이 조용한 삭제로 이어진다 |
 | D6 | 임베딩은 CPU·JVM ONNX (`docs/decisions.md` "임베딩은 GPU 가 아니라 CPU 로" 절) | **결정됨(2026-11-02, 5단계 적용)**: Python embedder 컨테이너로 바꾼다. 기본은 CPU이고, GPU는 선택 오버라이드다. 리랭커는 6단계로 미뤘지만 컨테이너는 유지한다(ONNX 파일 유지 부담, GPU 로 옮길 길, 측정과 같은 런타임 — `docs/decisions.md`) | 리랭커(크로스 인코더)가 생겼고, 같은 서비스가 GPU로 옮겨 갈 길이 필요하다. 검색 경로는 CPU로도 충분하다는 원 판단은 유지한다. 리랭커를 6단계로 미루면 이 이유가 약해지므로 5단계 전에 다시 정한다(9.2) |
-| D7 | 태그 선택지는 계정 기존 값에서 모은다 (`docs/job-postings.md:140`) | 역량·문항 유형은 시스템 고정 코드 18개로 둔다 | 문항과 사건이 같은 어휘를 써야 매칭된다 |
+| D7 | 태그 선택지는 계정 기존 값에서 모은다 (`docs/job-postings.md:140`) | 문항 유형의 보조 해석만 고정 코드 18개, 사건은 자유 태그·원문 검색(6.10.1) | 같은 코드가 없어도 새 문항·태그 없는 사건을 조회해야 한다. 문항 원문 검색을 코드 분류로 제한하지 않음 |
 | D8 | 메모리 BM25 (`:50`) | LEXICAL 신호로 유지하고 df 계산만 고친다. 존치는 실데이터 측정으로 정한다 | 합성 PoC는 제거 근거로 부족하다 |
 | D9 | `job_postings.target_position_id` | 쓰지도 지우지도 않는다 | 데이터 삭제 금지 원칙 |
 | D10 | 첨부 교체 시 즉시 삭제 (`docs/attachments.md:71`, `AttachmentField.vue:51`) | 즉시 삭제를 없앤다. 정리 작업은 두지 않는다. **적용함(2026-11-02)** — `docs/decisions.md` 「첨부 교체·제거 때 이전 파일을 지우지 않는다」 | 복제 이력서가 id를 공유해 원본의 파일이 사라진다 |
@@ -1442,7 +1723,7 @@ AGENTS.md 순서에 따라, 착수 전에 이 설계를 `docs/experience-graph-s
 1. ~~AI가 관계를 확정하게 할지~~ → **닫음**: 확정은 웹에서만 한다. MCP 쓰기는 "AI 기록"이다.
 2. ~~이력서 버전마다 경험 문구를 다르게 쓰는지~~ → **닫음**: 경험 원본이 정본이고 기업별 문구는 이력서 행에 보존한다(6.1, 10.4).
 3. ~~어느 이력서 버전을 실제로 제출했는지 기록이 필요한지~~ → **닫음**: 제출 기록을 확인 수준과 함께 남긴다(6.6).
-4. 사건 단위 기술 태그가 필요한지. 사건 자체가 4c 라 4c 를 열 때 함께 정한다.
+4. ~~사건 단위 기술 태그가 필요한지.~~ 정함(2026-11-03): 사건은 자유 태그를 든다(6.10.1 E4).
 5. 서버 로그나 MCP 대화 기록을 볼 수 있는지. "프로젝트 누락"의 원인을 가른다. MCP 호출 로그를 3단계 앞뒤에 넣는다(7절 운영 메모).
 6. 수작업 골드셋 10~20개를 언제 만들 수 있는지(0단계 선행 조건).
 7. GPU 오버라이드를 켤 시점. 5단계 CPU 리랭커 실측 뒤에 정한다.
