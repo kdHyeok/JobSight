@@ -1235,7 +1235,8 @@ ALTER TABLE experience_chunks ADD COLUMN episode_id VARCHAR(40);             -- 
 | 필드 | 4c-1c 목표 계약 |
 |---|---|
 | `positionId?`, `posting?` | 등록 직무 또는 저장하지 않는 공고(지금의 다섯 칸). 둘을 동시에 주면 400 `QUERY_CONFLICT`. 둘 다 없어도 문항·자유 질의가 있으면 정상. 이름만 있는 posting 도 맥락으로 쓸 수 있지만 실제 담당업무가 없으면 `POSITION_CONTEXT_THIN` 경고 |
-| `question?` | 공백 제외 1~2000자. 자소서 문항 원문. 회사·직무와 함께 주거나 문항만 줘도 된다 |
+| `question?` | 공백 제외 1~2000자. 자소서 문항 원문. 회사·직무와 함께 주거나 문항만 줘도 된다. 의미 검색에는 앞 800자만 쓴다(아래 "질의 길이") |
+| `questionMode?` | `AUTO`(기본) · `FIT` · `COMPETENCY`. 문항이 직무 적합을 묻는지 클라이언트가 알면 명시한다. 명시값이 정규식 추정보다 우선한다(아래 "문항 성격 판정") |
 | `q?` | 공백 제외 1~2000자. 자유 문장 보충 질의. `question` 과 함께 주면 질문 원문을 보존하고 둘을 검색에 사용한다. "AX 개발자"처럼 직무명만 줘도 허용하되 구체 경험이 있다고 단정하지 않는다 |
 | `requirements?` | 기존 상한 60개·다섯 칸·SKILL/QUALIFICATION 계약 유지. positionId 또는 posting 없이 주면 400 `REQUIREMENTS_WITHOUT_POSITION` |
 | `kinds?` | 경험 종류 1~5개(PROJECT/ACTIVITY/CAREER/TRAINING/OTHER), 생략하면 전부. 사건 역량 유형으로는 필터하지 않는다 |
@@ -1244,7 +1245,13 @@ ALTER TABLE experience_chunks ADD COLUMN episode_id VARCHAR(40);             -- 
 
 - `positionId`, 유효 내용이 있는 posting, question, q 중 하나 이상이 필요하다. 빈 문자열은 생략으로 취급하고, 전부 없으면 400 `QUERY_REQUIRED`. 공고·직무 없이 문항만 오는 것은 `NO_POSITION` 안내일 뿐 오류가 아니다. 상한·잘못된 enum·정수가 아닌 limit 등은 400이며 조용히 자르지 않는다.
 - 소유자 밖의 positionId 는 404 다. posting·q 에 적힌 회사명은 검색 맥락이지 다른 계정 자료를 읽는 권한이 아니다. 조회로 공고·경험·연결을 생성하지 않는다.
-- 4.1 의 `questionTypes` 추정은 응답의 보조 설명이다. 지원 직무의 적합성·전문성·기여를 명시적으로 묻는 문항을 FIT 으로 보고, 코드가 없거나 신뢰도가 낮으면 SEMANTIC 으로 가서 `QUESTION_TYPE_UNCERTAIN` 을 준다. **문항 원문은 분류 결과와 무관하게 항상 검색한다.** 고정 코드 일치가 사건의 진입 조건이 되지 않는다. `postingId`·명시 `competencies` 입력과 추가 신호는 이번 범위에 넣지 않는다.
+- **문항 원문은 분류 결과와 무관하게 항상 검색한다.** 고정 코드 일치가 사건의 진입 조건이 되지 않는다. `postingId`·명시 `competencies` 입력과 추가 신호는 이번 범위에 넣지 않는다.
+- **문항 성격 판정** (PR #21 2차 리뷰). 분류는 사건을 거르지 않지만 아래 가중표의 **행을 고르므로 순위에 영향을 준다** — 이 점을 숨기지 않고, 분류가 틀려도 정답 사건이 사라지지 않게 다음 순서로 정한다.
+  1. `questionMode` 가 `FIT`·`COMPETENCY` 면 그대로 쓴다(`query.questionMode.from: CLIENT`).
+  2. `AUTO` 면 4.1 정규식(`Competency`)으로 추정한다. 상위 코드가 FIT 모드(지원동기·입사 후 포부·직무 이해·적합성)면 FIT, 신뢰도 있는 COMPETENCY/SEMANTIC 코드면 비FIT.
+  3. 코드가 없거나 신뢰도가 낮은데 **직무(J)가 있으면 FIT 행**을 쓰고 `QUESTION_TYPE_UNCERTAIN` 을 준다. 직무 맥락을 받은 요청에서 직무 신호를 0.15로 깎아 정답 기술 사건을 잃는 쪽이 더 나쁘다. 직무가 없으면 "문항 또는 q 만" 행이다.
+  4. 비FIT 행으로 평가했는데 직무가 있고 **진입 조건(규칙 5)을 통과한 사건 후보가 0건**이면, 같은 요청을 FIT 행으로 한 번 더 평가하고 `QUESTION_MODE_FALLBACK` 을 준다(`query.questionMode: {value: FIT, from: FALLBACK}`). 재평가는 한 번뿐이다.
+  - 정규식은 "전문성"을 `TECH_EXPERTISE`(COMPETENCY)로, "직무 이해·적합·관련"만 `JOB_FIT`(FIT)으로 잡는다(`Competency.java`). "지원 분야에서 전문성을 키운 경험", "이 포지션에서 기여할 수 있는 역량" 같은 직무 적합 문항은 2번에서 비FIT 으로 갈 수 있다 — 3·4번과 `questionMode` 가 그 구멍을 막는다. 골드셋에 이런 문항을 반드시 넣는다(측정 절).
 
 **후보·점수·묶음 규칙** (E8)
 
@@ -1256,16 +1263,20 @@ ALTER TABLE experience_chunks ADD COLUMN episode_id VARCHAR(40);             -- 
 | 질의 | Q-DENSE | Q-LEXICAL | J-DENSE | J-LEXICAL | 사건 직접 REQUIREMENT |
 |---|---|---|---|---|---|
 | 문항·q 없이 직무만 | — | — | 1 | 1 | 1 |
-| 직무 적합(FIT) 문항 + 직무 | 1 | 1 | 0.5 | 0.5 | 1 |
-| 협업 등 FIT 외 문항 또는 q + 직무, 유형 미확신 포함 | 1 | 1 | 0.15 | 0.15 | 0.15 |
+| 직무 적합(FIT) 문항 + 직무 — 명시·추정·유형 미확신·대체 경로 포함 | 1 | 1 | 0.5 | 0.5 | 1 |
+| 협업 등 비FIT 문항 또는 q + 직무 (신뢰도 있는 비FIT 추정 또는 `questionMode: COMPETENCY`) | 1 | 1 | 0.15 | 0.15 | 0.15 |
 | 문항 또는 q 만 | 1 | 1 | — | — | — |
 
-5. **보조 직무 신호로 관련 없는 사건을 채우지 않는다.** FIT 외 Q 가 있으면 Q-DENSE 가 사건용 보정 하한을 넘거나 Q-LEXICAL 이 양수인 후보만 본 순위에 들어간다. J·부모 태그만 맞는 후보는 협업·목표 달성 등의 문항 근거로 추천하지 않는다. **FIT + J 는 예외로 직접 사건의 J-DENSE/J-LEXICAL/REQUIREMENT 일치로도 진입**한다. "직무에 적합한 이유"처럼 일반적인 질문 문구만으로 기술 사건을 탈락시키지 않기 위해서다. 이때도 부모 skills 일치만으로 사건이 진입하지 않는다. 하한은 4c-1a 골드셋으로 정하고 관련 없는 사건·정답 없는 문항을 포함해 검증한다. 모든 후보가 진입 조건 미달이면 `results:[]`, `NO_RELEVANT_MATCH` 다. 의미 유사도는 사실 확인이나 정답 확률이 아니다.
+5. **보조 직무 신호로 관련 없는 사건을 채우지 않는다.** 비FIT Q 가 있으면 **Q-DENSE 가 사건용 하한을 넘는 후보만** 본 순위에 들어간다. Q-LEXICAL 은 진입을 정하지 않고 들어온 후보의 순위에만 쓴다 — `Bm25` 는 불용어 없이 단어 일치를 보므로 "문제", "해결", "프로젝트", "팀" 하나만 겹쳐도 양수가 되어, "양수면 진입"은 무정답 오추천률(≤ 0.10)을 지킬 수 없다(PR #21 2차 리뷰). Q 의 BM25 질의어에서는 문항 상투어(`QUESTION_STOPWORDS`: 경험·사례·본인·자신·설명·기술·서술·작성·하시오·주십시오 등, 목록은 4c-1a 에서 골드셋 문항으로 정해 코드 상수로 둔다)를 뺀다. J·부모 태그만 맞는 후보는 협업·목표 달성 등의 문항 근거로 추천하지 않는다. **FIT + J 는 예외로 직접 사건의 J-DENSE/J-LEXICAL/REQUIREMENT 일치로도 진입**한다. "직무에 적합한 이유"처럼 일반적인 질문 문구만으로 기술 사건을 탈락시키지 않기 위해서다. 이때도 부모 skills 일치만으로 사건이 진입하지 않는다. 하한은 4c-1a 골드셋으로 정하고 관련 없는 사건·정답 없는 문항을 포함해 검증한다. 모든 후보가 진입 조건 미달이면 `results:[]`, `NO_RELEVANT_MATCH` 다. 의미 유사도는 사실 확인이나 정답 확률이 아니다.
 6. **그다음 경험으로 묶는다.** 사건 후보와 경험 전체 후보를 같은 신호 목록에서 평가한 뒤 경험 묶음 점수는 그 안 최고 후보의 융합 점수다. `results[].rank` 는 묶음 순위, `episodes[].rank` 는 그 묶음 안 순위, `globalRank` 는 묶기 전 사건 전체 순위다. 동점은 experienceId → 후보 종류 → episodeId 오름차순으로 고정한다. `limit` 묶음, 각 `episodeLimit` 사건만 펼친다. 부모 기술 일치는 사건의 why 로 복사하지 않는다. 경험 전체만 맞으면 `matchedUnit: EXPERIENCE`·그 why 를 남기고 관련 없는 사건을 억지로 펼치지 않는다.
 7. **그래프 확장은 순위와 분리한다.** 반환 사건과 자유 태그 키를 공유하는 다른 경험의 사건을 계정 안에서만 1홉으로 찾아 `related[]` 에 최대 5개 덧붙인다. `{from:{experienceId,episodeId}, tag, via:SHARED_TAG}` 로 경로를 밝힌다. 두 홉·유사 간선 영구 저장은 없고, related 는 정답 후보 수나 Hit@N 에 섞지 않는다. 같은 태그는 사실상 같은 사건이라는 뜻이 아니다.
-8. **실패와 중복 사용을 드러낸다.** embedder 실패는 `degraded:["dense"]` 로 BM25·직접 REQUIREMENT 만 쓰되 Q 관련도 조건은 유지한다. 미분류 항목이 있으면 `UNASSIGNED_FACTS`·`coverageIncomplete:true`, 사건으로 나누지 않은 경험이 있으면 `EPISODE_COVERAGE_INCOMPLETE`·true 다. 기존 미등록 행 등의 불완전 표시도 유지한다. `NO_RELEVANT_MATCH` 는 "내게 그런 경험이 없음"의 확정이 아니다. 등록 직무로 같은 공고를 확인할 수 있으면 사건을 근거로 쓴 기존 답변 id 와 `usedInSameApplication` 을 준다. 문항만/미등록 공고는 공고 정체성을 모르므로 null 이고, 같은 회사명만으로 같은 지원서라 추정하지 않는다. 이미 쓴 사건도 제외하지 않는다.
+8. **실패와 중복 사용을 드러낸다.** embedder 실패는 `degraded:["dense"]` 로 BM25·직접 REQUIREMENT 만 쓰되 Q 관련도 조건은 유지한다. 이때 비FIT 진입 조건은 Q-DENSE 대신 **불용어를 뺀 Q 질의어 중 서로 다른 2개 이상이 사건 텍스트에 있고, BM25 점수가 후보 최고점의 0.5 이상**인 후보로 바꾼다(문항 질의어가 1개뿐이면 그 1개 일치). 하한은 골드셋으로 다시 정한다. 미분류 항목이 있으면 `UNASSIGNED_FACTS`·`coverageIncomplete:true`, 사건으로 나누지 않은 경험이 있으면 `EPISODE_COVERAGE_INCOMPLETE`·true 다. 기존 미등록 행 등의 불완전 표시도 유지한다. `NO_RELEVANT_MATCH` 는 "내게 그런 경험이 없음"의 확정이 아니다. 등록 직무로 같은 공고를 확인할 수 있으면 사건을 근거로 쓴 기존 답변 id 와 `usedInSameApplication` 을 준다. 문항만/미등록 공고는 공고 정체성을 모르므로 null 이고, 같은 회사명만으로 같은 지원서라 추정하지 않는다. 이미 쓴 사건도 제외하지 않는다.
 
-질의도 모델 길이 제한을 넘을 수 있다. embedder 가 Q/J 에 `truncated:true` 를 돌려주면 잘린 벡터를 정상 검색처럼 쓰지 않고 해당 DENSE 채널을 빼며 `QUERY_TEXT_TRUNCATED`·`degraded:["dense"]` 를 준다. BM25 는 원문을 사용한다. 응답 query 에는 원문을 보존하므로 사용자가 질의를 줄여 다시 찾을 수 있다.
+**질의 길이** (PR #21 2차 리뷰 — 현재 코드와 맞춘다). 지금 `DenseIndex` 는 질의를 임베딩 전에 `EmbeddingTexts.MAX_CHARS`(800자, ≈ 400토큰)로 **조용히 자른다**(`DenseIndex.java:57`). 그래서 embedder 의 `truncated` 는 질의에서 거의 나오지 않는다. 규칙:
+- **J**(직무 다섯 칸)는 지금처럼 앞 칸(지원자격·담당업무)부터 이어 800자에서 자른다. 실제 공고는 대부분 넘으므로 정상 동작이고 **경고하지 않는다**. 재현용으로 `query.truncated: ["position"]` 만 싣는다. J-DENSE 채널은 그대로 쓴다.
+- **Q**(question + q)는 BM25 에 원문 전체를 쓰고, 의미 검색에는 앞 800자만 쓴다. 800자를 넘으면 `query.truncated: ["question"]` 과 `QUERY_TEXT_TRUNCATED` 경고를 준다 — 문항 뒤쪽 요구가 의미 검색에서 빠졌다는 뜻이다. Q-DENSE 채널은 빼지 않는다(문항 앞부분이 대개 핵심이다).
+- 서버가 800자로 자른 뒤에도 embedder 가 `truncated:true` 를 돌려주면(토크나이저 비율이 예상과 다를 때) 그 채널만 빼고 `QUERY_TEXT_TRUNCATED`·`degraded:["dense"]` 를 준다. 이 경우는 `EmbeddingTexts.MAX_CHARS` 를 다시 잴 신호다.
+- 응답 `query` 에는 원문을 보존하므로 사용자가 질의를 줄여 다시 찾을 수 있다.
 
 **요청·응답 예시** (모두 합성 값, 미구현 계약)
 
@@ -1298,6 +1309,7 @@ MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이�
     "q": null, "searchMode": "COMPETENCY", "requirementsSource": "SERVER_DICTIONARY",
     "requirements": [{"key": "python", "field": "requiredSkills"}],
     "questionTypes": [{"code": "COLLABORATION", "confidence": 0.8, "from": "REGEX"}],
+    "questionMode": {"value": "COMPETENCY", "from": "REGEX"}, "truncated": [],
     "kinds": ["PROJECT"], "limit": 8, "episodeLimit": 2
   },
   "context": {
@@ -1341,7 +1353,7 @@ MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이�
 
 **측정 (구현 전에 먼저)**
 
-- 골드셋: 사용자 검토를 거친 비식별 경험 3~5개·사건 10~20개. 정답 있는 질의 30개 이상과 정답 없는 질의 10개 이상을 고정한다. 질의마다 회사/직무/문항 입력과 정답 `(경험 id, 사건 id)` 집합, 관련도 2(직접 적합)/1(보조)/0(무관)을 둔다. 문항 표현만 바꾼 변형은 같은 그룹으로 묶어 튜닝용·평가용에 나눠 새지 않게 한다. 실제 자료를 공개 테스트 경로에 넣기 전 개인정보·비공개 코드·근거 URL 을 제거하거나 합성 fixture 로 대체한다.
+- 골드셋: 사용자 검토를 거친 비식별 경험 3~5개·사건 10~20개. 정답 있는 질의 30개 이상과 정답 없는 질의 10개 이상을 고정한다. 질의마다 회사/직무/문항 입력과 정답 `(경험 id, 사건 id)` 집합, 관련도 2(직접 적합)/1(보조)/0(무관)을 둔다. 문항 표현만 바꾼 변형은 같은 그룹으로 묶어 튜닝용·평가용에 나눠 새지 않게 한다. **정규식이 FIT 으로 잡지 못하는 직무 적합 문항**(예: "지원 분야에서 전문성을 키운 경험", "이 포지션에서 기여할 수 있는 역량")과 **흔한 단어만 겹치는 무정답 문항**을 각각 3개 이상 넣는다. 질의마다 `questionMode` 를 AUTO 로 두고 잰다(명시 FIT 은 별도 표시). 실제 자료를 공개 테스트 경로에 넣기 전 개인정보·비공개 코드·근거 URL 을 제거하거나 합성 fixture 로 대체한다.
 - **최종 응답 전체로 측정한다.** results 에서 실제 반환한 episodes 만 펼쳐 globalRank 순으로 평가한다. 부모 경험이 limit 밖으로 빠지거나 episodeLimit 때문에 정답이 응답에서 사라지면 실패다. 정답 부모 안에서만 계산한 조건부 적중률이나 related 의 정답으로 성공을 주장하지 않는다.
 - 지표: Hit@5(허용 정답 중 하나 이상), Recall@5(정답 여러 개 중 회수 비율), nDCG@5, 정답 없는 질의의 오추천률. 초기 통과선은 정답 질의 Hit@5 ≥ 0.90·nDCG@5 ≥ 0.80, 정답 없는 질의 오추천률 ≤ 0.10 이다. 표본이 작으므로 비율과 분자/분모·실패 질의 목록을 함께 기록하고 일반 채용 문항 전체의 성능으로 확대하지 않는다.
 - 기준선: 현재 경험 단위 검색은 같은 사실·질의의 **프로젝트 Hit@8** 을 기록하고 새 검색이 낮아지지 않아야 한다. 현재 API 는 사건을 반환하지 않으므로 사건 지표의 기준선은 N/A 이며 가상의 기존 사건 적중률을 만들지 않는다. 4c-1a 에서 문항 질의를 현재 API 로 실행할 수 없으면 공고 검색 비교만 별도로 표시한다.
@@ -1355,6 +1367,10 @@ MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이�
 | 서버 관리 직무 + 직무 적합 문항 | A/ep2 가 사건 전체 1위 |
 | 위 두 직무 각각 + 협업 문항 | 둘 다 A/ep3 가 1위. 부모의 하둡 skills 만으로 ep1 을 우선하지 않음 |
 | 직무 없는 협업 문항, 표현을 바꾼 문항 | 정상 응답·NO_POSITION, 기대 사건 상위 5 |
+| 하둡 직무 + 정규식이 FIT 으로 못 잡는 직무 적합 문항(AUTO) | A/ep1 상위 5. 유형 미확신이면 FIT 행·`QUESTION_TYPE_UNCERTAIN`, 비FIT 으로 0건이면 `QUESTION_MODE_FALLBACK` 으로 재평가. `questionMode: FIT` 명시면 대체 없이 FIT 행 |
+| 하둡 직무 + 협업 문항 + `questionMode: COMPETENCY` | A/ep3 1위, 대체 경로를 타지 않음 |
+| 흔한 단어("문제", "해결", "프로젝트")만 사건과 겹치는 무관 문항 — dense 정상 / dense 장애 | 둘 다 `results:[]`·`NO_RELEVANT_MATCH`. Q-LEXICAL 양수만으로 진입하지 않음, 문항 상투어는 BM25 질의어에서 빠짐 |
+| 담당업무가 긴 공고(J 800자 초과) / 900자 문항 | 앞은 J-DENSE 유지·`query.truncated:["position"]`·경고 없음, 뒤는 BM25 원문·Q-DENSE 앞 800자·`QUERY_TEXT_TRUNCATED` |
 | 고정 코드에 없는 새 문항 + 태그 없는 관련 사건 | 원문 BM25·DENSE 로 기대 사건 상위 5. 코드 없음으로 제외하지 않음 |
 | q 만, question+q, kinds 필터, 같은 점수 | 유효 조회·둘 다 검색, 종류 필터 준수·동점 순서 재현 |
 | 낮은 프로젝트 기술 일치지만 문항에 맞는 사건 / 높은 기술 일치지만 문항에 무관한 사건 | 앞 사건이 살아남음. 부모 기술만으로 뒤 사건을 문항 후보에 넣지 않음 |
@@ -1377,7 +1393,7 @@ MCP `experience_search` — 직무와 문항을 함께 준다. 회사 이름이�
 |---|---|---|
 | 4c-1a | 비식별/합성 골드셋·질의 그룹 분리·공고 검색 기준선 | 정답 30건 이상·정답 없음 10건 이상, 정답 사건 집합·관련도·평가용 고정 목록과 현재 API 미지원 범위 기록 |
 | 4c-1b | 저장: 사건·항목 scope·구 데이터 해석·소속 이동 CORRECT·corrected_episodes·MCP 저장·웹 편집 | 개정 판정·범위 정정·삭제 보존·기본값 정규화·잘못된 조합·동시성 사례를 테스트로 확인 |
-| 4c-1c | **요청 DTO/MCP 스키마 확장(question/q/kinds/episodeLimit), 문항만 조회, 사건 우선 점수·후그룹화**, 응답 예시의 근거 포인터·1홉 related·사용 표시 | 필수 검색 사례 전부, 최종 응답 기준 품질 통과선·기준선 프로젝트 Hit@8 비하락. 잘못된 요청 400·소유자 404·읽기 전용·상한·degraded 계약 테스트. 전체 지연 p50/p95 는 표본·환경과 함께 실측하되 미측정을 성공으로 쓰지 않음 |
+| 4c-1c | **요청 DTO/MCP 스키마 확장(question/q/questionMode/kinds/episodeLimit), 문항 성격 판정·FIT 대체 경로, Q 진입 조건(DENSE 하한, 장애 시 BM25 2어·상대 하한)·문항 상투어, 질의 길이 표시, 문항만 조회, 사건 우선 점수·후그룹화**, 응답 예시의 근거 포인터·1홉 related·사용 표시 | 필수 검색 사례 전부, 최종 응답 기준 품질 통과선·기준선 프로젝트 Hit@8 비하락. 잘못된 요청 400·소유자 404·읽기 전용·상한·degraded 계약 테스트. 전체 지연 p50/p95 는 표본·환경과 함께 실측하되 미측정을 성공으로 쓰지 않음 |
 | 4c-1d | 근거: episode_id 열·사건 범위 재검토·자소서 사건 선택·작성 절차/목표 계약을 플러그인 스킬에 반영 | 하둡 사건 정정과 소속 이동이 필요한 답변에만 재검토를 띄움, 과거 근거·경험 전체 근거 호환 및 REST/MCP 왕복 검증 |
 
 **검증 경계.** 위 표는 향후 구현의 완료 기준이지 현재 테스트 결과가 아니다. 이번 문서 PR 에서 확인하는 것은 예시 JSON 파싱·문서 링크/코드 블록·계약 간 모순·문서 변경 범위와 기존 서비스 smoke 뿐이다. 사건 저장·검색 품질·새 API·DB 이행은 구현 PR 에서 검증한다.
