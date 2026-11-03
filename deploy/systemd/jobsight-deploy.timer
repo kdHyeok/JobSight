@@ -1,0 +1,13 @@
+# jobsight-deploy.service 를 주기적으로 깨운다.
+[Unit]
+Description=JobSight 배포 워처 (5분마다)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+# 배포가 오래 걸려도 밀린 실행이 쌓이지 않게.
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

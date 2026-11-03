@@ -1,0 +1,14 @@
+# origin/main 을 보고 바뀌었으면 배포한다. 설치는 docs/nginx-deploy.md 「배포」.
+# @@JOBSITE_DIR@@ 를 운영 디렉터리 절대경로로 바꿔서 설치한다.
+[Unit]
+Description=JobSight — origin/main 변화 시 배포
+Documentation=https://github.com/kdHyeok/JobSight/blob/main/docs/nginx-deploy.md
+# docker 가 떠 있어야 한다. 사용자 유닛이라 Requires 로 묶지 않고 스크립트가 실패하면 그만둔다.
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@@JOBSITE_DIR@@
+ExecStart=/usr/bin/env bash scripts/watch-deploy.sh
+# 빌드(embedder 첫 빌드는 이미지 약 2GB)가 길다. 타이머 주기보다 넉넉히 준다.
+TimeoutStartSec=3600

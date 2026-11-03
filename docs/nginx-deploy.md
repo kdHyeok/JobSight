@@ -62,9 +62,9 @@ MCP의 정확한 OAuth callback 설정은 선택적 `compose.mcp.yaml`에서 `MC
 
 `SESSION_COOKIE_SECURE=true` 이므로 `http://127.0.0.1:8088` 로는 로그인할 수 없다(쿠키가 실리지 않는다). 8088 은 미인증 스모크·디버깅 경로다.
 
-## 배포 — main push → 셀프호스티드 러너
+## 배포 — 서버가 origin/main 을 당겨간다
 
-`main` 에 커밋이 올라가면 `.github/workflows/cd.yml` 이 운영에 반영한다. 사람이 서버에서 직접
+서버의 systemd timer 가 `origin/main` 을 보고 있다가 커밋이 올라가면 배포한다. 사람이 직접
 돌리는 경로(아래 「손으로 배포」)도 같은 `scripts/deploy.sh` 를 쓴다 — 두 경로가 갈라지지 않게.
 
 정식 저장소는 `https://github.com/kdHyeok/JobSight`다. 기존 clone은
@@ -101,24 +101,26 @@ code/state를 전달하지 않고 `/?authError=DOMAIN_CHANGED`로 보낸다. 구
 OAuth 프로토콜 경로는 400 `invalid_target`, 나머지 API·변경 요청은 410이다. metadata GET은 새 canonical JSON을 제공한다.
 Bearer·POST body·세션 쿠키를 새 도메인으로 프록시/리다이렉트하지 않는다. `/health`와 HTTP ACME 갱신은 유지한다.
 
-### CD 파이프라인
+### 자동 배포 (pull 방식)
 
 ```
-main push → tests (GitHub 호스티드: backend gradle test, frontend type-check+test)
-          → deploy (셀프호스티드 러너 `jobsite-prod`, 운영 머신)
-             scripts/deploy.sh = 빌드 → up → 스모크 → 실패 시 자동 롤백
+GitHub (공개)        이 머신
+─────────────        ─────────────────────────────────
+tests (호스티드)      systemd timer  5분마다
+                     └ scripts/watch-deploy.sh
+                        origin/main 이 움직였나?
+                        └ scripts/deploy.sh
+                           빌드 → up → 스모크 → 실패 시 롤백
 ```
 
-**왜 셀프호스티드인가.** 운영 서버는 가정집 LAN(192.168.0.211) 안이고 인바운드 SSH 가 없다.
-GitHub 호스티드 러너는 닿지 못한다. 이미지 레지스트리도 쓰지 않으므로(위 「Compose」) 서버가
-소스에서 빌드해야 한다. 러너가 GitHub 를 폴링하는 방향이라 포트를 열지 않는다. — `docs/decisions.md`
+**GitHub 에서 이 머신으로 들어오는 경로가 없다.** 이 머신이 GitHub 를 볼 뿐이다.
+인바운드 포트도, 터널도, 셀프호스티드 러너도 없다. 공개 저장소에 러너를 붙이지
+않기로 한 이유는 `docs/decisions.md` 에 있다 — 요약하면 포크 PR 이 워크플로 파일
+자체를 바꿔 보낼 수 있어서, 트리거를 하나라도 열어두면 이 호스트가 넘어간다.
 
-**공개 저장소라 트리거를 좁혔다.** `cd.yml` 은 `main` push 와 수동 실행에서만 돌고
-`pull_request` 로는 절대 돌지 않는다. 포크에서도 돌지 않는다(`github.repository` 검사).
-테스트는 호스티드 러너에서 끝내고 운영 머신은 배포만 한다. 저장소 설정의
-Fork PR 승인 정책은 `all_external_contributors` 다. **이 방어선을 지키는 것이 중요하다 —
-러너는 `quincy` 로 돌고 docker 그룹에 있어 사실상 호스트 root 다. `pull_request` 트리거를
-`cd.yml` 에 추가하면 그 순간 아무나 이 머신에서 코드를 실행할 수 있다.**
+GitHub 쪽에 남는 것은 테스트뿐이다(`.github/workflows/ci.yml`, `tests.yml`,
+호스티드 러너). 배포 비밀값은 GitHub 에 올라가지 않는다 — 서버가 자기 디스크의
+`.env`·`.secrets/` 를 읽는다.
 
 `scripts/deploy.sh` 의 순서가 안전장치다.
 
@@ -127,25 +129,50 @@ Fork PR 승인 정책은 `all_external_contributors` 다. **이 방어선을 지
 3. `up` 하는 순간 공개 도메인이 바뀐다(위 「함정」).
 4. 스모크가 실패하면 직전 이미지로 되돌리고 종료코드 1 이다.
 
-**자동 롤백의 한계: Flyway 는 되돌리지 않는다.** 마이그레이션을 포함한 배포가 스모크에서
-실패하면 코드만 돌아가고 스키마는 남는다. 되돌린 코드의 `ddl-auto: validate` 가 어긋나면
-기동이 실패한다. 그래서 스크립트는 마이그레이션이 포함된 배포를 로그에 눈에 띄게 적는다.
-스키마를 바꾸는 배포 전에는 아래 덤프를 먼저 뜬다.
+**자동 롤백의 한계: Flyway 는 되돌리지 않는다.** 마이그레이션을 포함한 배포가
+스모크에서 실패하면 코드만 돌아가고 스키마는 남는다. 되돌린 코드의
+`ddl-auto: validate` 가 어긋나면 기동이 실패한다. 스크립트는 마이그레이션이
+포함된 배포를 로그에 눈에 띄게 적는다. 스키마를 바꾸는 배포 전에는 아래 덤프를 뜬다.
 
-### 러너 (1회 설치)
+**배포가 실패한 뒤의 상태를 알아 둔다.** `deploy.sh` 는 빌드 전에 ff 머지를 하므로,
+실패해도 작업 트리는 새 커밋이고 실행 이미지만 이전 것으로 되돌아간다. 워처는 그 커밋을
+`.deploy-state.failed` 에 적고 **같은 커밋으로 재시도하지 않는다** — 5분마다 같은 실패를
+반복하지 않기 위해서다. 고친 뒤 그 파일을 지우거나, 다음 커밋이 올라오면 다시 돈다.
+
+이 검사는 「변화 없음」 검사보다 **먼저** 와야 한다. `deploy.sh` 가 빌드 전에 ff 머지를
+하므로 머지 뒤 실패하면 `HEAD == origin/main` 이 되고, 변화 없음을 먼저 보면 그 순간
+경보가 꺼져 "구 이미지가 도는데 아무도 모르는" 상태가 된다. 지금은 사람이 치울 때까지
+계속 종료코드 1 을 돌려 `systemctl --user status jobsight-deploy.service` 가 failed 로 남는다.
+
+### 워처 설치 (1회)
+
+유닛은 `deploy/systemd/` 에 템플릿으로 있다. `@@JOBSITE_DIR@@` 를 운영 디렉터리로
+바꿔서 사용자 유닛으로 설치한다. root 가 필요 없고, `loginctl enable-linger` 가
+켜져 있으면 로그아웃·재부팅 뒤에도 돈다.
 
 ```bash
-cd ~/actions-runner-jobsight
-./config.sh --unattended --replace --url https://github.com/kdHyeok/JobSight \
-  --token "$(gh api -X POST repos/kdHyeok/JobSight/actions/runners/registration-token -q .token)" \
-  --name jobsite-prod --labels jobsite-prod --work _work
-./run.sh   # 또는 systemd 사용자 서비스로 상주(Linger=yes)
+cd ~/jobsite-v006
+mkdir -p ~/.config/systemd/user
+for u in jobsight-deploy.service jobsight-deploy.timer; do
+  sed "s|@@JOBSITE_DIR@@|$PWD|g" "deploy/systemd/$u" > ~/.config/systemd/user/$u
+done
+systemctl --user daemon-reload
+systemctl --user enable --now jobsight-deploy.timer
+loginctl enable-linger "$USER"      # 로그아웃해도 타이머가 살아 있게
 ```
 
-라벨 `jobsite-prod` 가 `cd.yml` 의 `runs-on` 과 맞아야 한다. 러너는 저장소 범위이고
-운영 디렉터리 밖(`~/actions-runner-jobsight`)에 둔다. 배포 잡은 체크아웃하지 않는다 —
-`.env`·`.secrets`·DB 볼륨·compose 프로젝트가 운영 디렉터리에 묶여 있어서, 거기서 돌아야 한다.
-다른 경로에 두었으면 저장소 변수 `JOBSITE_DIR` 로 알려준다.
+상태와 로그:
+
+```bash
+systemctl --user list-timers jobsight-deploy.timer
+systemctl --user status jobsight-deploy.service
+journalctl --user -u jobsight-deploy.service -n 100 --no-pager
+```
+
+주기를 바꾸려면 `~/.config/systemd/user/jobsight-deploy.timer` 의 `OnUnitActiveSec`
+을 고치고 `systemctl --user daemon-reload && systemctl --user restart jobsight-deploy.timer`.
+잠시 멈추려면 `systemctl --user stop jobsight-deploy.timer`.
+
 
 ### 손으로 배포
 

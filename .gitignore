@@ -11,3 +11,6 @@ frontend/node_modules/
 frontend/dist/
 artifacts/
 __pycache__/
+
+# 배포 워처 상태 (scripts/watch-deploy.sh)
+.deploy-state*
