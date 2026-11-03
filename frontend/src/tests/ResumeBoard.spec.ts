@@ -117,6 +117,24 @@ describe('이력서 편집기 열기', () => {
     expect(editor.props('questions')).toEqual(questionsB)
   })
 
+  it('저장이 실패한 뒤 다시 저장해 성공하면 옛 오류 문구가 사라진다', async () => {
+    vi.mocked(resumes.getResume).mockReset().mockResolvedValue(resume)
+    vi.mocked(resumes.updateResume).mockReset()
+      .mockRejectedValueOnce(new Error('일시 오류'))
+      .mockResolvedValueOnce({ ...resume, version: 1 } as Resume)
+
+    const wrapper = shallowMount(ResumeBoard, { props: { focus: 'resume' } })
+    await flushPromises()
+    wrapper.findComponent(ResumeEditor).vm.$emit('save', {})
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('저장 중 오류가 발생했습니다.')
+
+    wrapper.findComponent(ResumeEditor).vm.$emit('save', {})
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('[role="status"]').text()).toBe('저장했습니다.')
+  })
+
   it('문항 요청이 실패해도 이력서는 열리고, 문항 칸이 직접 다시 부르도록 null 을 넘긴다', async () => {
     vi.mocked(resumes.getResume).mockReset().mockResolvedValue(resume)
     vi.mocked(introductions.listSelfIntroductions).mockRejectedValue(new Error('일시 오류'))

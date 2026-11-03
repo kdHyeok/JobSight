@@ -122,6 +122,17 @@ describe('이력서 편집기의 경험 연결', () => {
     expect(savedPayload(wrapper).content.projects[0]).toMatchObject({ experienceId: 'e1', experienceRevision: 1 })
   })
 
+  it('이미 이 이력서에 연결된 경험은 고를 수 없고, 막힌 값이 들어와도 행을 붙이지 않고 알린다', async () => {
+    const wrapper = await mountEditor(resume([anchored]))
+    const select = projectRows(wrapper).get('select[aria-label="경험에서 불러오기"]')
+    expect(select.find('option[value="e1"]').attributes('disabled')).toBeDefined()
+    // 자동화 도구처럼 disabled 를 무시하고 값을 넣은 경우(EGO 화면 검증에서 실제로 났다).
+    await select.setValue('e1')
+    await flushPromises()
+    expect(projectRows(wrapper).findAll('.resume-row')).toHaveLength(1)
+    expect(wrapper.get('.notice.error').text()).toContain('이미 이 이력서의 행에 연결된 경험')
+  })
+
   it('"경험으로 등록"은 행으로 경험 원본을 만들고 그 행에 앵커를 단다', async () => {
     vi.mocked(api.createExperience).mockResolvedValue({
       id: 'e3', version: 0, revision: 1, changeKind: 'INIT', needsReview: [], normalizedSkills: [], warnings: [],

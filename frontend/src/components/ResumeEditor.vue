@@ -110,6 +110,11 @@ function refreshExperience(id: string) {
 async function loadFromExperience(key: SectionKey, id: string) {
   if (!id) return
   experienceError.value = ''
+  // 선택지는 이미 쓴 경험을 disabled 로 막지만, 막힌 값이 들어와도 저장 400(EXPERIENCE_ROW_DUPLICATE) 전에 여기서 멈춘다.
+  if (anchoredIds(content.value).includes(id)) {
+    experienceError.value = '이미 이 이력서의 행에 연결된 경험입니다. 한 이력서에서 경험 하나는 한 행에만 씁니다.'
+    return
+  }
   try {
     const detail = experienceDetails.value[id] ?? (await getExperiences([id]))[0]
     if (!detail) return

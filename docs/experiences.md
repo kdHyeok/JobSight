@@ -63,6 +63,7 @@ cd frontend && npm run type-check && npm test
 
 ## 함정
 
+- **링커는 같은 경험 두 행(`EXPERIENCE_ROW_DUPLICATE`)을 개정 검사보다 먼저 본다.** 순서가 반대면 둘째 행이 다른 개정을 실었을 때 `EXPERIENCE_REVISION_MISMATCH`("개정 번호는 바꿀 수 없습니다")로 원인이 가려진다. 편집기는 이미 쓴 경험을 선택지에서 `disabled` 로 막고, 그 값이 들어와도 `loadFromExperience` 가 행을 붙이지 않는다([트러블슈팅 기록](troubleshooting/2026-11-03-experience-duplicate-row-masked-by-revision-error.md)).
 - **웹에서 연결을 바꿀 때 `experienceRevision` 을 남기지 않는다.** 남기면 링커가 그 번호를 새 경험의 개정으로 읽어 400 `EXPERIENCE_REVISION_MISMATCH` 가 되거나 엉뚱한 개정에 묶인다. `ResumeSection.relink` 가 키를 지운다.
 - **경험 수정의 null 은 "유지"다.** 메모·시작 연월을 지우려면 빈 문자열을 보낸다(`ExperienceForm`). 사실은 고쳤을 때만 보낸다 — 늘 보내면 메모만 고친 저장이 AI 기록을 확정해 버린다.
 - **삭제 409 는 이력서·자소서 모두 `EXPERIENCE_IN_USE`** 다. 화면은 메시지 문구가 아니라 다시 읽은 상세의 `rows`·`selfIntros` 로 `detach` 확인 여부를 가른다.

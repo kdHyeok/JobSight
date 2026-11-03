@@ -131,6 +131,8 @@ class ResumeExperienceLinker {
                 throw new ApiRuleException(HttpStatus.BAD_REQUEST, "EXPERIENCE_SECTION_MISMATCH",
                         row.section() + " 행에는 " + row.kind() + " 경험만 연결할 수 있습니다(이 경험은 " + head.kind() + ").");
             }
+            // 중복을 개정보다 먼저 본다. 같은 경험을 다른 개정으로 실은 두 번째 행이 '개정을 바꿀 수 없다'로 잘못 거절됐다.
+            if (links.containsKey(id)) throw duplicateRow(id);
             Integer sent = row.revision();
             Integer kept = storedRevisions.get(id);
             int revision;
@@ -150,7 +152,7 @@ class ResumeExperienceLinker {
                 if (sent > head.revision()) throw revisionMismatch(id);
                 revision = sent;
             }
-            put(links, id, revision);
+            links.put(id, revision);
             row.anchor(id, revision);
         }
 
@@ -181,11 +183,9 @@ class ResumeExperienceLinker {
         return new Result(root, links, storedRevisions.keySet());
     }
 
-    private static void put(Map<UUID, Integer> links, UUID id, int revision) {
-        if (links.putIfAbsent(id, revision) != null) {
-            throw new ApiRuleException(HttpStatus.BAD_REQUEST, "EXPERIENCE_ROW_DUPLICATE",
-                    "한 이력서 안에서 같은 경험(" + id + ")을 두 행에 연결할 수 없습니다.");
-        }
+    private static ApiRuleException duplicateRow(UUID id) {
+        return new ApiRuleException(HttpStatus.BAD_REQUEST, "EXPERIENCE_ROW_DUPLICATE",
+                "한 이력서 안에서 같은 경험(" + id + ")을 두 행에 연결할 수 없습니다.");
     }
 
     private static ApiRuleException revisionMismatch(UUID id) {

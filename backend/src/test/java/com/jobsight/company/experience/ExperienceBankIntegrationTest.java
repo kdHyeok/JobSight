@@ -350,6 +350,11 @@ class ExperienceBankIntegrationTest {
         assertThat(code(catchThrowable(() -> put(resumeId, mapper.convertValue(Map.of("projects", List.of(
                 Map.of("name", "a", "experienceId", mine.toString()), Map.of("name", "b", "experienceId", mine.toString()))),
                 ResumeContent.class), null)))).isEqualTo("EXPERIENCE_ROW_DUPLICATE");
+        // 둘째 행이 다른 개정을 실어 와도 중복이 먼저다(전에는 EXPERIENCE_REVISION_MISMATCH 로 원인이 가려졌다).
+        assertThat(code(catchThrowable(() -> put(resumeId, mapper.convertValue(Map.of("projects", List.of(
+                Map.of("name", "a", "experienceId", mine.toString(), "experienceRevision", 1),
+                Map.of("name", "b", "experienceId", mine.toString(), "experienceRevision", 2))),
+                ResumeContent.class), null)))).isEqualTo("EXPERIENCE_ROW_DUPLICATE");
 
         ResumeResponse cleared = put(resumeId, mapper.convertValue(Map.of("projects", List.of()), ResumeContent.class), null);
         assertThat(cleared.unlinkedWarnings()).containsExactly(mine);

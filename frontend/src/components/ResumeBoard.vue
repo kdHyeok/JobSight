@@ -118,6 +118,8 @@ async function save(payload: ResumePayload) {
   saving.value = true
   formErrors.value = {}
   notice.value = ''
+  // 앞선 저장 실패 문구를 지운다. 남겨 두면 성공한 저장 뒤에도 '저장했습니다'와 옛 오류가 함께 보인다.
+  loadError.value = ''
   try {
     // 읽어 온 version 을 함께 보낸다. 그사이 다른 곳(AI 등)이 저장했으면 덮어쓰지 않고 409 를 받는다.
     const saved = await updateResume(current.value.id, { ...payload, expectedVersion: current.value.version })
@@ -138,6 +140,7 @@ async function copy() {
   if (!current.value) return
   saving.value = true
   notice.value = ''
+  loadError.value = ''
   try {
     const copied = await copyResume(current.value.id, `${current.value.name} (복사)`)
     emit('openResume', copied.id)
