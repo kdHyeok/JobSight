@@ -9,6 +9,12 @@ permissions:
   contents: read
 
 jobs:
+  smoke-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash scripts/test-smoke-curl.sh
+
   backend:
     runs-on: ubuntu-latest
     steps:

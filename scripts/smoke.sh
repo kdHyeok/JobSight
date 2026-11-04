@@ -15,7 +15,7 @@
 set -u
 cd "$(dirname "$0")/.."
 
-curl() { command curl --connect-timeout 5 --max-time 15 "$@"; }
+source scripts/smoke-curl.sh
 
 BASE="${1:-}"
 if [ -z "$BASE" ] && [ -f .env ]; then
@@ -34,7 +34,7 @@ check() { # name expected actual
   fi
 }
 code()     { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
-header()   { curl -sS -o /dev/null -D - "$1" 2>/dev/null | tr -d '\r' | awk -v k="$(echo "$2" | tr 'A-Z' 'a-z'):" 'tolower($1)==k {sub(/^[^ ]+ /,""); print}'; }
+header()   { curl -sS -o /dev/null -D - "$1" | tr -d '\r' | awk -v k="$(echo "$2" | tr 'A-Z' 'a-z'):" 'tolower($1)==k {sub(/^[^ ]+ /,""); print}'; }
 urldecode(){ sed 's/%3A/:/gi; s/%2F/\//gi'; }
 
 echo "smoke @ $BASE"
@@ -72,7 +72,7 @@ check "GET OAuth server metadata"            "200" "$(code "$BASE/.well-known/oa
 # 잘못 잡아 http:// 로 나가고, HSTS 를 모르는 OAuth 클라이언트가 평문 홉에서 끊긴다.
 mcp_az_location="$(curl -sS -o /dev/null -D - \
   "$BASE/oauth2/authorize?response_type=code&client_id=jobsight-plugin&redirect_uri=https%3A%2F%2Fchatgpt.com%2Fconnector_platform_oauth_redirect&scope=jobsight.read+jobsight.write&state=smoke&resource=$(printf '%s' "$BASE/mcp" | sed 's/:/%3A/g; s#/#%2F#g')&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256" \
-  2>/dev/null | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')"
+  | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')"
 # BASE 가 평문이면(로컬 8088) http Location 이 정상이다. 다운그레이드만 잡는다.
 case "$mcp_az_location" in
   "")       az_actual="(없음)" ;;
@@ -164,7 +164,7 @@ if [ "$google_enabled" = "true" ]; then
   redirect_uri="$(printf '%s' "$loc" | tr '&?' '\n\n' | grep '^redirect_uri=' | cut -d= -f2- | urldecode)"
   check "GET /oauth2/authorization/google"    "302"  "$(code "$BASE/oauth2/authorization/google")"
   check "  redirect_uri == PUBLIC_BASE_URL+callback" "$BASE/login/oauth2/code/google" "$redirect_uri"
-  cookies="$(curl -sS -o /dev/null -D - "$BASE/oauth2/authorization/google" 2>/dev/null | tr -d '\r' | grep -i '^set-cookie:' | grep -i 'JSESSIONID')"
+  cookies="$(curl -sS -o /dev/null -D - "$BASE/oauth2/authorization/google" | tr -d '\r' | grep -i '^set-cookie:' | grep -i 'JSESSIONID')"
   case "$cookies" in
     *SameSite=Lax*) check "  JSESSIONID SameSite" "Lax" "Lax" ;;
     *SameSite=Strict*) check "  JSESSIONID SameSite" "Lax" "Strict" ;;

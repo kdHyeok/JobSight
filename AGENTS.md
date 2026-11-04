@@ -38,6 +38,8 @@ PostgreSQL + Spring Boot 4.1(Java 21) + Vue 3(TypeScript) + nginx + 임베딩 �
 | MCP Events(웹훅 이벤트)·지원 관리 알람·`application_agenda` | [docs/mcp-events.md](docs/mcp-events.md) — 설계, 미구현 |
 | `job.donyk.link` 도메인·OAuth·플러그인 전환 | [계획](docs/01-plan/features/custom-domain-oauth.plan.md) · [설계](docs/02-design/features/custom-domain-oauth.design.md) |
 | 화면 배치·색·컴포넌트 | [docs/design-system.md](docs/design-system.md) |
+| 사용자 서비스 이용 흐름 전체(화면·데이터·삭제 범위·한도) | [docs/service-user-flows.md](docs/service-user-flows.md) |
+| UI/UX 재설계(접근 레이어·주 내비·단계 R0~R6) | [계획](docs/01-plan/features/ui-ux-redesign.plan.md) — 결정 7개 대기 |
 | `nginx.conf`, `compose*.yaml`, `.github/**`, 배포 | [docs/nginx-deploy.md](docs/nginx-deploy.md) |
 | "왜 이렇게 했지?" | [docs/decisions.md](docs/decisions.md) — 되돌리기 전에 반드시 읽는다 |
 | 겪은 버그·오진·작업 도구 문제(증상 → 원인 → 조치), 같은 오류 문구를 다시 만났을 때 | [docs/troubleshooting/](docs/troubleshooting/README.md) — 사건마다 `YYYY-MM-DD-주제.md`, README 목차에 행 추가 |
